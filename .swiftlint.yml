@@ -21,6 +21,7 @@ line_length:
   ignores_urls: true
 
 opt_in_rules:
+  - missing_docs
   - force_unwrapping
   - empty_count
   - explicit_init
@@ -47,6 +48,11 @@ custom_rules:
     regex: '\x{2014}'
     message: "No em dashes: use a colon, comma, or semicolon."
     severity: error
+
+# Public API must be documented. Error severity on public + open;
+# fails CI until every public/open decl has a doc comment.
+missing_docs:
+  error: [open, public]
 
 excluded:
   - .build
