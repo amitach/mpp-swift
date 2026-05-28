@@ -57,6 +57,7 @@ public struct Expires: Sendable, Hashable {
 
     /// The value was not a valid RFC 3339 timestamp.
     public enum ParsingError: Error, Sendable, Hashable {
+        /// The string did not parse as an RFC 3339 `date-time`.
         case malformed
     }
 
