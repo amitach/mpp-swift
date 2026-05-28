@@ -7,6 +7,10 @@ import Foundation
 /// JSON object with `status`, `method`, `timestamp`, and `reference`. A receipt
 /// is issued only on success, so ``Status`` currently has the single
 /// `success` value; an unrecognized status fails to decode.
+///
+/// Decoding is deliberately lenient about unknown JSON fields: a server may add
+/// method-specific or future fields to a receipt, and rejecting them would break
+/// interoperability with a newer peer. The four fields above are required.
 public struct Receipt: Sendable, Hashable, Codable {
     /// The settlement status. Receipts are issued only on success.
     public let status: Status
@@ -15,6 +19,7 @@ public struct Receipt: Sendable, Hashable, Codable {
     /// When the payment settled.
     public let timestamp: RFC3339DateTime
     /// Method-specific settlement reference (transaction hash, invoice id, ...).
+    /// Its format and whether it may be empty are defined by the payment method.
     public let reference: String
 
     /// Creates a receipt.
