@@ -161,4 +161,59 @@ struct ChallengeTests {
         let reparsed = try Challenge(headerValue: full.headerValue)
         #expect(reparsed == full)
     }
+
+    // Spec: draft-httpauth-payment-00 §5.1.2.1.1 — the HMAC binding input is the
+    // seven slots realm|method|intent|request|expires|digest|opaque, with empty
+    // strings for absent optionals; `id` (the HMAC output) is not an input.
+    @Test("binding input joins all seven slots with full fields present")
+    func bindingInputFull() throws {
+        let challenge = try Challenge(
+            id: "ignored", realm: "r", method: MethodName("tempo"), intent: .charge,
+            request: EncodedJSON("REQ"), digest: "D",
+            expires: Expires("2026-01-01T00:00:00Z"), opaque: EncodedJSON("OPQ")
+        )
+        #expect(challenge.bindingInput == "r|tempo|charge|REQ|2026-01-01T00:00:00Z|D|OPQ")
+    }
+
+    @Test("binding input uses empty slots for absent optionals, not dropped ones")
+    func bindingInputMinimal() throws {
+        let challenge = try Challenge(
+            id: "i", realm: "api", method: MethodName("tempo"),
+            intent: .charge, request: EncodedJSON("REQ")
+        )
+        #expect(challenge.bindingInput == "api|tempo|charge|REQ|||")
+    }
+
+    @Test("an absent expires keeps digest in its own slot (positional, not shifted)")
+    func bindingInputPositional() throws {
+        let challenge = try Challenge(
+            id: "i", realm: "r", method: MethodName("tempo"),
+            intent: .charge, request: EncodedJSON("REQ"), digest: "D"
+        )
+        #expect(challenge.bindingInput == "r|tempo|charge|REQ||D|")
+    }
+
+    @Test("binding input excludes id (the HMAC output is not an input)")
+    func bindingInputExcludesID() throws {
+        let base = try Challenge(
+            id: "first", realm: "r", method: MethodName("tempo"),
+            intent: .charge, request: EncodedJSON("REQ")
+        )
+        let other = try Challenge(
+            id: "second", realm: "r", method: MethodName("tempo"),
+            intent: .charge, request: EncodedJSON("REQ")
+        )
+        #expect(base.bindingInput == other.bindingInput)
+    }
+
+    @Test("binding input carries request/opaque verbatim, including JCS-significant bytes")
+    func bindingInputVerbatim() throws {
+        // An unsorted-key encoding must appear in the slot exactly as received.
+        let challenge = try Challenge(
+            id: "i", realm: "r", method: MethodName("tempo"), intent: .charge,
+            request: EncodedJSON("eyJiIjoyLCJhIjoxfQ"), opaque: EncodedJSON("T3Bx")
+        )
+        // expires and digest are both absent: two empty slots before opaque.
+        #expect(challenge.bindingInput == "r|tempo|charge|eyJiIjoyLCJhIjoxfQ|||T3Bx")
+    }
 }
