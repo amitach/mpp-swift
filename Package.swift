@@ -50,7 +50,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MPPServerTests",
-            dependencies: ["MPPServer"]
+            dependencies: ["MPPServer", "MPPCore", "MPPBodyDigest"]
         ),
     ],
     swiftLanguageModes: [.v6]

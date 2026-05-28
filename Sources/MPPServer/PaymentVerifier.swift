@@ -26,8 +26,22 @@ public struct PaymentVerifier: Sendable {
         self.replayStore = replayStore
     }
 
-    /// Verifies the `Authorization: Payment` header value against `body` as of `now`.
-    public func verify(authorization: String, body: Data, now: Date) async -> Outcome {
+    /// Verifies the `Authorization: Payment` header value against `body` as of
+    /// `now`, for a route that requires `expecting`.
+    ///
+    /// `expecting` is required, not optional: the HMAC proves only that this
+    /// server issued *a* challenge with the credential's realm/method/intent, not
+    /// that they match the resource being accessed. Pinning them here prevents a
+    /// confused-deputy / cross-route replay (a credential minted for a cheap
+    /// route presented to an expensive one under a shared secret). A nil-able
+    /// default would let a caller silently skip the pin, so the parameter is
+    /// mandatory.
+    public func verify(
+        authorization: String,
+        body: Data,
+        now: Date,
+        expecting: ExpectedBinding
+    ) async -> Outcome {
         guard let credential = try? Credential(headerValue: authorization) else {
             return .rejected(.malformedCredential)
         }
@@ -37,8 +51,11 @@ public struct PaymentVerifier: Sendable {
         // server issued exactly these (unmodified) challenge parameters.
         guard signer.verify(challenge) else { return .rejected(.invalidChallenge) }
 
-        if let expires = challenge.expires {
-            guard (try? expires.validate(at: now)) != nil else { return .rejected(.expired) }
+        // ...but not that they are this route's parameters: pin them.
+        guard expecting.matches(challenge) else { return .rejected(.bindingMismatch) }
+
+        if let expires = challenge.expires, expires.isExpired(at: now) {
+            return .rejected(.expired)
         }
 
         if let digest = challenge.digest {
@@ -52,6 +69,26 @@ public struct PaymentVerifier: Sendable {
         guard await replayStore.consume(challenge.id) else { return .rejected(.replayed) }
 
         return .verified(MPPVerified(credential: credential))
+    }
+
+    /// The `(realm, method, intent)` a route requires, which a credential's
+    /// echoed challenge must match. These are the protocol-identity slots of the
+    /// challenge-id binding; the method-specific `request` is checked by the
+    /// payment method, not here.
+    public struct ExpectedBinding: Sendable, Hashable {
+        public let realm: String
+        public let method: MethodName
+        public let intent: IntentName
+
+        public init(realm: String, method: MethodName, intent: IntentName) {
+            self.realm = realm
+            self.method = method
+            self.intent = intent
+        }
+
+        func matches(_ challenge: Challenge) -> Bool {
+            challenge.realm == realm && challenge.method == method && challenge.intent == intent
+        }
     }
 
     /// The result of verifying a credential.
@@ -69,6 +106,9 @@ public struct PaymentVerifier: Sendable {
         case malformedCredential
         /// The echoed challenge was not signed by this server (bad id binding).
         case invalidChallenge
+        /// The challenge's realm/method/intent did not match the route's
+        /// (a credential minted for a different resource).
+        case bindingMismatch
         /// The challenge had expired as of `now`.
         case expired
         /// The request body did not match the challenge's content digest.

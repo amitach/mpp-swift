@@ -5,7 +5,8 @@ import MPPServer
 import Testing
 
 // Spec: draft-httpauth-payment-00 §5.1.2 (id binding) + §11.3/§11.5 (single use).
-// The verifier runs parse -> HMAC-verify -> expiry -> digest -> consume(last).
+// The verifier runs parse -> HMAC-verify -> binding-pin -> expiry -> digest ->
+// consume(last).
 @Suite("PaymentVerifier")
 struct PaymentVerifierTests {
     private let secret = Data("test-secret-key-12345".utf8)
@@ -13,6 +14,11 @@ struct PaymentVerifierTests {
 
     private func signer() -> ChallengeSigner {
         ChallengeSigner(secret: secret)
+    }
+
+    /// The route binding the signed test credentials are minted for.
+    private func expected() throws -> PaymentVerifier.ExpectedBinding {
+        try .init(realm: "api.example.com", method: MethodName("tempo"), intent: .charge)
     }
 
     /// Builds a credential whose echoed challenge is signed by `signer`.
@@ -43,35 +49,36 @@ struct PaymentVerifierTests {
         return nil
     }
 
-    @Test("verifies a well-formed, signed, un-expired credential")
+    @Test("verifies a well-formed, signed, un-expired, route-matched credential")
     func verifiesValidCredential() async throws {
         let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
-        let credential = try signedCredential(signer: signer())
+        let header = try signedCredential(signer: signer()).headerValue
         let outcome = try await verifier.verify(
-            authorization: credential.headerValue, body: Data(), now: now
+            authorization: header, body: Data(), now: now, expecting: expected()
         )
         let token = try #require(verified(outcome))
         #expect(token.credential.challenge.method.rawValue == "tempo")
     }
 
     @Test("rejects a non-Payment Authorization value")
-    func rejectsMalformed() async {
+    func rejectsMalformed() async throws {
         let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
-        let outcome = await verifier.verify(authorization: "Bearer abc", body: Data(), now: now)
+        let outcome = try await verifier.verify(
+            authorization: "Bearer abc", body: Data(), now: now, expecting: expected()
+        )
         #expect(rejection(outcome) == .malformedCredential)
     }
 
     @Test("rejects a challenge this server did not sign")
     func rejectsUnsignedChallenge() async throws {
         let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
-        // A challenge with an arbitrary id was never signed by our secret.
         let forged = try Challenge(
             id: "forged", realm: "api.example.com", method: MethodName("tempo"),
             intent: .charge, request: EncodedJSON("e30")
         )
-        let credential = Credential(challenge: forged, payload: ["proof": "x"])
+        let header = try Credential(challenge: forged, payload: ["proof": "x"]).headerValue
         let outcome = try await verifier.verify(
-            authorization: credential.headerValue, body: Data(), now: now
+            authorization: header, body: Data(), now: now, expecting: expected()
         )
         #expect(rejection(outcome) == .invalidChallenge)
     }
@@ -79,11 +86,38 @@ struct PaymentVerifierTests {
     @Test("rejects a credential signed under a different secret")
     func rejectsWrongSecret() async throws {
         let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
-        let credential = try signedCredential(signer: ChallengeSigner(secret: Data("other".utf8)))
+        let header = try signedCredential(signer: ChallengeSigner(secret: Data("other".utf8)))
+            .headerValue
         let outcome = try await verifier.verify(
-            authorization: credential.headerValue, body: Data(), now: now
+            authorization: header, body: Data(), now: now, expecting: expected()
         )
         #expect(rejection(outcome) == .invalidChallenge)
+    }
+
+    @Test("rejects a valid credential presented to the wrong route (confused deputy)")
+    func rejectsBindingMismatch() async throws {
+        let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
+        let header = try signedCredential(signer: signer()).headerValue // realm api.example.com
+        let otherRoute = try PaymentVerifier.ExpectedBinding(
+            realm: "other.example.com", method: MethodName("tempo"), intent: .charge
+        )
+        let outcome = await verifier.verify(
+            authorization: header, body: Data(), now: now, expecting: otherRoute
+        )
+        #expect(rejection(outcome) == .bindingMismatch)
+    }
+
+    @Test("rejects a credential whose intent differs from the route's")
+    func rejectsIntentMismatch() async throws {
+        let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
+        let header = try signedCredential(signer: signer()).headerValue // intent: .charge
+        let sessionRoute = try PaymentVerifier.ExpectedBinding(
+            realm: "api.example.com", method: MethodName("tempo"), intent: .session
+        )
+        let outcome = await verifier.verify(
+            authorization: header, body: Data(), now: now, expecting: sessionRoute
+        )
+        #expect(rejection(outcome) == .bindingMismatch)
     }
 
     @Test("rejects an expired challenge but accepts one expiring later")
@@ -94,11 +128,12 @@ struct PaymentVerifierTests {
             signer: signer(),
             expires: Expires("2027-01-01T00:00:00Z")
         )
+        let binding = try expected()
         let expired = try await verifier.verify(
-            authorization: past.headerValue, body: Data(), now: now
+            authorization: past.headerValue, body: Data(), now: now, expecting: binding
         )
         let valid = try await verifier.verify(
-            authorization: future.headerValue, body: Data(), now: now
+            authorization: future.headerValue, body: Data(), now: now, expecting: binding
         )
         #expect(rejection(expired) == .expired)
         #expect(verified(valid) != nil)
@@ -108,14 +143,18 @@ struct PaymentVerifierTests {
     func enforcesBodyDigest() async throws {
         let body = Data("the original body".utf8)
         let digest = ContentDigest.compute(body)
-        let match = try signedCredential(signer: signer(), digest: digest)
-        let mismatch = try signedCredential(signer: signer(), digest: digest)
-        let okOutcome = try await verifier(signer()).verify(
-            authorization: match.headerValue, body: body, now: now
-        )
-        let bad = try await verifier(signer()).verify(
-            authorization: mismatch.headerValue, body: Data("tampered".utf8), now: now
-        )
+        let matchHeader = try signedCredential(signer: signer(), digest: digest).headerValue
+        let mismatchHeader = try signedCredential(signer: signer(), digest: digest).headerValue
+        let binding = try expected()
+        let okOutcome = await PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
+            .verify(authorization: matchHeader, body: body, now: now, expecting: binding)
+        let bad = await PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
+            .verify(
+                authorization: mismatchHeader,
+                body: Data("tampered".utf8),
+                now: now,
+                expecting: binding
+            )
         #expect(verified(okOutcome) != nil)
         #expect(rejection(bad) == .digestMismatch)
     }
@@ -123,30 +162,40 @@ struct PaymentVerifierTests {
     @Test("rejects a replayed credential; the first use wins")
     func rejectsReplay() async throws {
         let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
-        let credential = try signedCredential(signer: signer())
-        let header = try credential.headerValue
-        let first = await verifier.verify(authorization: header, body: Data(), now: now)
-        let second = await verifier.verify(authorization: header, body: Data(), now: now)
+        let header = try signedCredential(signer: signer()).headerValue
+        let binding = try expected()
+        let first = await verifier.verify(
+            authorization: header,
+            body: Data(),
+            now: now,
+            expecting: binding
+        )
+        let second = await verifier.verify(
+            authorization: header,
+            body: Data(),
+            now: now,
+            expecting: binding
+        )
         #expect(verified(first) != nil)
         #expect(rejection(second) == .replayed)
     }
 
     @Test("an invalid credential does not burn the challenge id (consume is last)")
     func invalidCredentialDoesNotConsume() async throws {
-        let store = InMemoryReplayStore()
-        let verifier = PaymentVerifier(signer: signer(), replayStore: store)
+        let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
         let body = Data("body".utf8)
-        let credential = try signedCredential(signer: signer(), digest: ContentDigest.compute(body))
-        let header = try credential.headerValue
+        let header = try signedCredential(signer: signer(), digest: ContentDigest.compute(body))
+            .headerValue
+        let binding = try expected()
         // Wrong body: rejected at the digest gate, before consume.
         let rejected = await verifier.verify(
-            authorization: header,
-            body: Data("wrong".utf8),
-            now: now
+            authorization: header, body: Data("wrong".utf8), now: now, expecting: binding
         )
         #expect(rejection(rejected) == .digestMismatch)
         // The id was not consumed, so the correct body still verifies.
-        let accepted = await verifier.verify(authorization: header, body: body, now: now)
+        let accepted = await verifier.verify(
+            authorization: header, body: body, now: now, expecting: binding
+        )
         #expect(verified(accepted) != nil)
     }
 
@@ -154,12 +203,13 @@ struct PaymentVerifierTests {
     func concurrentSingleVerification() async throws {
         let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
         let header = try signedCredential(signer: signer()).headerValue
+        let binding = try expected()
         let attempts = 50
         let wins = await withTaskGroup(of: Bool.self, returning: Int.self) { group in
             for _ in 0 ..< attempts {
                 group.addTask {
                     if case .verified = await verifier.verify(
-                        authorization: header, body: Data(), now: now
+                        authorization: header, body: Data(), now: now, expecting: binding
                     ) { return true }
                     return false
                 }
@@ -171,9 +221,5 @@ struct PaymentVerifierTests {
             return count
         }
         #expect(wins == 1)
-    }
-
-    private func verifier(_ signer: ChallengeSigner) -> PaymentVerifier {
-        PaymentVerifier(signer: signer, replayStore: InMemoryReplayStore())
     }
 }
