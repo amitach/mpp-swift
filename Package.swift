@@ -21,6 +21,7 @@ let package = Package(
     products: [
         .library(name: "MPPCore", targets: ["MPPCore"]),
         .library(name: "MPPBodyDigest", targets: ["MPPBodyDigest"]),
+        .library(name: "MPPServer", targets: ["MPPServer"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
@@ -38,6 +39,14 @@ let package = Package(
         .testTarget(
             name: "MPPBodyDigestTests",
             dependencies: ["MPPBodyDigest"]
+        ),
+        .target(
+            name: "MPPServer",
+            dependencies: ["MPPCore", .product(name: "Crypto", package: "swift-crypto")]
+        ),
+        .testTarget(
+            name: "MPPServerTests",
+            dependencies: ["MPPServer"]
         ),
     ],
     swiftLanguageModes: [.v6]
