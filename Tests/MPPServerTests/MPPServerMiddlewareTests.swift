@@ -297,6 +297,18 @@ struct MPPServerMiddlewareTests {
         #expect(String(bytes: body, encoding: .utf8) == "ok")
     }
 
+    @Test("the handler may be async (it is awaited on the paid path)")
+    func asyncHandlerIsAwaited() async throws {
+        let middleware = try makeMiddleware()
+        let request = try makeRequest(authorization: paidHeader())
+        let (response, body) = await middleware.handle(request, body: Data(), now: now) { _, _ in
+            await Task.yield() // a genuinely async handler must be accepted and awaited
+            return (HTTPResponse(status: .ok), Data("async".utf8))
+        }
+        #expect(response.status.code == 200)
+        #expect(String(bytes: body, encoding: .utf8) == "async")
+    }
+
     @Test("the 402's WWW-Authenticate round-trips into a credential that verifies through handle")
     func http402ChallengeRoundTrips() async throws {
         let middleware = try makeMiddleware()
@@ -330,6 +342,8 @@ struct MPPServerMiddlewareTests {
         let problem = try JSONDecoder().decode(ProblemDetails.self, from: body)
         #expect(problem.status == 402)
         #expect(problem.type == "https://paymentauth.org/problems/payment-required")
+        // Canonical encoding: type URIs are not slash-escaped on the wire.
+        #expect(!(String(bytes: body, encoding: .utf8) ?? "").contains("\\/"))
         let wwwAuth = try #require(response.headerFields[.wwwAuthenticate])
         let challenge = try Challenge(headerValue: wwwAuth)
         #expect(problem.extensions["challengeId"] == .string(challenge.id))

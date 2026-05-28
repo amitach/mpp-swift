@@ -40,11 +40,13 @@ public struct MPPServerMiddleware: Sendable {
     ///     offered challenge and pin verification, so the two cannot drift.
     ///   - request: The method-specific request to advertise, `base64url(JCS(json))`.
     ///   - expiresIn: Challenge lifetime from mint time, in seconds; `nil` mints a
-    ///     challenge with no expiry.
+    ///     challenge with no expiry. Pass a non-negative value: a negative interval
+    ///     would mint already-expired challenges, making the route inaccessible.
     ///   - maxBodyBytes: Request bodies larger than this are rejected with `413`
     ///     before any payment work. Defaults to 10 MiB. This bound is an MPP-swift
     ///     denial-of-service guard (the spec does not mandate it), so the digest
-    ///     buffer is bounded before it is hashed.
+    ///     buffer is bounded before it is hashed. Pass a positive value: `0` rejects
+    ///     every non-empty body and a negative value rejects even an empty one.
     ///   - onEvent: A synchronous diagnostics sink; defaults to a no-op.
     ///
     /// A digest-bound, described, or opaque-carrying challenge is minted via
@@ -127,7 +129,7 @@ public struct MPPServerMiddleware: Sendable {
         _ request: HTTPRequest,
         body: Data,
         now: Date,
-        handler: (HTTPRequest, MPPVerified) -> (HTTPResponse, Data)
+        handler: (HTTPRequest, MPPVerified) async -> (HTTPResponse, Data)
     ) async -> (HTTPResponse, Data) {
         let authorization = request.headerFields[.authorization]
         switch await evaluate(authorization: authorization, body: body, now: now) {
@@ -136,7 +138,7 @@ public struct MPPServerMiddleware: Sendable {
         case let .challenge(challenge, problem):
             return Self.paymentRequiredResponse(challenge: challenge, problem: problem)
         case let .proceed(verified):
-            var (response, responseBody) = handler(request, verified)
+            var (response, responseBody) = await handler(request, verified)
             // `private` is the §11.10 floor for a paid response, but never weaken a
             // directive the handler chose (e.g. a one-shot body marked `no-store`):
             // only set it when the handler left Cache-Control absent.
@@ -244,9 +246,13 @@ public struct MPPServerMiddleware: Sendable {
     }
 
     private static func encodedProblem(_ problem: ProblemDetails) -> Data {
-        // A ProblemDetails encodes deterministically and cannot realistically
-        // fail; the body is best-effort, while the status and headers (which the
-        // protocol decision depends on) are always authoritative.
-        (try? JSONEncoder().encode(problem)) ?? Data()
+        // Canonical encoding, matching `Credential.headerValue`: sorted keys so the
+        // body is deterministic regardless of extension-member count, and unescaped
+        // slashes so the problem `type` URIs read cleanly on the wire. The body is
+        // best-effort (it cannot realistically fail); the status and headers, which
+        // the protocol decision depends on, are always authoritative.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return (try? encoder.encode(problem)) ?? Data()
     }
 }
