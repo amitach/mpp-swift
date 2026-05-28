@@ -42,11 +42,15 @@ let package = Package(
         ),
         .target(
             name: "MPPServer",
-            dependencies: ["MPPCore", .product(name: "Crypto", package: "swift-crypto")]
+            dependencies: [
+                "MPPCore",
+                "MPPBodyDigest",
+                .product(name: "Crypto", package: "swift-crypto"),
+            ]
         ),
         .testTarget(
             name: "MPPServerTests",
-            dependencies: ["MPPServer"]
+            dependencies: ["MPPServer", "MPPCore", "MPPBodyDigest"]
         ),
     ],
     swiftLanguageModes: [.v6]
