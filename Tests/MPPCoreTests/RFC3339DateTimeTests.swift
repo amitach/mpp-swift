@@ -28,6 +28,16 @@ struct RFC3339DateTimeTests {
         #expect(offset.rawValue == "2026-01-02T03:04:05+05:30")
     }
 
+    @Test("equality is by the verbatim string, not the instant")
+    func equalityIsByRawValue() throws {
+        // Same instant, different encodings: distinct values (wire bytes differ),
+        // because the string may be HMAC-bound. Use `.date` for instant equality.
+        let zulu = try RFC3339DateTime("2026-01-02T03:04:05Z")
+        let offset = try RFC3339DateTime("2026-01-02T03:04:05+00:00")
+        #expect(zulu.date == offset.date)
+        #expect(zulu != offset)
+    }
+
     @Test("formats an instant as Z without fractional seconds")
     func formatsInstant() {
         let value = RFC3339DateTime(date: Date(timeIntervalSince1970: 1_767_323_045))

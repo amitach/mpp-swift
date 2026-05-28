@@ -38,21 +38,35 @@ public struct Receipt: Sendable, Hashable, Codable {
     /// Decodes a receipt from a `Payment-Receipt` header value.
     ///
     /// - Parameter headerValue: The base64url-encoded JSON object.
-    /// - Throws: ``Base64URL/DecodeError`` if the value is not base64url, or a
-    ///   `DecodingError` if the JSON is not a valid receipt.
-    public init(headerValue: String) throws {
-        let data = try Base64URL.decode(headerValue)
-        self = try JSONDecoder().decode(Receipt.self, from: data)
+    /// - Throws: ``ParsingError``.
+    public init(headerValue: String) throws(ParsingError) {
+        let data: Data
+        do {
+            data = try Base64URL.decode(headerValue)
+        } catch {
+            throw .notBase64URL(error)
+        }
+        do {
+            self = try JSONDecoder().decode(Receipt.self, from: data)
+        } catch {
+            throw .invalidJSON(reason: String(describing: error))
+        }
     }
 
     /// The `Payment-Receipt` header value: base64url(JSON) of this receipt.
     ///
     /// JSON keys are emitted in sorted order for a stable encoding.
     public var headerValue: String {
-        get throws {
+        get throws(ParsingError) {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-            return try Base64URL.encode(encoder.encode(self))
+            let data: Data
+            do {
+                data = try encoder.encode(self)
+            } catch {
+                throw .invalidJSON(reason: String(describing: error))
+            }
+            return Base64URL.encode(data)
         }
     }
 
@@ -60,5 +74,14 @@ public struct Receipt: Sendable, Hashable, Codable {
     public enum Status: String, Sendable, Hashable, Codable {
         /// The payment settled successfully.
         case success
+    }
+
+    /// A reason a `Payment-Receipt` value is not a valid receipt.
+    public enum ParsingError: Error, Sendable {
+        /// The header value was not unpadded base64url.
+        case notBase64URL(Base64URL.DecodeError)
+        /// The decoded bytes were not a valid receipt JSON object. `reason`
+        /// carries the underlying coding error's description for diagnostics.
+        case invalidJSON(reason: String)
     }
 }

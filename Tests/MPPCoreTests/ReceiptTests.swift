@@ -85,8 +85,18 @@ struct ReceiptTests {
 
     @Test("rejects a non-base64url header value")
     func rejectsInvalidBase64URL() {
-        #expect(throws: Base64URL.DecodeError.self) {
+        #expect(throws: Receipt.ParsingError.self) {
             try Receipt(headerValue: "not base64url!!")
         }
+    }
+
+    @Test("ignores unknown JSON fields for forward/peer compatibility")
+    func ignoresUnknownFields() throws {
+        let receipt = try Receipt(headerValue: encoded([
+            ("status", "success"), ("method", "tempo"),
+            ("timestamp", "2026-01-02T03:04:05Z"), ("reference", "r"),
+            ("futureField", "ignored"),
+        ]))
+        #expect(receipt.reference == "r")
     }
 }

@@ -7,7 +7,10 @@ import Foundation
 /// single primitive that parses and formats them. The original string is kept
 /// in ``rawValue`` because some timestamps are bound by the challenge-id HMAC,
 /// so reformatting (for example dropping fractional seconds) would change the
-/// bytes; comparisons and ordering use the parsed ``date``.
+/// bytes. Equality is therefore by the verbatim ``rawValue``: two different
+/// encodings of the same instant are distinct values (their wire bytes differ).
+/// Compare ``date`` directly when you need instant equality rather than byte
+/// equality.
 public struct RFC3339DateTime: Sendable, Hashable {
     /// The timestamp exactly as received, preserved for binding integrity.
     public let rawValue: String
