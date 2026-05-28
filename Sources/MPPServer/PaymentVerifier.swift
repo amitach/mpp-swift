@@ -7,10 +7,11 @@ import MPPCore
 /// token, or a typed rejection.
 ///
 /// The pipeline runs in order: parse the credential; confirm its echoed challenge
-/// is one this server signed (HMAC, via ``ChallengeSigner``); confirm it has not
-/// expired; confirm the request body matches the challenge digest (when the
-/// challenge carries one); and finally consume the challenge id exactly once
-/// (``ReplayStore``).
+/// is one this server signed (HMAC, via ``ChallengeSigner``); confirm the
+/// challenge's realm/method/intent match the route's ``ExpectedBinding``; confirm
+/// it has not expired; confirm the request body matches the challenge digest
+/// (when the challenge carries one); and finally consume the challenge id exactly
+/// once (``ReplayStore``).
 ///
 /// Consume is LAST on purpose: an invalid credential must never burn a legitimate
 /// payer's challenge id, and the consume must precede any side effect the caller
