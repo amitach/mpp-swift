@@ -2,13 +2,16 @@
 /// body a server returns with a `402 Payment Required` (and other failures).
 ///
 /// Per `draft-httpauth-payment-00` §8, servers SHOULD return a problem body on a
-/// 402. All five standard members (RFC 9457 §3.1) are optional; an absent `type`
-/// is interpreted as `about:blank`. Anything beyond the standard members is an
-/// extension member (for example MPP's `challengeId`), preserved in
-/// ``extensions`` so a consumer can read protocol-specific fields without this
-/// type having to know them.
+/// 402. All five standard members (RFC 9457 §3.1) are optional and preserved
+/// losslessly: an absent member stays absent (it is not materialized), so a
+/// re-serialized problem matches what the server sent. A consumer that needs the
+/// default treats an absent ``type`` as `about:blank` (RFC 9457 §3.1.1).
+/// Anything beyond the standard members is an extension member (for example
+/// MPP's `challengeId`), preserved in ``extensions`` so a consumer can read
+/// protocol-specific fields without this type having to know them.
 public struct ProblemDetails: Sendable, Hashable {
-    /// A URI reference identifying the problem type. Absent ⇒ `about:blank`.
+    /// A URI reference identifying the problem type. Absent here means the
+    /// server omitted it; consumers interpret that as `about:blank`.
     public var type: String?
     /// A short, human-readable summary of the problem type.
     public var title: String?

@@ -92,6 +92,19 @@ struct ProblemDetailsTests {
         #expect(try JSONDecoder().decode(ProblemDetails.self, from: data) == problem)
     }
 
+    @Test("no standard member leaks into extensions on decode, even when all are present")
+    func standardMembersNeverLeakOnDecode() throws {
+        let problem = try decode(#"""
+        {"type":"about:blank","title":"X","status":402,
+         "detail":"d","instance":"/i","challengeId":"c1"}
+        """#)
+        #expect(problem.extensions.count == 1)
+        #expect(problem.extensions["challengeId"] == "c1")
+        for key in ["type", "title", "status", "detail", "instance"] {
+            #expect(problem.extensions[key] == nil)
+        }
+    }
+
     @Test("a colliding extension key never shadows a typed standard member on encode")
     func extensionDoesNotShadowStandard() throws {
         var problem = ProblemDetails(status: 402)
