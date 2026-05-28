@@ -14,11 +14,19 @@ import MPPCore
 /// keyed, secret-derived MAC, so a non-constant-time compare could let an
 /// attacker forge an `id` byte by byte).
 public struct ChallengeSigner: Sendable {
-    private let key: SymmetricKey
+    // Stored as Data, not SymmetricKey: Data is Sendable on every platform,
+    // whereas swift-crypto's SymmetricKey is only Sendable on Darwin (via
+    // CryptoKit). Data's description is "<n> bytes", so the secret never leaks
+    // via reflection. The key is wrapped per call (a cheap byte copy).
+    private let secret: Data
 
     /// Creates a signer over raw server-secret bytes.
     public init(secret: Data) {
-        key = SymmetricKey(data: secret)
+        self.secret = secret
+    }
+
+    private var key: SymmetricKey {
+        SymmetricKey(data: secret)
     }
 
     /// The `id` for `challenge`: `base64url(HMAC-SHA256(secret, bindingInput))`.

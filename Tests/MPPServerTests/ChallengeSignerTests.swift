@@ -1,8 +1,7 @@
-import Crypto
 import Foundation
 import MPPCore
+import MPPServer
 import Testing
-@testable import MPPServer
 
 // Spec: draft-httpauth-payment-00 §5.1.2.1.1 —
 // id = base64url(HMAC-SHA256(secret, bindingInput)), unpadded.
