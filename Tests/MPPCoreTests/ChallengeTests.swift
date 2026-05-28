@@ -85,6 +85,20 @@ struct ChallengeTests {
         }
     }
 
+    @Test(
+        "rejects a present-but-empty required parameter",
+        // method/intent take this path too: the require guard fires before
+        // MethodName/IntentName validation, so an empty value is reported as
+        // .emptyParameter, not .invalidMethod/.invalidIntent.
+        arguments: ["id", "realm", "method", "intent", "request"]
+    )
+    func rejectsEmptyRequired(empty: String) {
+        let pairs = required().map { $0.0 == empty ? ($0.0, "") : $0 }
+        #expect(throws: Challenge.ParsingError.emptyParameter(empty)) {
+            try Challenge(headerValue: header(pairs))
+        }
+    }
+
     @Test("rejects an uppercase method (spec requires lowercase)")
     func rejectsInvalidMethod() {
         let value = header([

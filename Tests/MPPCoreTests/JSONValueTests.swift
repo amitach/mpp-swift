@@ -57,6 +57,13 @@ struct JSONValueTests {
         #expect(JSONValue.string("café €").canonicalized() == #""café €""#)
     }
 
+    @Test("emits a supplementary-plane (astral) character literally as UTF-8")
+    func astralCharacterLiteral() {
+        // U+1F600 is a surrogate pair in UTF-16; RFC 8785 §3.2.2.2 emits it
+        // literally, not as an escape. Locks our hand-rolled escaper on non-BMP.
+        #expect(JSONValue.string("\u{1F600}").canonicalized() == "\"\u{1F600}\"")
+    }
+
     @Test("serializes booleans, null, and integers canonically")
     func scalars() {
         #expect(JSONValue.bool(true).canonicalized() == "true")

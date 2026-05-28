@@ -64,6 +64,12 @@ struct CredentialTests {
         #expect(try Credential(headerValue: lowercased) == sample())
     }
 
+    @Test("accepts one or more spaces between scheme and token (1*SP)")
+    func acceptsMultipleSpaces() throws {
+        let token = try sample().headerValue.split(separator: " ")[1]
+        #expect(try Credential(headerValue: "Payment   \(token)") == sample())
+    }
+
     @Test("rejects a value with no Payment scheme")
     func rejectsMissingScheme() {
         #expect(throws: Credential.ParsingError.missingScheme) {
