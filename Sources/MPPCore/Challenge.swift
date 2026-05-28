@@ -137,6 +137,13 @@ public struct Challenge: Sendable, Hashable, Codable {
     /// `opaque`) contribute an empty slot, never a dropped one. The server then
     /// computes `id = base64url(HMAC-SHA256(secret, bindingInput))`.
     ///
+    /// The binding slot order (`expires` then `digest`) is set by §5.1.2.1.1 and
+    /// is deliberately **not** the field/header order (where `digest` precedes
+    /// `expires`, per the §5.1 parameter listing and ``headerValue``). The header
+    /// order is cosmetic (auth-params are unordered, parsed by name); the binding
+    /// order is load-bearing and fixed by the spec. Do not "align" them.
+    /// `description` is also absent here: it is display-only and not bound.
+    ///
     /// `id` itself is excluded: it is the HMAC output, not an input. The slots
     /// carry their verbatim wire bytes so the value re-derives identically on the
     /// server. The positional, fixed-count layout means a `|` inside `realm` is

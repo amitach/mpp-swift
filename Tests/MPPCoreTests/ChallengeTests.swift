@@ -206,6 +206,33 @@ struct ChallengeTests {
         #expect(base.bindingInput == other.bindingInput)
     }
 
+    @Test("binding slot order is expires-then-digest, the reverse of the header order")
+    func bindingInputExpiresBeforeDigest() throws {
+        // expires set, digest absent, opaque set: expires fills slot 5, the
+        // empty digest slot 6 sits between it and opaque. A digest-first order
+        // (matching headerValue) would put the empty slot before expires.
+        let challenge = try Challenge(
+            id: "i", realm: "r", method: MethodName("tempo"), intent: .charge,
+            request: EncodedJSON("REQ"),
+            expires: Expires("2025-01-06T12:00:00Z"), opaque: EncodedJSON("OPQ")
+        )
+        #expect(challenge.bindingInput == "r|tempo|charge|REQ|2025-01-06T12:00:00Z||OPQ")
+    }
+
+    @Test("description is display-only and excluded from the binding input")
+    func bindingInputExcludesDescription() throws {
+        let withDescription = try Challenge(
+            id: "i", realm: "r", method: MethodName("tempo"), intent: .charge,
+            request: EncodedJSON("REQ"), description: "Buy a widget"
+        )
+        let without = try Challenge(
+            id: "i", realm: "r", method: MethodName("tempo"),
+            intent: .charge, request: EncodedJSON("REQ")
+        )
+        #expect(withDescription.bindingInput == without.bindingInput)
+        #expect(withDescription.bindingInput == "r|tempo|charge|REQ|||")
+    }
+
     @Test("binding input carries request/opaque verbatim, including JCS-significant bytes")
     func bindingInputVerbatim() throws {
         // An unsorted-key encoding must appear in the slot exactly as received.
