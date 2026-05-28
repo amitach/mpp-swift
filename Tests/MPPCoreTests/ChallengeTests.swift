@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import MPPCore
 
@@ -119,6 +120,20 @@ struct ChallengeTests {
         #expect(throws: Challenge.ParsingError.header(.missingScheme)) {
             try Challenge(headerValue: #"Bearer realm="x""#)
         }
+    }
+
+    @Test("encodes to a JSON object (for echoing in a credential), omitting absent optionals")
+    func encodesAsJSONObject() throws {
+        let challenge = try Challenge(
+            id: "i", realm: "r", method: MethodName("tempo"),
+            intent: .charge, request: EncodedJSON("REQ")
+        )
+        let data = try JSONEncoder().encode(challenge)
+        let json = try #require(String(bytes: data, encoding: .utf8))
+        #expect(json.contains(#""id":"i""#))
+        #expect(!json.contains("digest"))
+        #expect(!json.contains("null"))
+        #expect(try JSONDecoder().decode(Challenge.self, from: data) == challenge)
     }
 
     @Test("round-trips through headerValue for a full challenge")

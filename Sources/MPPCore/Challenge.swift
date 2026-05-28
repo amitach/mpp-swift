@@ -7,7 +7,7 @@
 /// spec grammar at the parse boundary: `method` and `intent` are validated, and
 /// `request` / `opaque` keep their base64url-encoded form verbatim so the
 /// challenge-id HMAC binding sees exactly the bytes the server sent.
-public struct Challenge: Sendable, Hashable {
+public struct Challenge: Sendable, Hashable, Codable {
     /// Unique challenge identifier the server binds to the other parameters.
     public let id: String
     /// Protection-space identifier (RFC 9110 `realm`).

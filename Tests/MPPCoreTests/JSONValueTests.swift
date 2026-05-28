@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import MPPCore
 
@@ -77,5 +78,34 @@ struct JSONValueTests {
         let expected = #"{"amount":"1000000","currency":"0xabc","#
             + #""methodDetails":{"chainId":42431,"feePayer":true},"recipient":"0xdef"}"#
         #expect(request.canonicalized() == expected)
+    }
+}
+
+// Codable lets JSONValue carry a method-specific credential payload (an arbitrary
+// JSON object) opaquely. Numbers stay integer-only: a float is rejected, never
+// silently truncated.
+@Suite("JSONValue Codable")
+struct JSONValueCodableTests {
+    @Test("round-trips every JSON shape through Codable")
+    func roundTripsAllShapes() throws {
+        let value: JSONValue = [
+            "s": "x", "i": 42, "neg": -7, "b": true, "n": .null,
+            "arr": [1, 2, "three"], "obj": ["k": "v"],
+        ]
+        let data = try JSONEncoder().encode(value)
+        #expect(try JSONDecoder().decode(JSONValue.self, from: data) == value)
+    }
+
+    @Test("decodes integers as integers, not floats")
+    func decodesIntegers() throws {
+        let value = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"a":1000000}"#.utf8))
+        #expect(value == ["a": 1_000_000])
+    }
+
+    @Test("rejects a floating-point number rather than truncating it")
+    func rejectsFloats() {
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(JSONValue.self, from: Data(#"{"a":1.5}"#.utf8))
+        }
     }
 }

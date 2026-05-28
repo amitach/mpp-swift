@@ -110,3 +110,84 @@ extension JSONValue: ExpressibleByDictionaryLiteral {
         self = .object(Dictionary(elements, uniquingKeysWith: { _, last in last }))
     }
 }
+
+// `Codable` lets `JSONValue` carry an opaque, method-specific credential payload
+// (an arbitrary JSON object). Decoding stays integer-only: a floating-point
+// number is rejected rather than silently truncated, keeping the no-float
+// guarantee that the rest of the protocol relies on.
+extension JSONValue: Codable {
+    private struct ObjectKey: CodingKey {
+        let stringValue: String
+        let intValue: Int? = nil
+        init(stringValue: String) {
+            self.stringValue = stringValue
+        }
+
+        init?(intValue _: Int) {
+            nil
+        }
+    }
+
+    public init(from decoder: any Decoder) throws {
+        if let keyed = try? decoder.container(keyedBy: ObjectKey.self) {
+            var object: [String: JSONValue] = [:]
+            // A well-formed JSON object has unique keys; on a duplicate the
+            // decoder keeps the first occurrence (the dictionary literal above is
+            // last-wins, but neither case should arise in conforming input).
+            for key in keyed.allKeys {
+                object[key.stringValue] = try keyed.decode(JSONValue.self, forKey: key)
+            }
+            self = .object(object)
+        } else if var unkeyed = try? decoder.unkeyedContainer() {
+            var array: [JSONValue] = []
+            while !unkeyed.isAtEnd {
+                try array.append(unkeyed.decode(JSONValue.self))
+            }
+            self = .array(array)
+        } else {
+            let single = try decoder.singleValueContainer()
+            if single.decodeNil() {
+                self = .null
+            } else if let bool = try? single.decode(Bool.self) {
+                self = .bool(bool)
+            } else if let integer = try? single.decode(Int64.self) {
+                self = .integer(integer)
+            } else if let string = try? single.decode(String.self) {
+                self = .string(string)
+            } else {
+                throw DecodingError.dataCorruptedError(
+                    in: single,
+                    debugDescription: "Unsupported JSON value: MPP JSON is object, array, "
+                        + "string, integer, bool, or null; floating-point numbers are not allowed."
+                )
+            }
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        switch self {
+        case let .object(members):
+            var container = encoder.container(keyedBy: ObjectKey.self)
+            for (key, value) in members {
+                try container.encode(value, forKey: ObjectKey(stringValue: key))
+            }
+        case let .array(elements):
+            var container = encoder.unkeyedContainer()
+            for element in elements {
+                try container.encode(element)
+            }
+        case let .string(value):
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
+        case let .integer(value):
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
+        case let .bool(value):
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
+        case .null:
+            var container = encoder.singleValueContainer()
+            try container.encodeNil()
+        }
+    }
+}
