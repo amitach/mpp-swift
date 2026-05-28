@@ -77,7 +77,7 @@ public struct Receipt: Sendable, Hashable, Codable {
     }
 
     /// A reason a `Payment-Receipt` value is not a valid receipt.
-    public enum ParsingError: Error, Sendable {
+    public enum ParsingError: Error, Sendable, Hashable {
         /// The header value was not unpadded base64url.
         case notBase64URL(Base64URL.DecodeError)
         /// The decoded bytes were not a valid receipt JSON object. `reason`

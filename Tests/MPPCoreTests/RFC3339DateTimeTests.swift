@@ -44,6 +44,15 @@ struct RFC3339DateTimeTests {
         #expect(value.rawValue == "2026-01-02T03:04:05Z")
     }
 
+    @Test("init(date:) keeps date consistent with the whole-second rawValue")
+    func initFromDateIsSelfConsistent() throws {
+        // A sub-second instant: rawValue drops the fraction, and date must match
+        // rawValue (not the input) so encode/decode is stable and equality holds.
+        let value = RFC3339DateTime(date: Date(timeIntervalSince1970: 1_767_323_045.75))
+        #expect(value.rawValue == "2026-01-02T03:04:05Z")
+        #expect(try value == RFC3339DateTime(value.rawValue))
+    }
+
     @Test(
         "rejects malformed timestamps",
         arguments: ["", "not-a-date", "2026-13-01T00:00:00Z", "2026-01-02 03:04:05"]

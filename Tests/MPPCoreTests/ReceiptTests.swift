@@ -56,7 +56,7 @@ struct ReceiptTests {
             ("status", "pending"), ("method", "tempo"),
             ("timestamp", "2026-01-02T03:04:05Z"), ("reference", "x"),
         ])
-        #expect(throws: (any Error).self) {
+        #expect(throws: Receipt.ParsingError.self) {
             try Receipt(headerValue: value)
         }
     }
@@ -67,7 +67,7 @@ struct ReceiptTests {
             ("status", "success"), ("method", "tempo"),
             ("timestamp", "nope"), ("reference", "x"),
         ])
-        #expect(throws: (any Error).self) {
+        #expect(throws: Receipt.ParsingError.self) {
             try Receipt(headerValue: value)
         }
     }
@@ -78,7 +78,7 @@ struct ReceiptTests {
             ("status", "success"), ("method", "Tempo"),
             ("timestamp", "2026-01-02T03:04:05Z"), ("reference", "x"),
         ])
-        #expect(throws: (any Error).self) {
+        #expect(throws: Receipt.ParsingError.self) {
             try Receipt(headerValue: value)
         }
     }

@@ -31,9 +31,15 @@ public struct RFC3339DateTime: Sendable, Hashable {
 
     /// Creates a timestamp from an instant, formatting it as RFC 3339 (`Z`, no
     /// fractional seconds).
+    ///
+    /// `date` is taken from the formatted string, not the input, so it always
+    /// matches ``rawValue`` (mint precision is whole seconds): any sub-second
+    /// component of `date` is dropped, keeping `rawValue` the single source of
+    /// truth and the encode/decode round-trip stable.
     public init(date: Date) {
-        self.date = date
-        rawValue = Self.format(date)
+        let formatted = Self.format(date)
+        rawValue = formatted
+        self.date = Self.parse(formatted) ?? date
     }
 
     /// The value was not a valid RFC 3339 timestamp.
