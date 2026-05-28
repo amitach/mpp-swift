@@ -11,10 +11,10 @@
 /// `"1.5"` with a decimals scale) is converted to base units by a separate
 /// helper at the charge layer; a decimal string is not itself a valid
 /// `Amount`. There is no floating-point representation anywhere — amounts are
-/// exact integers. This is intentionally stricter than `mppx`'s input
-/// validator (`zod.ts` allows `\d+(\.\d+)?` and leading zeros) and `mpp-rs`'s
-/// `parse_amount` (a lenient `u128` parse); we use the discovery grammar, which
-/// is the normative canonical form, for the value that travels on the wire.
+/// exact integers. Validation is intentionally strict: it enforces the
+/// normative canonical discovery grammar (non-negative integer base units, no
+/// leading zeros) for the value that travels on the wire, rather than accepting
+/// lenient human-readable input.
 public struct Amount: Sendable, Hashable {
     /// The canonical non-negative integer in base units, with no leading zeros.
     public let rawValue: String
@@ -69,29 +69,5 @@ public struct Amount: Sendable, Hashable {
     }
 }
 
-extension Amount: CustomStringConvertible {
-    public var description: String {
-        rawValue
-    }
-}
-
-extension Amount: Codable {
-    public init(from decoder: any Decoder) throws {
-        let rawValue = try decoder.singleValueContainer().decode(String.self)
-        do {
-            self = try Amount(rawValue)
-        } catch {
-            throw DecodingError.dataCorrupted(
-                .init(
-                    codingPath: decoder.codingPath,
-                    debugDescription: "Invalid amount \"\(rawValue)\": \(error)"
-                )
-            )
-        }
-    }
-
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(rawValue)
-    }
-}
+// Transparent Codable + description come from RawStringValidated.
+extension Amount: RawStringValidated {}

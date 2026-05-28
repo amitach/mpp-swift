@@ -4,12 +4,8 @@ import Testing
 
 // Spec: draft-payment-intent-charge-00 (amount in base units) +
 //       draft-payment-discovery-00 (amount grammar `0 / [1-9][0-9]*`).
-// Reference comparison:
-//   mppx  src/zod.ts:9          -> /^\d+(\.\d+)?$/  (lenient input: decimals + leading zeros)
-//   mppx  src/discovery:12      -> /^(0|[1-9][0-9]*)$/  (strict, matches ours)
-//   mpp-rs charge.rs:87         -> parse_amount() lenient u128 parse
-// Verdict (G3.5): the on-wire amount is a canonical base-units integer; we use
-// the discovery grammar (strict, no leading zeros). Decimal human input +
+// The on-wire amount is a canonical base-units integer using the discovery
+// grammar (strict, no leading zeros). Decimal human input +
 // decimals conversion is a charge-layer helper, not a valid Amount.
 @Suite("Amount")
 struct AmountTests {

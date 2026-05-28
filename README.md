@@ -41,7 +41,7 @@ Then depend on the products you need (you pull only those):
 ## Design
 
 - **Client and server are separate products** — depend on one without the other.
-- **Spec is the source of truth.** The SDK defaults to the published MPP drafts; where the reference SDKs (`mppx`, `mpp-rs`) diverge, the divergence is handled explicitly via a compatibility configuration, never silently inherited.
+- **Spec is the source of truth.** The SDK defaults to the published MPP drafts; where an interoperating peer diverges, the divergence is handled explicitly via a compatibility configuration, never silently inherited.
 - **Conventions follow the Swift ecosystem** — Apple's API Design Guidelines and the `swift-*` package norms.
 
 ## License

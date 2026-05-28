@@ -8,9 +8,8 @@ import Foundation
 /// because the challenge-id HMAC binds the literal `expires` value; reformatting
 /// it (for example dropping fractional seconds) would break that binding.
 ///
-/// Expiry checks take an explicit `now` rather than reading the system clock, so
-/// callers (and tests) are deterministic. This differs from the reference SDKs,
-/// whose `assert` reads `Date.now` internally.
+/// Expiry checks take an explicit `now` rather than reading `Date.now`
+/// internally, so callers (and tests) are deterministic.
 public struct Expires: Sendable, Hashable {
     /// The RFC 3339 timestamp exactly as received, preserved for binding integrity.
     public let rawValue: String
@@ -106,29 +105,5 @@ extension Expires {
     }
 }
 
-extension Expires: CustomStringConvertible {
-    public var description: String {
-        rawValue
-    }
-}
-
-extension Expires: Codable {
-    public init(from decoder: any Decoder) throws {
-        let rawValue = try decoder.singleValueContainer().decode(String.self)
-        do {
-            self = try Expires(rawValue)
-        } catch {
-            throw DecodingError.dataCorrupted(
-                .init(
-                    codingPath: decoder.codingPath,
-                    debugDescription: "Invalid RFC 3339 expires \"\(rawValue)\": \(error)"
-                )
-            )
-        }
-    }
-
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(rawValue)
-    }
-}
+// Transparent Codable + description come from RawStringValidated.
+extension Expires: RawStringValidated {}

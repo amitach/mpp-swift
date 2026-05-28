@@ -4,11 +4,8 @@ import Testing
 
 // Spec: draft-httpauth-payment-00 §5.1.1 + Appendix A
 //   intent-token = 1*( ALPHA / DIGIT / "-" )   ; mixed case, digits, hyphens
-// Reference comparison:
-//   mppx  src/Challenge.ts:29  -> intent: z.string()    (no validation)
-//   mpp-rs src/protocol/core/types.rs:107 -> lowercases the intent (deviation)
-// Verdict (G3.5): the spec does not mandate lowercase for intent, so lowercasing
-// is wrong; spec wins. We validate the grammar and preserve case exactly.
+// The spec does not mandate lowercase for intent, so we validate the grammar
+// and preserve case exactly (we do not normalize).
 @Suite("IntentName")
 struct IntentNameTests {
     @Test("accepts the registered intents and exposes them as constants")
@@ -26,7 +23,7 @@ struct IntentNameTests {
     }
 
     // The spec does not require lowercase for intent: preserve case, do not
-    // normalize. This is where we diverge deliberately from mpp-rs.
+    // normalize.
     @Test("preserves case rather than lowercasing")
     func preservesCase() throws {
         #expect(try IntentName("Charge").rawValue == "Charge")

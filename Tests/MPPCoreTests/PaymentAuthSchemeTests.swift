@@ -2,13 +2,9 @@ import Testing
 @testable import MPPCore
 
 // Spec: draft-httpauth-payment-00 §5.1 + RFC 9110 auth-param grammar.
-// Reference comparison (both agree):
-//   mppx  src/Challenge.ts:355-465  -> scheme extraction + parseAuthParams,
-//                                       rejects duplicate params (#98), quoted
-//                                       escapes, multi-scheme (#160)
-//   mpp-rs src/protocol/core/headers.rs:105-166 -> same, "Duplicate parameter"
-// Verdict (G3.5): refs converge; implement spec-correct matching both. Values
-// preserved verbatim (#418); duplicates rejected (#98); multi-scheme handled.
+// Implemented per the spec: scheme extraction (multi-scheme aware), quoted-string
+// escapes, duplicate-parameter rejection, and verbatim value preservation for
+// challenge-id binding integrity.
 @Suite("PaymentAuthScheme")
 struct PaymentAuthSchemeTests {
     @Test("parses comma-separated quoted parameters")
@@ -21,7 +17,7 @@ struct PaymentAuthSchemeTests {
         #expect(params["intent"] == "charge")
     }
 
-    @Test("extracts the Payment scheme alongside another scheme (#160)")
+    @Test("extracts the Payment scheme alongside another scheme")
     func extractsAmongMultipleSchemes() throws {
         let params = try PaymentAuthScheme.parseParameters(
             from: #"Bearer sometoken, Payment id="abc", method="tempo""#
@@ -30,7 +26,7 @@ struct PaymentAuthSchemeTests {
         #expect(params["method"] == "tempo")
     }
 
-    @Test("preserves values verbatim, including colons in RFC 3339 timestamps (#418)")
+    @Test("preserves values verbatim, including colons in RFC 3339 timestamps")
     func preservesRawValues() throws {
         let params = try PaymentAuthScheme.parseParameters(
             from: #"Payment expires="2026-01-01T00:00:00Z""#
@@ -53,7 +49,7 @@ struct PaymentAuthSchemeTests {
         #expect(params["method"] == "tempo")
     }
 
-    @Test("rejects duplicate parameters (#98)")
+    @Test("rejects duplicate parameters")
     func rejectsDuplicateParameters() {
         #expect(throws: PaymentAuthScheme.ParseError.duplicateParameter("id")) {
             try PaymentAuthScheme.parseParameters(from: #"Payment id="a", method="tempo", id="b""#)

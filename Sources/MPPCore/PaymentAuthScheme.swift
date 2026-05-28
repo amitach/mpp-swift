@@ -9,11 +9,10 @@
 /// backslash escapes. The header MAY contain other authentication schemes
 /// alongside `Payment`.
 ///
-/// Behavior reconciled against both reference SDKs (mppx and mpp-rs), which
-/// agree here: the `Payment` scheme is extracted case-insensitively even when
-/// other schemes are present; **duplicate parameters are rejected** (mppx #98,
-/// mpp-rs); and values are preserved **verbatim** (#418) so the challenge-id
-/// binding sees exactly what was sent. Parameter *names* are case-insensitive
+/// Per the spec: the `Payment` scheme is extracted case-insensitively even when
+/// other schemes are present; **duplicate parameters are rejected**; and values
+/// are preserved **verbatim** so the challenge-id binding sees exactly what was
+/// sent. Parameter *names* are case-insensitive
 /// per RFC 9110 §11.2, so they are lower-cased on parse (this also makes
 /// duplicate detection catch case variants); parameter *values* are untouched.
 public enum PaymentAuthScheme {

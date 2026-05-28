@@ -14,8 +14,8 @@ public enum MPP {
 
     /// The MPP specification drafts this release targets.
     ///
-    /// The SDK defaults to spec-correct behavior. Where the reference SDKs
-    /// (`mppx`, `mpp-rs`) diverge from these drafts, the divergence is handled
+    /// The SDK defaults to spec-correct behavior. Where it must interoperate
+    /// with a peer that diverges from these drafts, the divergence is handled
     /// explicitly via the compatibility configuration rather than silently
     /// inherited.
     public static let supportedSpecifications: [String] = [
