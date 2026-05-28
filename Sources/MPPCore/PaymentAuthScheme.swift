@@ -13,7 +13,9 @@
 /// agree here: the `Payment` scheme is extracted case-insensitively even when
 /// other schemes are present; **duplicate parameters are rejected** (mppx #98,
 /// mpp-rs); and values are preserved **verbatim** (#418) so the challenge-id
-/// binding sees exactly what was sent.
+/// binding sees exactly what was sent. Parameter *names* are case-insensitive
+/// per RFC 9110 §11.2, so they are lower-cased on parse (this also makes
+/// duplicate detection catch case variants); parameter *values* are untouched.
 public enum PaymentAuthScheme {
     /// The authentication scheme name.
     public static let name = "Payment"
@@ -136,7 +138,10 @@ public enum PaymentAuthScheme {
             while index < characters.count, isKeyCharacter(characters[index]) {
                 index += 1
             }
-            let key = String(characters[keyStart ..< index])
+            // Auth-param names are case-insensitive (RFC 9110 §11.2); lower-case
+            // the key so case variants collide for duplicate detection and so
+            // downstream lookups (which use lowercase spec names) always match.
+            let key = String(characters[keyStart ..< index]).lowercased()
             if key.isEmpty { throw .malformedParameter }
 
             while index < characters.count, characters[index].isWhitespace {
