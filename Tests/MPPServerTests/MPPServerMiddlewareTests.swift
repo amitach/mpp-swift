@@ -7,111 +7,112 @@ import Testing
 // Spec: draft-httpauth-payment-00 §5.1 (mint), §11.10 (no-store on 402, private
 // on the paid response). The 413 body cap is an MPP-swift DoS guard, not a spec
 // requirement. The middleware ties ChallengeMinter + PaymentVerifier together.
+// Shared fixtures at file scope (one home; keeps the suite body under the cap).
+private let secret = Data("test-secret-key-12345".utf8)
+private let now = Date(timeIntervalSince1970: 1_767_312_000) // 2026-01-02T00:00:00Z
+
+private func makeBinding() throws -> RouteBinding {
+    try RouteBinding(realm: "api.example.com", method: MethodName("tempo"), intent: .charge)
+}
+
+/// A middleware whose minter and verifier share one secret and replay store.
+private func makeMiddleware(
+    maxBodyBytes: Int = 10 * 1024 * 1024,
+    store: any ReplayStore = InMemoryReplayStore(),
+    onEvent: @escaping @Sendable (ServerEvent) -> Void = { _ in }
+) throws -> MPPServerMiddleware {
+    let signer = ChallengeSigner(secret: secret)
+    return try MPPServerMiddleware(
+        minter: ChallengeMinter(signer: signer),
+        verifier: PaymentVerifier(signer: signer, replayStore: store),
+        binding: makeBinding(),
+        request: EncodedJSON("e30"),
+        expiresIn: 300,
+        maxBodyBytes: maxBodyBytes,
+        onEvent: onEvent
+    )
+}
+
+/// An `Authorization: Payment` value whose challenge is minted for the route.
+private func paidHeader() throws -> String {
+    try headerFor()
+}
+
+/// A credential header minted with overridable secret/binding/expiry/digest,
+/// to drive each `PaymentVerifier.Rejection` through the middleware.
+private func headerFor(
+    signedWith customSecret: Data? = nil,
+    binding customBinding: RouteBinding? = nil,
+    expires: Expires? = nil,
+    digest: String? = nil
+) throws -> String {
+    let signer = ChallengeSigner(secret: customSecret ?? secret)
+    let route = try customBinding ?? makeBinding()
+    let challenge = ChallengeMinter(signer: signer).mint(
+        binding: route, request: EncodedJSON("e30"), digest: digest, expires: expires
+    )
+    return try Credential(challenge: challenge, payload: ["proof": "0xabc"]).headerValue
+}
+
+/// Drives `header` through `evaluate` and returns the resulting 402 problem type.
+private func rejectionProblemType(
+    _ header: String, body: Data = Data()
+) async throws -> String? {
+    let decision = try await makeMiddleware().evaluate(
+        authorization: header, body: body, now: now
+    )
+    return challengeOf(decision)?.1.type
+}
+
+private func makeRequest(authorization: String? = nil) -> HTTPRequest {
+    var fields = HTTPFields()
+    if let authorization { fields[.authorization] = authorization }
+    return HTTPRequest(
+        method: .post,
+        scheme: "https",
+        authority: "api.example.com",
+        path: "/r",
+        headerFields: fields
+    )
+}
+
+/// Collects events emitted during a request (sink is synchronous).
+private final class EventBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [ServerEvent] = []
+    func add(_ event: ServerEvent) { lock.lock(); stored.append(event); lock.unlock() }
+    var events: [ServerEvent] { lock.lock(); defer { lock.unlock() }; return stored }
+}
+
+// Matchers, so assertions stay one short `#expect` line.
+private func challengeOf(
+    _ decision: MPPServerMiddleware.Decision
+) -> (Challenge, ProblemDetails)? {
+    if case let .challenge(challenge, problem) = decision { return (challenge, problem) }
+    return nil
+}
+
+private func isProceed(_ decision: MPPServerMiddleware.Decision) -> Bool {
+    if case .proceed = decision { return true }
+    return false
+}
+
+private func isTooLarge(_ decision: MPPServerMiddleware.Decision) -> Bool {
+    if case .payloadTooLarge = decision { return true }
+    return false
+}
+
+private func lastEventName(_ box: EventBox) -> String? {
+    switch box.events.last {
+    case .challengeIssued: return "challengeIssued"
+    case .paymentVerified: return "paymentVerified"
+    case .paymentRejected: return "paymentRejected"
+    case nil: return nil
+    }
+}
+
 @Suite("MPPServerMiddleware")
 struct MPPServerMiddlewareTests {
-    private let secret = Data("test-secret-key-12345".utf8)
-    private let now = Date(timeIntervalSince1970: 1_767_312_000) // 2026-01-02T00:00:00Z
-
-    private func makeBinding() throws -> RouteBinding {
-        try RouteBinding(realm: "api.example.com", method: MethodName("tempo"), intent: .charge)
-    }
-
-    /// A middleware whose minter and verifier share one secret and replay store.
-    private func makeMiddleware(
-        maxBodyBytes: Int = 10 * 1024 * 1024,
-        store: any ReplayStore = InMemoryReplayStore(),
-        onEvent: @escaping @Sendable (ServerEvent) -> Void = { _ in }
-    ) throws -> MPPServerMiddleware {
-        let signer = ChallengeSigner(secret: secret)
-        return try MPPServerMiddleware(
-            minter: ChallengeMinter(signer: signer),
-            verifier: PaymentVerifier(signer: signer, replayStore: store),
-            binding: makeBinding(),
-            request: EncodedJSON("e30"),
-            expiresIn: 300,
-            maxBodyBytes: maxBodyBytes,
-            onEvent: onEvent
-        )
-    }
-
-    /// An `Authorization: Payment` value whose challenge is minted for the route.
-    private func paidHeader() throws -> String {
-        try headerFor()
-    }
-
-    /// A credential header minted with overridable secret/binding/expiry/digest,
-    /// to drive each `PaymentVerifier.Rejection` through the middleware.
-    private func headerFor(
-        signedWith customSecret: Data? = nil,
-        binding customBinding: RouteBinding? = nil,
-        expires: Expires? = nil,
-        digest: String? = nil
-    ) throws -> String {
-        let signer = ChallengeSigner(secret: customSecret ?? secret)
-        let route = try customBinding ?? makeBinding()
-        let challenge = ChallengeMinter(signer: signer).mint(
-            binding: route, request: EncodedJSON("e30"), digest: digest, expires: expires
-        )
-        return try Credential(challenge: challenge, payload: ["proof": "0xabc"]).headerValue
-    }
-
-    /// Drives `header` through `evaluate` and returns the resulting 402 problem type.
-    private func rejectionProblemType(
-        _ header: String, body: Data = Data()
-    ) async throws -> String? {
-        let decision = try await makeMiddleware().evaluate(
-            authorization: header, body: body, now: now
-        )
-        return challengeOf(decision)?.1.type
-    }
-
-    private func makeRequest(authorization: String? = nil) -> HTTPRequest {
-        var fields = HTTPFields()
-        if let authorization { fields[.authorization] = authorization }
-        return HTTPRequest(
-            method: .post,
-            scheme: "https",
-            authority: "api.example.com",
-            path: "/r",
-            headerFields: fields
-        )
-    }
-
-    /// Collects events emitted during a request (sink is synchronous).
-    private final class EventBox: @unchecked Sendable {
-        private let lock = NSLock()
-        private var stored: [ServerEvent] = []
-        func add(_ event: ServerEvent) { lock.lock(); stored.append(event); lock.unlock() }
-        var events: [ServerEvent] { lock.lock(); defer { lock.unlock() }; return stored }
-    }
-
-    // Matchers, so assertions stay one short `#expect` line.
-    private func challengeOf(
-        _ decision: MPPServerMiddleware.Decision
-    ) -> (Challenge, ProblemDetails)? {
-        if case let .challenge(challenge, problem) = decision { return (challenge, problem) }
-        return nil
-    }
-
-    private func isProceed(_ decision: MPPServerMiddleware.Decision) -> Bool {
-        if case .proceed = decision { return true }
-        return false
-    }
-
-    private func isTooLarge(_ decision: MPPServerMiddleware.Decision) -> Bool {
-        if case .payloadTooLarge = decision { return true }
-        return false
-    }
-
-    private func lastEventName(_ box: EventBox) -> String? {
-        switch box.events.last {
-        case .challengeIssued: return "challengeIssued"
-        case .paymentVerified: return "paymentVerified"
-        case .paymentRejected: return "paymentRejected"
-        case nil: return nil
-        }
-    }
-
     // MARK: - evaluate (pure core)
 
     @Test("an over-large body is rejected before any payment work")
@@ -282,5 +283,54 @@ struct MPPServerMiddlewareTests {
         #expect(response.status.code == 200)
         #expect(response.headerFields[.cacheControl] == "private")
         #expect(String(bytes: body, encoding: .utf8) == "ok")
+    }
+
+    @Test("the 402's WWW-Authenticate round-trips into a credential that verifies through handle")
+    func http402ChallengeRoundTrips() async throws {
+        let middleware = try makeMiddleware()
+        let (challengeResponse, _) = await middleware.handle(
+            makeRequest(), body: Data(), now: now
+        ) { _, _ in
+            (HTTPResponse(status: .ok), Data())
+        }
+        // Re-parse the emitted challenge, build a credential, and resubmit: proves
+        // the header the server puts on the wire is exactly what the verifier accepts.
+        let wwwAuth = try #require(challengeResponse.headerFields[.wwwAuthenticate])
+        let challenge = try Challenge(headerValue: wwwAuth)
+        let header = try Credential(challenge: challenge, payload: ["proof": "0xabc"]).headerValue
+        let (response, body) = await middleware.handle(
+            makeRequest(authorization: header), body: Data(), now: now
+        ) { _, _ in
+            (HTTPResponse(status: .ok), Data("ok".utf8))
+        }
+        #expect(response.status.code == 200)
+        #expect(String(bytes: body, encoding: .utf8) == "ok")
+    }
+
+    @Test("the emitted 402 body decodes to the expected RFC 9457 problem")
+    func http402ProblemBodyDecodes() async throws {
+        let middleware = try makeMiddleware()
+        let (response, body) = await middleware.handle(
+            makeRequest(), body: Data(), now: now
+        ) { _, _ in
+            (HTTPResponse(status: .ok), Data())
+        }
+        let problem = try JSONDecoder().decode(ProblemDetails.self, from: body)
+        #expect(problem.status == 402)
+        #expect(problem.type == "https://paymentauth.org/problems/payment-required")
+        let wwwAuth = try #require(response.headerFields[.wwwAuthenticate])
+        let challenge = try Challenge(headerValue: wwwAuth)
+        #expect(problem.extensions["challengeId"] == .string(challenge.id))
+    }
+
+    @Test("a rejection emits exactly one paymentRejected event, not a second challengeIssued")
+    func rejectionEmitsSingleEvent() async throws {
+        let box = EventBox()
+        let middleware = try makeMiddleware(onEvent: box.add)
+        _ = await middleware.evaluate(authorization: "Bearer not-a-payment", body: Data(), now: now)
+        // One event per decision: the rejection mints a fresh retry challenge but
+        // reports it as paymentRejected, never a second challengeIssued.
+        #expect(box.events.count == 1)
+        #expect(lastEventName(box) == "paymentRejected")
     }
 }

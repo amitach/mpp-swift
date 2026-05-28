@@ -28,9 +28,6 @@ public struct MPPServerMiddleware: Sendable {
     private let binding: RouteBinding
     private let challengeRequest: EncodedJSON
     private let expiresIn: TimeInterval?
-    private let challengeDigest: String?
-    private let challengeDescription: String?
-    private let challengeOpaque: EncodedJSON?
     private let maxBodyBytes: Int
     private let onEvent: @Sendable (ServerEvent) -> Void
 
@@ -44,23 +41,21 @@ public struct MPPServerMiddleware: Sendable {
     ///   - request: The method-specific request to advertise, `base64url(JCS(json))`.
     ///   - expiresIn: Challenge lifetime from mint time, in seconds; `nil` mints a
     ///     challenge with no expiry.
-    ///   - digest: Optional RFC 9530 digest of the expected request body to bind.
-    ///   - description: Optional display-only text for the challenge.
-    ///   - opaque: Optional server correlation data, `base64url(JCS(json))`.
     ///   - maxBodyBytes: Request bodies larger than this are rejected with `413`
     ///     before any payment work. Defaults to 10 MiB. This bound is an MPP-swift
     ///     denial-of-service guard (the spec does not mandate it), so the digest
     ///     buffer is bounded before it is hashed.
     ///   - onEvent: A synchronous diagnostics sink; defaults to a no-op.
+    ///
+    /// A digest-bound, described, or opaque-carrying challenge is minted via
+    /// ``ChallengeMinter`` directly; the middleware advertises only the route's
+    /// request and expiry until a consumer needs those other slots.
     public init(
         minter: ChallengeMinter,
         verifier: PaymentVerifier,
         binding: RouteBinding,
         request: EncodedJSON,
         expiresIn: TimeInterval? = nil,
-        digest: String? = nil,
-        description: String? = nil,
-        opaque: EncodedJSON? = nil,
         maxBodyBytes: Int = 10 * 1024 * 1024,
         onEvent: @escaping @Sendable (ServerEvent) -> Void = { _ in }
     ) {
@@ -69,9 +64,6 @@ public struct MPPServerMiddleware: Sendable {
         self.binding = binding
         self.challengeRequest = request
         self.expiresIn = expiresIn
-        self.challengeDigest = digest
-        self.challengeDescription = description
-        self.challengeOpaque = opaque
         self.maxBodyBytes = maxBodyBytes
         self.onEvent = onEvent
     }
@@ -156,10 +148,7 @@ public struct MPPServerMiddleware: Sendable {
         minter.mint(
             binding: binding,
             request: challengeRequest,
-            digest: challengeDigest,
-            expires: expiresIn.map { Expires(date: now.addingTimeInterval($0)) },
-            description: challengeDescription,
-            opaque: challengeOpaque
+            expires: expiresIn.map { Expires(date: now.addingTimeInterval($0)) }
         )
     }
 
