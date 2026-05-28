@@ -11,11 +11,18 @@ import Foundation
 /// Expiry checks take an explicit `now` rather than reading `Date.now`
 /// internally, so callers (and tests) are deterministic.
 public struct Expires: Sendable, Hashable {
+    /// The underlying RFC 3339 timestamp.
+    private let instant: RFC3339DateTime
+
     /// The RFC 3339 timestamp exactly as received, preserved for binding integrity.
-    public let rawValue: String
+    public var rawValue: String {
+        instant.rawValue
+    }
 
     /// The parsed instant the challenge expires.
-    public let date: Date
+    public var date: Date {
+        instant.date
+    }
 
     /// Parses an RFC 3339 timestamp, preserving the original string.
     ///
@@ -23,16 +30,17 @@ public struct Expires: Sendable, Hashable {
     ///   fractional seconds, using `Z` or a numeric UTC offset.
     /// - Throws: ``ParsingError/malformed`` if the value is not RFC 3339.
     public init(_ rawValue: String) throws(ParsingError) {
-        guard let date = Self.parse(rawValue) else { throw .malformed }
-        self.rawValue = rawValue
-        self.date = date
+        do {
+            instant = try RFC3339DateTime(rawValue)
+        } catch {
+            throw .malformed
+        }
     }
 
     /// Creates an expiry from an instant, formatting it as RFC 3339 (`Z`, no
     /// fractional seconds). Use when minting a fresh challenge.
     public init(date: Date) {
-        self.date = date
-        rawValue = Self.format(date)
+        instant = RFC3339DateTime(date: date)
     }
 
     /// Whether the challenge has expired as of `now`.
@@ -49,6 +57,7 @@ public struct Expires: Sendable, Hashable {
 
     /// The value was not a valid RFC 3339 timestamp.
     public enum ParsingError: Error, Sendable, Hashable {
+        /// The string did not parse as an RFC 3339 `date-time`.
         case malformed
     }
 
@@ -78,30 +87,6 @@ public extension Expires {
     /// An expiry `count` days after `now`.
     static func days(_ count: Int, from now: Date) -> Expires {
         hours(count * 24, from: now)
-    }
-}
-
-extension Expires {
-    // RFC 3339 allows optional fractional seconds, which a single
-    // ISO8601DateFormatter cannot match both with and without. Try the
-    // fractional form first, then the plain form. Formatters are created per
-    // call (they are reference types and not safely shared under strict
-    // concurrency); expiry parsing is not a hot path.
-    static func parse(_ string: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractional.date(from: string) {
-            return date
-        }
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        return plain.date(from: string)
-    }
-
-    static func format(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.string(from: date)
     }
 }
 
