@@ -80,8 +80,13 @@ private func makeRequest(authorization: String? = nil) -> HTTPRequest {
 private final class EventBox: @unchecked Sendable {
     private let lock = NSLock()
     private var stored: [ServerEvent] = []
-    func add(_ event: ServerEvent) { lock.lock(); stored.append(event); lock.unlock() }
-    var events: [ServerEvent] { lock.lock(); defer { lock.unlock() }; return stored }
+    func add(_ event: ServerEvent) {
+        lock.lock(); stored.append(event); lock.unlock()
+    }
+
+    var events: [ServerEvent] {
+        lock.lock(); defer { lock.unlock() }; return stored
+    }
 }
 
 // Matchers, so assertions stay one short `#expect` line.
@@ -118,8 +123,8 @@ struct MPPServerMiddlewareTests {
     @Test("an over-large body is rejected before any payment work")
     func bodyCap() async throws {
         let middleware = try makeMiddleware(maxBodyBytes: 16)
-        let decision = await middleware.evaluate(
-            authorization: try paidHeader(), body: Data(count: 17), now: now
+        let decision = try await middleware.evaluate(
+            authorization: paidHeader(), body: Data(count: 17), now: now
         )
         #expect(isTooLarge(decision))
     }
@@ -141,8 +146,8 @@ struct MPPServerMiddlewareTests {
     func validCredentialProceeds() async throws {
         let box = EventBox()
         let middleware = try makeMiddleware(onEvent: box.add)
-        let decision = await middleware.evaluate(
-            authorization: try paidHeader(), body: Data(), now: now
+        let decision = try await middleware.evaluate(
+            authorization: paidHeader(), body: Data(), now: now
         )
         #expect(isProceed(decision))
         #expect(lastEventName(box) == "paymentVerified")
@@ -222,7 +227,7 @@ struct MPPServerMiddlewareTests {
     func http413() async throws {
         let middleware = try makeMiddleware(maxBodyBytes: 16)
         var handlerRan = false
-        let request = makeRequest(authorization: try paidHeader())
+        let request = try makeRequest(authorization: paidHeader())
         let (response, _) = await middleware.handle(
             request, body: Data(count: 17), now: now
         ) { _, _ in
@@ -251,8 +256,8 @@ struct MPPServerMiddlewareTests {
     @Test("a body of exactly maxBodyBytes is allowed (the cap is inclusive)")
     func bodyCapBoundary() async throws {
         let middleware = try makeMiddleware(maxBodyBytes: 16)
-        let decision = await middleware.evaluate(
-            authorization: try paidHeader(), body: Data(count: 16), now: now
+        let decision = try await middleware.evaluate(
+            authorization: paidHeader(), body: Data(count: 16), now: now
         )
         #expect(isProceed(decision))
     }
@@ -260,7 +265,7 @@ struct MPPServerMiddlewareTests {
     @Test("a handler's own stricter Cache-Control survives (not downgraded to private)")
     func handlerCacheControlPreserved() async throws {
         let middleware = try makeMiddleware()
-        let request = makeRequest(authorization: try paidHeader())
+        let request = try makeRequest(authorization: paidHeader())
         let (response, _) = await middleware.handle(request, body: Data(), now: now) { _, _ in
             var response = HTTPResponse(status: .ok)
             response.headerFields[.cacheControl] = "no-store"
@@ -273,7 +278,7 @@ struct MPPServerMiddlewareTests {
     @Test("a paid request runs the handler and decorates the 200 with Cache-Control: private")
     func http200Receipted() async throws {
         let middleware = try makeMiddleware()
-        let request = makeRequest(authorization: try paidHeader())
+        let request = try makeRequest(authorization: paidHeader())
         let (response, body) = await middleware.handle(
             request, body: Data(), now: now
         ) { _, verified in

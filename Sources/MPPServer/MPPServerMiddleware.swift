@@ -62,7 +62,7 @@ public struct MPPServerMiddleware: Sendable {
         self.minter = minter
         self.verifier = verifier
         self.binding = binding
-        self.challengeRequest = request
+        challengeRequest = request
         self.expiresIn = expiresIn
         self.maxBodyBytes = maxBodyBytes
         self.onEvent = onEvent
@@ -104,10 +104,10 @@ public struct MPPServerMiddleware: Sendable {
             authorization: authorization, body: body, now: now, expecting: binding
         )
         switch outcome {
-        case .verified(let verified):
+        case let .verified(verified):
             onEvent(.paymentVerified(verified))
             return .proceed(verified)
-        case .rejected(let rejection):
+        case let .rejected(rejection):
             // Offer a fresh challenge alongside the rejection so the client can retry.
             let challenge = mintChallenge(now: now)
             onEvent(.paymentRejected(rejection))
@@ -130,9 +130,9 @@ public struct MPPServerMiddleware: Sendable {
         switch await evaluate(authorization: authorization, body: body, now: now) {
         case .payloadTooLarge:
             return Self.payloadTooLargeResponse(maxBodyBytes: maxBodyBytes)
-        case .challenge(let challenge, let problem):
+        case let .challenge(challenge, problem):
             return Self.paymentRequiredResponse(challenge: challenge, problem: problem)
-        case .proceed(let verified):
+        case let .proceed(verified):
             var (response, responseBody) = handler(request, verified)
             // `private` is the §11.10 floor for a paid response, but never weaken a
             // directive the handler chose (e.g. a one-shot body marked `no-store`):
@@ -176,24 +176,39 @@ public struct MPPServerMiddleware: Sendable {
         case .freshChallenge:
             return make("payment-required", "Payment Required", "This resource requires payment.")
         case .rejection(.malformedCredential):
-            return make("malformed-credential", "Malformed Credential",
-                        "The Authorization header was not a parseable Payment credential.")
+            return make(
+                "malformed-credential",
+                "Malformed Credential",
+                "The Authorization header was not a parseable Payment credential."
+            )
         case .rejection(.invalidChallenge):
-            return make("invalid-challenge", "Invalid Challenge",
-                        "The credential's challenge was not issued by this server.")
+            return make(
+                "invalid-challenge",
+                "Invalid Challenge",
+                "The credential's challenge was not issued by this server."
+            )
         case .rejection(.bindingMismatch):
-            return make("verification-failed", "Verification Failed",
-                        "The credential's challenge does not match this resource.")
+            return make(
+                "verification-failed",
+                "Verification Failed",
+                "The credential's challenge does not match this resource."
+            )
         case .rejection(.expired):
             return make("payment-expired", "Payment Expired", "The challenge had expired.")
         case .rejection(.digestMismatch):
-            return make("verification-failed", "Verification Failed",
-                        "The request body did not match the challenge digest.")
+            return make(
+                "verification-failed",
+                "Verification Failed",
+                "The request body did not match the challenge digest."
+            )
         case .rejection(.replayed):
             // §8.2 / §4.2: an already-used challenge id is an `invalid-challenge`
             // ("unknown, expired, or already used"), not a proof failure.
-            return make("invalid-challenge", "Invalid Challenge",
-                        "The challenge has already been used.")
+            return make(
+                "invalid-challenge",
+                "Invalid Challenge",
+                "The challenge has already been used."
+            )
         }
     }
 

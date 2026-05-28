@@ -14,7 +14,9 @@ struct ChallengeMinterTests {
         ChallengeMinter(signer: ChallengeSigner(secret: secret))
     }
 
-    private func makeSigner() -> ChallengeSigner { ChallengeSigner(secret: secret) }
+    private func makeSigner() -> ChallengeSigner {
+        ChallengeSigner(secret: secret)
+    }
 
     private func makeBinding() throws -> RouteBinding {
         try RouteBinding(realm: "api.example.com", method: MethodName("tempo"), intent: .charge)
@@ -32,16 +34,16 @@ struct ChallengeMinterTests {
 
     @Test("a minted challenge's id verifies under the same signer's secret")
     func mintedIDVerifies() throws {
-        let challenge = makeMinter().mint(binding: try makeBinding(), request: EncodedJSON("e30"))
+        let challenge = try makeMinter().mint(binding: makeBinding(), request: EncodedJSON("e30"))
         #expect(makeSigner().verify(challenge))
     }
 
     @Test("a minted challenge round-trips through its WWW-Authenticate header value")
     func roundTripsThroughHeader() throws {
-        let challenge = makeMinter().mint(
-            binding: try makeBinding(),
+        let challenge = try makeMinter().mint(
+            binding: makeBinding(),
             request: EncodedJSON("e30"),
-            expires: try Expires("2027-01-01T00:00:00Z"),
+            expires: Expires("2027-01-01T00:00:00Z"),
             opaque: EncodedJSON("eyJrIjoxfQ")
         )
         let reparsed = try Challenge(headerValue: challenge.headerValue)
@@ -58,10 +60,10 @@ struct ChallengeMinterTests {
         let otherRequest = minter.mint(binding: route, request: EncodedJSON("eyJhIjoxfQ"))
         #expect(otherRequest.id != base.id)
         // Adding an expiry (a bound optional slot) must yield a different id.
-        let withExpiry = minter.mint(
+        let withExpiry = try minter.mint(
             binding: route,
             request: EncodedJSON("e30"),
-            expires: try Expires("2027-01-01T00:00:00Z")
+            expires: Expires("2027-01-01T00:00:00Z")
         )
         #expect(withExpiry.id != base.id)
         // Adding a digest (a bound optional slot) must yield a different id.
