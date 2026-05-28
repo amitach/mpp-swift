@@ -1,11 +1,10 @@
 import Testing
-
 @testable import MPPCore
 
 @Suite("MPP metadata")
 struct MPPMetadataTests {
     @Test("version is a three-component semantic version")
-    func versionIsSemanticVersion() throws {
+    func versionIsSemanticVersion() {
         let components = MPP.version.split(separator: ".")
         #expect(components.count == 3)
         for component in components {
