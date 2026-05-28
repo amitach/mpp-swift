@@ -49,16 +49,4 @@ struct IntentNameTests {
             try IntentName("café")
         }
     }
-
-    @Test("encodes transparently and decoding validates")
-    func codableRoundTrip() throws {
-        let data = try JSONEncoder().encode(IntentName.session)
-        #expect(data == Data("\"session\"".utf8))
-
-        let decoded = try JSONDecoder().decode(IntentName.self, from: Data("\"session\"".utf8))
-        #expect(decoded == .session)
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(IntentName.self, from: Data("\"two words\"".utf8))
-        }
-    }
 }

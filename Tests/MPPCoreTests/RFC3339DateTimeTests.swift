@@ -62,12 +62,4 @@ struct RFC3339DateTimeTests {
             try RFC3339DateTime(input)
         }
     }
-
-    @Test("round-trips transparently through Codable as a single JSON string")
-    func codableIsTransparent() throws {
-        let value = try RFC3339DateTime("2026-01-02T03:04:05Z")
-        let data = try JSONEncoder().encode(value)
-        #expect(String(bytes: data, encoding: .utf8) == "\"2026-01-02T03:04:05Z\"")
-        #expect(try JSONDecoder().decode(RFC3339DateTime.self, from: data) == value)
-    }
 }

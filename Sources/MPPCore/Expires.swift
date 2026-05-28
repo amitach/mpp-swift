@@ -68,27 +68,5 @@ public struct Expires: Sendable, Hashable {
     }
 }
 
-public extension Expires {
-    /// An expiry `count` seconds after `now`.
-    static func seconds(_ count: Int, from now: Date) -> Expires {
-        Expires(date: now.addingTimeInterval(TimeInterval(count)))
-    }
-
-    /// An expiry `count` minutes after `now`.
-    static func minutes(_ count: Int, from now: Date) -> Expires {
-        seconds(count * 60, from: now)
-    }
-
-    /// An expiry `count` hours after `now`.
-    static func hours(_ count: Int, from now: Date) -> Expires {
-        minutes(count * 60, from: now)
-    }
-
-    /// An expiry `count` days after `now`.
-    static func days(_ count: Int, from now: Date) -> Expires {
-        hours(count * 24, from: now)
-    }
-}
-
 // Transparent Codable + description come from RawStringValidated.
 extension Expires: RawStringValidated {}

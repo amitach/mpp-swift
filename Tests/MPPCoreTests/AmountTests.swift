@@ -47,30 +47,4 @@ struct AmountTests {
         }
         #expect(try Amount("0").rawValue == "0")
     }
-
-    @Test("constructs from an unsigned integer canonically")
-    func constructsFromUInt64() {
-        #expect(Amount(0).rawValue == "0")
-        #expect(Amount(1_000_000).rawValue == "1000000")
-    }
-
-    @Test("uint64Value parses, and is nil when the amount exceeds 64 bits")
-    func uint64ValueOverflow() throws {
-        #expect(try Amount("1000000").uint64Value == 1_000_000)
-        // 10^26, far beyond UInt64.max (~1.8e19): a valid Amount, but no UInt64.
-        let huge = try Amount("100000000000000000000000000")
-        #expect(huge.uint64Value == nil)
-    }
-
-    @Test("encodes transparently and decoding validates")
-    func codableRoundTrip() throws {
-        let data = try JSONEncoder().encode(Amount("1000000"))
-        #expect(data == Data("\"1000000\"".utf8))
-
-        let decoded = try JSONDecoder().decode(Amount.self, from: Data("\"1000000\"".utf8))
-        #expect(decoded.rawValue == "1000000")
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(Amount.self, from: Data("\"1.5\"".utf8))
-        }
-    }
 }

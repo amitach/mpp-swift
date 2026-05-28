@@ -29,25 +29,6 @@ public struct Amount: Sendable, Hashable {
         self.rawValue = rawValue
     }
 
-    /// Creates an amount from an unsigned integer, formatted canonically.
-    public init(_ value: UInt64) {
-        rawValue = String(value)
-    }
-
-    /// Creates an amount without validation, for compile-time-known-valid
-    /// values defined within the package.
-    package init(unchecked rawValue: String) {
-        self.rawValue = rawValue
-    }
-
-    /// The amount as a `UInt64`, or `nil` if it exceeds `UInt64.max`.
-    ///
-    /// Large token amounts can exceed 64 bits; rail modules parse ``rawValue``
-    /// into a wider integer (`UInt128`/`U256`) when they need to.
-    public var uint64Value: UInt64? {
-        UInt64(rawValue)
-    }
-
     private static func validate(_ value: String) throws(ValidationError) {
         guard !value.isEmpty else { throw .empty }
         for scalar in value.unicodeScalars where !(0x30 ... 0x39).contains(scalar.value) {
