@@ -4,10 +4,11 @@ import PackageDescription
 // mpp-swift — Swift SDK for the Machine Payments Protocol (MPP).
 //
 // Products and targets grow one workstream at a time (see the implementation
-// plan). This bootstrap declares only `MPPCore`, the always-on protocol layer
-// every other module builds on. Client/Server/MCP/Discovery/Proxy/rails are
-// added as their workstreams land, each behind its own product so consumers
-// depend on exactly what they need.
+// plan). `MPPCore` is the always-on protocol layer every other module builds on;
+// `MPPBodyDigest` is the optional RFC 9530 Content-Digest codec (the first module
+// to use cryptography). Client/Server/MCP/Discovery/Proxy/rails are added as
+// their workstreams land, each behind its own product so consumers depend on
+// exactly what they need.
 let package = Package(
     name: "mpp-swift",
     platforms: [
@@ -19,12 +20,24 @@ let package = Package(
     ],
     products: [
         .library(name: "MPPCore", targets: ["MPPCore"]),
+        .library(name: "MPPBodyDigest", targets: ["MPPBodyDigest"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
     ],
     targets: [
         .target(name: "MPPCore"),
         .testTarget(
             name: "MPPCoreTests",
             dependencies: ["MPPCore"]
+        ),
+        .target(
+            name: "MPPBodyDigest",
+            dependencies: [.product(name: "Crypto", package: "swift-crypto")]
+        ),
+        .testTarget(
+            name: "MPPBodyDigestTests",
+            dependencies: ["MPPBodyDigest"]
         ),
     ],
     swiftLanguageModes: [.v6]
