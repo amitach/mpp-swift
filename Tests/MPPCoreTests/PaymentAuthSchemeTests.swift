@@ -60,6 +60,24 @@ struct PaymentAuthSchemeTests {
         }
     }
 
+    // RFC 9110 §11.2: auth-param names are case-insensitive. Names are
+    // lower-cased on parse, so case variants collide (duplicate) and lookups
+    // by the lowercase spec name always match.
+    @Test("treats parameter names case-insensitively")
+    func parameterNamesAreCaseInsensitive() throws {
+        let params = try PaymentAuthScheme
+            .parseParameters(from: #"Payment ID="abc", Method="tempo""#)
+        #expect(params["id"] == "abc")
+        #expect(params["method"] == "tempo")
+    }
+
+    @Test("rejects case-variant duplicate parameter names")
+    func rejectsCaseVariantDuplicates() {
+        #expect(throws: PaymentAuthScheme.ParseError.duplicateParameter("id")) {
+            try PaymentAuthScheme.parseParameters(from: #"Payment id="a", ID="b""#)
+        }
+    }
+
     @Test("rejects an unterminated quoted-string")
     func rejectsUnterminatedQuote() {
         #expect(throws: PaymentAuthScheme.ParseError.unterminatedQuotedString) {
