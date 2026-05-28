@@ -95,6 +95,17 @@ struct ChallengeTests {
         }
     }
 
+    @Test("rejects an intent outside the grammar")
+    func rejectsInvalidIntent() {
+        let value = header([
+            ("id", "i"), ("realm", "r"), ("method", "tempo"),
+            ("intent", "bad intent"), ("request", request),
+        ])
+        #expect(throws: Challenge.ParsingError.self) {
+            try Challenge(headerValue: value)
+        }
+    }
+
     @Test("rejects a malformed expires")
     func rejectsInvalidExpires() {
         let value = header(required() + [("expires", "not-a-date")])

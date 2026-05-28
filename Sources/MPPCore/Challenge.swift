@@ -25,6 +25,10 @@ public struct Challenge: Sendable, Hashable {
     /// When the challenge expires, if the server set a deadline.
     public let expires: Expires?
     /// Human-readable description, for display only.
+    ///
+    /// Named for the spec's `description` parameter. `Challenge` deliberately
+    /// does not conform to `CustomStringConvertible`, so this optional field
+    /// does not collide with that protocol's non-optional `description`.
     public let description: String?
     /// Server-defined correlation data, base64url(JCS(json)).
     public let opaque: EncodedJSON?
