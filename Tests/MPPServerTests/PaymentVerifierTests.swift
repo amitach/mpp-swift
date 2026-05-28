@@ -120,6 +120,19 @@ struct PaymentVerifierTests {
         #expect(rejection(outcome) == .bindingMismatch)
     }
 
+    @Test("rejects a credential whose method differs from the route's")
+    func rejectsMethodMismatch() async throws {
+        let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
+        let header = try signedCredential(signer: signer()).headerValue // method: tempo
+        let stripeRoute = try PaymentVerifier.ExpectedBinding(
+            realm: "api.example.com", method: MethodName("stripe"), intent: .charge
+        )
+        let outcome = await verifier.verify(
+            authorization: header, body: Data(), now: now, expecting: stripeRoute
+        )
+        #expect(rejection(outcome) == .bindingMismatch)
+    }
+
     @Test("rejects an expired challenge but accepts one expiring later")
     func enforcesExpiry() async throws {
         let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
