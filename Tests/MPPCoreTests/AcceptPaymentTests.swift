@@ -78,6 +78,17 @@ struct AcceptPaymentTests {
         #expect(AcceptPayment.format(ranges) == "tempo/charge, stripe/*;q=0.5, */session;q=0")
     }
 
+    @Test("formats a high-precision quality to a valid <=3-decimal qvalue")
+    func formatsHighPrecisionQuality() throws {
+        // The init accepts any finite 0...1 Double; format must still emit a wire
+        // qvalue (<=3 decimals, no scientific notation), so the output re-parses.
+        let range = try PaymentRange(method: .any, intent: .value(.charge), quality: 0.12345)
+        let header = AcceptPayment.format([range])
+        #expect(header == "*/charge;q=0.123")
+        let reparsed = try AcceptPayment.parse(header)
+        #expect(reparsed[0].quality == 0.123)
+    }
+
     @Test("round-trips parse -> format -> parse")
     func roundTrips() throws {
         let header = "tempo/charge, solana/*;q=0.6, */session;q=0.3"

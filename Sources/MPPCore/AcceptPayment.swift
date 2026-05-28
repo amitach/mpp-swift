@@ -178,9 +178,17 @@ public enum AcceptPayment {
     }
 
     private static func formatQuality(_ quality: Double) -> String {
-        // `q` is 0...1 with at most three decimals; %g (C locale) drops trailing
-        // zeros, so 0.5 -> "0.5", 0 -> "0".
-        String(format: "%g", quality)
+        // The wire qvalue (RFC 9110 §12.4.2) is 0...1 with at most three decimals,
+        // so round to that precision (%.3f, C locale, no scientific notation) and
+        // strip trailing zeros: 0.5 -> "0.5", 1 -> "1", 0.1234 -> "0.123".
+        var rendered = String(format: "%.3f", quality)
+        if rendered.contains(".") {
+            while rendered.hasSuffix("0") {
+                rendered.removeLast()
+            }
+            if rendered.hasSuffix(".") { rendered.removeLast() }
+        }
+        return rendered
     }
 
     /// A reason an `Accept-Payment` value could not be parsed.
