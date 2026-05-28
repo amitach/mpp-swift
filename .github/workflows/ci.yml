@@ -51,3 +51,11 @@ jobs:
         run: |
           brew install swiftlint
           swiftlint --strict
+      - name: No em dashes (repo-wide)
+        run: |
+          # swiftlint enforces .swift; this covers markdown, configs, everything
+          # tracked. An en dash (U+2013, range separator) is allowed.
+          if git grep -n -P '\x{2014}' -- . ; then
+            echo "::error::Em dash (U+2014) found. Use a colon, comma, or semicolon."
+            exit 1
+          fi
