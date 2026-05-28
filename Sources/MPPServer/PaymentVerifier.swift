@@ -76,10 +76,14 @@ public struct PaymentVerifier: Sendable {
     /// challenge-id binding; the method-specific `request` is checked by the
     /// payment method, not here.
     public struct ExpectedBinding: Sendable, Hashable {
+        /// The protection space (RFC 9110 realm) this route charges under.
         public let realm: String
+        /// The payment method this route accepts.
         public let method: MethodName
+        /// The payment intent this route requires.
         public let intent: IntentName
 
+        /// Creates the binding a route requires a credential's challenge to match.
         public init(realm: String, method: MethodName, intent: IntentName) {
             self.realm = realm
             self.method = method
