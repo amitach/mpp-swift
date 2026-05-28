@@ -109,8 +109,11 @@ public struct MPPServerMiddleware: Sendable {
             return .proceed(verified)
         case let .rejected(rejection):
             // Offer a fresh challenge alongside the rejection so the client can retry.
+            // Both moments are reported: the rejection, then the retry challenge that
+            // was issued (so `challengeIssued` counts every minted challenge).
             let challenge = mintChallenge(now: now)
             onEvent(.paymentRejected(rejection))
+            onEvent(.challengeIssued(challenge))
             let problem = Self.problem(for: .rejection(rejection), challengeID: challenge.id)
             return .challenge(challenge, problem)
         }

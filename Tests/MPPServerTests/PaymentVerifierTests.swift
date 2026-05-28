@@ -31,11 +31,7 @@ struct PaymentVerifierTests {
             id: "unsigned", realm: "api.example.com", method: MethodName("tempo"),
             intent: .charge, request: EncodedJSON("e30"), digest: digest, expires: expires
         )
-        let signed = Challenge(
-            id: signer.computeID(for: unsigned), realm: unsigned.realm, method: unsigned.method,
-            intent: unsigned.intent, request: unsigned.request, digest: unsigned.digest,
-            expires: unsigned.expires
-        )
+        let signed = unsigned.withID(signer.computeID(for: unsigned))
         return Credential(challenge: signed, payload: ["proof": "0xabc"])
     }
 

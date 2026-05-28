@@ -107,13 +107,20 @@ private func isTooLarge(_ decision: MPPServerMiddleware.Decision) -> Bool {
     return false
 }
 
-private func lastEventName(_ box: EventBox) -> String? {
-    switch box.events.last {
+private func eventName(_ event: ServerEvent) -> String {
+    switch event {
     case .challengeIssued: return "challengeIssued"
     case .paymentVerified: return "paymentVerified"
     case .paymentRejected: return "paymentRejected"
-    case nil: return nil
     }
+}
+
+private func lastEventName(_ box: EventBox) -> String? {
+    box.events.last.map(eventName)
+}
+
+private func eventNames(_ box: EventBox) -> [String] {
+    box.events.map(eventName)
 }
 
 @Suite("MPPServerMiddleware")
@@ -162,7 +169,7 @@ struct MPPServerMiddlewareTests {
         )
         let (_, problem) = try #require(challengeOf(decision))
         #expect(problem.type == "https://paymentauth.org/problems/malformed-credential")
-        #expect(lastEventName(box) == "paymentRejected")
+        #expect(eventNames(box) == ["paymentRejected", "challengeIssued"])
     }
 
     @Test("a replayed credential is rejected as invalid-challenge on its second use")
@@ -328,14 +335,13 @@ struct MPPServerMiddlewareTests {
         #expect(problem.extensions["challengeId"] == .string(challenge.id))
     }
 
-    @Test("a rejection emits exactly one paymentRejected event, not a second challengeIssued")
-    func rejectionEmitsSingleEvent() async throws {
+    @Test("a rejection emits paymentRejected then challengeIssued for the retry challenge")
+    func rejectionEmitsRejectedThenIssued() async throws {
         let box = EventBox()
         let middleware = try makeMiddleware(onEvent: box.add)
         _ = await middleware.evaluate(authorization: "Bearer not-a-payment", body: Data(), now: now)
-        // One event per decision: the rejection mints a fresh retry challenge but
-        // reports it as paymentRejected, never a second challengeIssued.
-        #expect(box.events.count == 1)
-        #expect(lastEventName(box) == "paymentRejected")
+        // The rejection is reported, then the retry challenge that was issued, so
+        // challengeIssued counts every minted challenge (fresh and retry alike).
+        #expect(eventNames(box) == ["paymentRejected", "challengeIssued"])
     }
 }
