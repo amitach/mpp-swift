@@ -131,6 +131,9 @@ extension JSONValue: Codable {
     public init(from decoder: any Decoder) throws {
         if let keyed = try? decoder.container(keyedBy: ObjectKey.self) {
             var object: [String: JSONValue] = [:]
+            // A well-formed JSON object has unique keys; on a duplicate the
+            // decoder keeps the first occurrence (the dictionary literal above is
+            // last-wins, but neither case should arise in conforming input).
             for key in keyed.allKeys {
                 object[key.stringValue] = try keyed.decode(JSONValue.self, forKey: key)
             }
