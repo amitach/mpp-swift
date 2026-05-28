@@ -10,7 +10,7 @@ public protocol ReplayStore: Sendable {
     /// Marks `id` as used and reports whether this was its first use.
     ///
     /// - Returns: `true` if `id` had not been consumed before (accept the
-    ///   payment); `false` if it was already consumed (a replay — reject). The
+    ///   payment); `false` if it was already consumed (a replay: reject). The
     ///   check-and-record is atomic: for concurrent calls with the same `id`,
     ///   exactly one returns `true`.
     func consume(_ id: String) async -> Bool

@@ -1,7 +1,7 @@
 import MPPServer
 import Testing
 
-// Spec: draft-httpauth-payment-00 §11.3 / §11.5 — single-use challenge ids;
+// Spec: draft-httpauth-payment-00 §11.3 / §11.5: single-use challenge ids;
 // consume is the atomic serialization point (first use wins, replays rejected).
 @Suite("InMemoryReplayStore")
 struct ReplayStoreTests {
@@ -17,6 +17,30 @@ struct ReplayStoreTests {
         let store = InMemoryReplayStore()
         #expect(await store.consume("a"))
         #expect(await store.consume("b"))
+    }
+
+    @Test("ids are matched verbatim: case-sensitive, never normalized")
+    func idsAreCaseSensitive() async {
+        // A challenge id is an opaque exact-match token, so differing only in
+        // case makes a distinct id; the store must not fold them together.
+        let store = InMemoryReplayStore()
+        #expect(await store.consume("Challenge-1"))
+        #expect(await store.consume("challenge-1"))
+    }
+
+    @Test("the empty string is a valid single-use id")
+    func emptyIDConsumable() async {
+        let store = InMemoryReplayStore()
+        #expect(await store.consume(""))
+        #expect(await !store.consume(""))
+    }
+
+    @Test("separate store instances are independent replay spaces")
+    func instancesAreIndependent() async {
+        let first = InMemoryReplayStore()
+        let second = InMemoryReplayStore()
+        #expect(await first.consume("shared"))
+        #expect(await second.consume("shared"))
     }
 
     @Test("under concurrent consume of one id, exactly one caller wins")
