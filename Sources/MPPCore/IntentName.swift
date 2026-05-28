@@ -40,10 +40,10 @@ public struct IntentName: Sendable, Hashable {
 
     private static func isAllowed(_ scalar: Unicode.Scalar) -> Bool {
         let value = scalar.value
-        return (0x41...0x5A).contains(value)  // A-Z
-            || (0x61...0x7A).contains(value)  // a-z
-            || (0x30...0x39).contains(value)  // 0-9
-            || value == 0x2D  // "-"
+        return (0x41 ... 0x5A).contains(value) // A-Z
+            || (0x61 ... 0x7A).contains(value) // a-z
+            || (0x30 ... 0x39).contains(value) // 0-9
+            || value == 0x2D // "-"
     }
 
     /// A reason a candidate value is not a valid ``IntentName``.
@@ -55,17 +55,19 @@ public struct IntentName: Sendable, Hashable {
     }
 }
 
-extension IntentName {
+public extension IntentName {
     /// The `charge` intent: a one-time payment in exchange for a single resource.
-    public static let charge = IntentName(unchecked: "charge")
+    static let charge = IntentName(unchecked: "charge")
     /// The `session` intent: pay-as-you-go over a payment channel.
-    public static let session = IntentName(unchecked: "session")
+    static let session = IntentName(unchecked: "session")
     /// The `subscription` intent: recurring payment across billing periods.
-    public static let subscription = IntentName(unchecked: "subscription")
+    static let subscription = IntentName(unchecked: "subscription")
 }
 
 extension IntentName: CustomStringConvertible {
-    public var description: String { rawValue }
+    public var description: String {
+        rawValue
+    }
 }
 
 extension IntentName: Codable {

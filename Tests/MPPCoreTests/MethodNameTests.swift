@@ -1,6 +1,5 @@
 import Foundation
 import Testing
-
 @testable import MPPCore
 
 // Spec: draft-httpauth-payment-00 §5.1.1 + Appendix A
@@ -75,8 +74,8 @@ struct MethodNameTests {
     @Test("decoding validates and round-trips")
     func decodingValidatesAndRoundTrips() throws {
         let decoded = try JSONDecoder().decode(MethodName.self, from: Data("\"tempo\"".utf8))
-        #expect(decoded == (try MethodName("tempo")))
-        #expect(throws: (any Error).self) {
+        #expect(try decoded == MethodName("tempo"))
+        #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(MethodName.self, from: Data("\"TEMPO\"".utf8))
         }
     }

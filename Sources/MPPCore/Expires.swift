@@ -33,7 +33,7 @@ public struct Expires: Sendable, Hashable {
     /// fractional seconds). Use when minting a fresh challenge.
     public init(date: Date) {
         self.date = date
-        self.rawValue = Self.format(date)
+        rawValue = Self.format(date)
     }
 
     /// Whether the challenge has expired as of `now`.
@@ -60,24 +60,24 @@ public struct Expires: Sendable, Hashable {
     }
 }
 
-extension Expires {
+public extension Expires {
     /// An expiry `count` seconds after `now`.
-    public static func seconds(_ count: Int, from now: Date) -> Expires {
+    static func seconds(_ count: Int, from now: Date) -> Expires {
         Expires(date: now.addingTimeInterval(TimeInterval(count)))
     }
 
     /// An expiry `count` minutes after `now`.
-    public static func minutes(_ count: Int, from now: Date) -> Expires {
+    static func minutes(_ count: Int, from now: Date) -> Expires {
         seconds(count * 60, from: now)
     }
 
     /// An expiry `count` hours after `now`.
-    public static func hours(_ count: Int, from now: Date) -> Expires {
+    static func hours(_ count: Int, from now: Date) -> Expires {
         minutes(count * 60, from: now)
     }
 
     /// An expiry `count` days after `now`.
-    public static func days(_ count: Int, from now: Date) -> Expires {
+    static func days(_ count: Int, from now: Date) -> Expires {
         hours(count * 24, from: now)
     }
 }
@@ -107,7 +107,9 @@ extension Expires {
 }
 
 extension Expires: CustomStringConvertible {
-    public var description: String { rawValue }
+    public var description: String {
+        rawValue
+    }
 }
 
 extension Expires: Codable {

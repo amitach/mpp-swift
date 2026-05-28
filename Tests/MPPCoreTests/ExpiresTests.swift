@@ -1,6 +1,5 @@
 import Foundation
 import Testing
-
 @testable import MPPCore
 
 // Spec: draft-httpauth-payment-00 §5.1 — `expires` is an RFC 3339 date-time.
@@ -13,7 +12,7 @@ import Testing
 @Suite("Expires")
 struct ExpiresTests {
     // Fixed reference instants — deterministic, no system clock.
-    private let now = Date(timeIntervalSince1970: 1_800_000_000)  // 2027-01-15T08:00:00Z
+    private let now = Date(timeIntervalSince1970: 1_800_000_000) // 2027-01-15T08:00:00Z
     private static let utcZ = "2026-01-01T00:00:00Z"
 
     @Test("parses RFC 3339 with Z and preserves the original string verbatim")
@@ -34,12 +33,12 @@ struct ExpiresTests {
             try Expires("not-a-date")
         }
         #expect(throws: Expires.ParsingError.malformed) {
-            try Expires("2026-01-01")  // date only, not a date-time
+            try Expires("2026-01-01") // date only, not a date-time
         }
     }
 
     @Test("isExpired compares against the supplied now, not the system clock")
-    func isExpiredUsesSuppliedNow() throws {
+    func isExpiredUsesSuppliedNow() {
         let past = Expires(date: now.addingTimeInterval(-1))
         let future = Expires(date: now.addingTimeInterval(1))
         #expect(past.isExpired(at: now))
@@ -62,7 +61,7 @@ struct ExpiresTests {
         #expect(Expires.seconds(30, from: now).date == now.addingTimeInterval(30))
         #expect(Expires.minutes(5, from: now).date == now.addingTimeInterval(300))
         #expect(Expires.hours(2, from: now).date == now.addingTimeInterval(7200))
-        #expect(Expires.days(1, from: now).date == now.addingTimeInterval(86_400))
+        #expect(Expires.days(1, from: now).date == now.addingTimeInterval(86400))
     }
 
     @Test("encodes transparently and decoding validates")
@@ -72,7 +71,7 @@ struct ExpiresTests {
 
         let decoded = try JSONDecoder().decode(Expires.self, from: Data("\"\(Self.utcZ)\"".utf8))
         #expect(decoded.rawValue == Self.utcZ)
-        #expect(throws: (any Error).self) {
+        #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(Expires.self, from: Data("\"nope\"".utf8))
         }
     }

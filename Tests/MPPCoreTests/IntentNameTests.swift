@@ -1,6 +1,5 @@
 import Foundation
 import Testing
-
 @testable import MPPCore
 
 // Spec: draft-httpauth-payment-00 §5.1.1 + Appendix A
@@ -61,7 +60,7 @@ struct IntentNameTests {
 
         let decoded = try JSONDecoder().decode(IntentName.self, from: Data("\"session\"".utf8))
         #expect(decoded == .session)
-        #expect(throws: (any Error).self) {
+        #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(IntentName.self, from: Data("\"two words\"".utf8))
         }
     }

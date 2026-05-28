@@ -7,6 +7,7 @@
 --wrapcollections before-first
 --self remove
 --importgrouping testable-bottom
---commas inline
 --trimwhitespace always
---disable redundantReturn
+# trailingCommas is owned by swiftlint (mandatory_comma); docComments is too
+# aggressive for file-header comments. Disable both here to avoid tool conflicts.
+--disable redundantReturn,trailingCommas,docComments

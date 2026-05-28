@@ -24,7 +24,7 @@ public struct MethodName: Sendable, Hashable {
     ///   outside `a`–`z`.
     public init(_ rawValue: String) throws(ValidationError) {
         guard !rawValue.isEmpty else { throw .empty }
-        for scalar in rawValue.unicodeScalars where !(0x61...0x7A).contains(scalar.value) {
+        for scalar in rawValue.unicodeScalars where !(0x61 ... 0x7A).contains(scalar.value) {
             throw .invalidCharacter(Character(scalar))
         }
         self.rawValue = rawValue
@@ -49,7 +49,9 @@ public struct MethodName: Sendable, Hashable {
 }
 
 extension MethodName: CustomStringConvertible {
-    public var description: String { rawValue }
+    public var description: String {
+        rawValue
+    }
 }
 
 extension MethodName: Codable {
