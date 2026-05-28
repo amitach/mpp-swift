@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import MPPCore
 
-// Spec: draft-httpauth-payment-00 §5.1 — WWW-Authenticate: Payment carries
+// Spec: draft-httpauth-payment-00 §5.1: WWW-Authenticate: Payment carries
 // required id/realm/method/intent/request and optional digest/expires/
 // description/opaque. method is lowercase ASCII; request/opaque are
 // base64url(JCS(json)) preserved verbatim for the challenge-id binding.
@@ -162,7 +162,7 @@ struct ChallengeTests {
         #expect(reparsed == full)
     }
 
-    // Spec: draft-httpauth-payment-00 §5.1.2.1.1 — the HMAC binding input is the
+    // Spec: draft-httpauth-payment-00 §5.1.2.1.1: the HMAC binding input is the
     // seven slots realm|method|intent|request|expires|digest|opaque, with empty
     // strings for absent optionals; `id` (the HMAC output) is not an input.
     @Test("binding input joins all seven slots with full fields present")

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import MPPCore
 
-// Spec: draft-httpauth-payment-00 §5.1 — Authorization: Payment 1*SP
+// Spec: draft-httpauth-payment-00 §5.1: Authorization: Payment 1*SP
 // base64url-nopad, where the payload is a JSON object {challenge, source?,
 // payload}. The challenge is echoed verbatim for the server's binding re-check.
 @Suite("Credential")

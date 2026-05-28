@@ -3,7 +3,7 @@ import MPPCore
 import MPPServer
 import Testing
 
-// Spec: draft-httpauth-payment-00 §5.1.2.1.1 —
+// Spec: draft-httpauth-payment-00 §5.1.2.1.1:
 // id = base64url(HMAC-SHA256(secret, bindingInput)), unpadded.
 @Suite("ChallengeSigner")
 struct ChallengeSignerTests {
@@ -42,7 +42,7 @@ struct ChallengeSignerTests {
         let method = try MethodName("tempo")
         let req = EncodedJSON("e30")
         let realm = "api.example.com"
-        // (challenge, expected id) — one case per slot that can vary the binding.
+        // (challenge, expected id): one case per slot that can vary the binding.
         let cases: [(Challenge, String)] = try [
             (
                 Challenge(id: "x", realm: realm, method: method, intent: .charge, request: req),

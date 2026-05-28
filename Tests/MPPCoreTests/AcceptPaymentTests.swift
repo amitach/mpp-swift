@@ -1,7 +1,7 @@
 import Testing
 @testable import MPPCore
 
-// Spec: draft-httpauth-payment-00 §6 — Accept-Payment = #payment-range, each
+// Spec: draft-httpauth-payment-00 §6: Accept-Payment = #payment-range, each
 // (method-or-*)/(intent-or-*) with an optional ;q= weight (omitted=1, q=0 means
 // "do not use"). Client -> server.
 @Suite("AcceptPayment")

@@ -1,6 +1,6 @@
 # mpp-swift
 
-The Swift SDK for the [Machine Payments Protocol (MPP)](https://mpp.dev) — pay for, and charge for, machine-to-machine API calls over HTTP 402.
+The Swift SDK for the [Machine Payments Protocol (MPP)](https://mpp.dev): pay for, and charge for, machine-to-machine API calls over HTTP 402.
 
 [![Swift 6.0+](https://img.shields.io/badge/Swift-6.0%2B-orange.svg)](https://swift.org)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%2013%20%7C%20iOS%2016%20%7C%20tvOS%2016%20%7C%20watchOS%209%20%7C%20visionOS%201%20%7C%20Linux-lightgrey.svg)](https://swift.org)
@@ -40,9 +40,9 @@ Then depend on the products you need (you pull only those):
 
 ## Design
 
-- **Client and server are separate products** — depend on one without the other.
+- **Client and server are separate products:** depend on one without the other.
 - **Spec is the source of truth.** The SDK defaults to the published MPP drafts; where an interoperating peer diverges, the divergence is handled explicitly via a compatibility configuration, never silently inherited.
-- **Conventions follow the Swift ecosystem** — Apple's API Design Guidelines and the `swift-*` package norms.
+- **Conventions follow the Swift ecosystem**: Apple's API Design Guidelines and the `swift-*` package norms.
 
 ## License
 

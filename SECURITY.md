@@ -8,7 +8,7 @@ Please report security issues privately via GitHub's "Report a vulnerability" (S
 
 ## Security model
 
-The SDK enforces the security considerations of `draft-httpauth-payment-00 §11` and the per-method drafts. Each requirement maps to a type, a default, a runtime guard, or a CI gate — not a doc comment alone:
+The SDK enforces the security considerations of `draft-httpauth-payment-00 §11` and the per-method drafts. Each requirement maps to a type, a default, a runtime guard, or a CI gate, not a doc comment alone:
 
 - **Transport (§11.2):** TLS is required; non-`https` is rejected at runtime (minimum TLS 1.2, default 1.3). A scoped `allowInsecureLocal` opt-in permits loopback only, for tests and the conformance harness.
 - **Credentials (§11.2.1):** credentials are redacted in `description`/`debugDescription`, excluded from errors, and held only for the duration of one request. Swift value-type copies make hard memory zeroization impossible, so the SDK promises redaction and minimal lifetime, and zeroizes only raw key buffers it fully controls.

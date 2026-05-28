@@ -2,13 +2,13 @@ import Foundation
 import Testing
 @testable import MPPCore
 
-// Spec: draft-httpauth-payment-00 §5.1 — `expires` is an RFC 3339 date-time.
+// Spec: draft-httpauth-payment-00 §5.1: `expires` is an RFC 3339 date-time.
 // Expiry checks take an explicit `now` rather than reading the system clock,
 // so the check is deterministic (anti-flakiness rule #1).
 // All time-dependent tests use fixed instants; none read the system clock.
 @Suite("Expires")
 struct ExpiresTests {
-    // Fixed reference instants — deterministic, no system clock.
+    // Fixed reference instants: deterministic, no system clock.
     private let now = Date(timeIntervalSince1970: 1_800_000_000) // 2027-01-15T08:00:00Z
     private static let utcZ = "2026-01-01T00:00:00Z"
 

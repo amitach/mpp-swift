@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import MPPCore
 
-// Spec: draft-httpauth-payment-00 §5.1 — Payment-Receipt is a base64url-encoded
+// Spec: draft-httpauth-payment-00 §5.1: Payment-Receipt is a base64url-encoded
 // JSON object with status/method/timestamp/reference; status is "success"
 // (receipts issued only on success).
 @Suite("Receipt")

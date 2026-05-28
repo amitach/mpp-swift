@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import MPPCore
 
-// Spec: draft-payment-intent-charge-00 — request/credential are base64url,
+// Spec: draft-payment-intent-charge-00: request/credential are base64url,
 // no padding (RFC 4648 §5). RFC 4648 §5 is the authoritative vector source,
 // tested directly here. Decoding is strict: standard-base64 characters and
 // padding are rejected.
@@ -38,7 +38,7 @@ struct Base64URLTests {
 
     @Test("round-trips bytes across all lengths and byte values, deterministically")
     func roundTrips() throws {
-        // Deterministic byte pattern (no system randomness — see the no-flaky
+        // Deterministic byte pattern (no system randomness; see the no-flaky
         // contract). The multiplier walks every residue mod 256, so over the
         // length range every byte value is exercised.
         for length in 0 ... 64 {

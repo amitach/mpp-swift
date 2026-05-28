@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import MPPCore
 
-// Spec: draft-payment-intent-charge-00 — request/opaque are JCS-serialized
+// Spec: draft-payment-intent-charge-00: request/opaque are JCS-serialized
 // (RFC 8785) then base64url-encoded without padding (RFC 4648 §5). The encoded
 // string is bound by the challenge-id HMAC, so a received value must be
 // preserved byte-for-byte.
