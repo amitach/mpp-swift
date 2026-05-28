@@ -16,7 +16,9 @@ public struct Challenge: Sendable, Hashable {
     public let method: MethodName
     /// Payment intent (a registered intent token).
     public let intent: IntentName
-    /// Method-specific request data, base64url(JCS(json)).
+    /// Method-specific request data, base64url(JCS(json)). Preserved verbatim;
+    /// a malformed encoding surfaces when read via ``EncodedJSON/decodedData()``,
+    /// not at parse time, so the challenge-id binding always sees the literal bytes.
     public let request: EncodedJSON
     /// Content digest of the request body (RFC 9530), preserved verbatim.
     public let digest: String?
@@ -55,6 +57,11 @@ public struct Challenge: Sendable, Hashable {
     /// - Parameter headerValue: The full header value, which may contain other
     ///   authentication schemes alongside `Payment`.
     /// - Throws: ``ParsingError``.
+    ///
+    /// `method` and `intent` are validated against their grammars here. All
+    /// other values (including `id` and `realm`) are accepted verbatim: the
+    /// challenge-id binding and request decodability are checked by later
+    /// layers, not by this parser, so the bound bytes are never altered.
     public init(headerValue: String) throws(ParsingError) {
         let parameters: [String: String]
         do {
