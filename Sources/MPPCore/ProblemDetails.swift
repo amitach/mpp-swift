@@ -22,7 +22,9 @@ public struct ProblemDetails: Sendable, Hashable {
     /// A URI reference identifying the specific occurrence.
     public var instance: String?
     /// Extension members beyond the five standard ones (e.g. `challengeId`),
-    /// carried opaquely. Never contains a standard-member key.
+    /// carried opaquely. A decoded problem never places a standard member here;
+    /// on encode, an extension key that collides with a standard member is
+    /// ignored so the typed field stays authoritative.
     public var extensions: [String: JSONValue]
 
     /// Creates a problem details object.
