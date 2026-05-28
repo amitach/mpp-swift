@@ -1,7 +1,7 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// mpp-swift — Swift SDK for the Machine Payments Protocol (MPP).
+// mpp-swift: Swift SDK for the Machine Payments Protocol (MPP).
 //
 // Products and targets grow one workstream at a time (see the implementation
 // plan). `MPPCore` is the always-on protocol layer every other module builds on;

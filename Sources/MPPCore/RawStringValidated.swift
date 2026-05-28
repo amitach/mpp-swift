@@ -1,7 +1,7 @@
 /// A value backed by a validated canonical string.
 ///
-/// Several MPP primitives — ``MethodName``, ``IntentName``, ``Amount``,
-/// ``Expires`` — are "a string that must satisfy a grammar." They differ only
+/// Several MPP primitives (``MethodName``, ``IntentName``, ``Amount``,
+/// ``Expires``) are "a string that must satisfy a grammar." They differ only
 /// in the grammar (and its error); the *serialization mechanism* is identical:
 /// transparent (single-value) `Codable` that re-validates on decode, and a
 /// `description` equal to the raw value. This protocol supplies that mechanism

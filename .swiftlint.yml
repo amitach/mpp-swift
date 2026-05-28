@@ -38,6 +38,16 @@ force_try:
 force_cast:
   severity: error
 
+# Project prose style: no em dashes (use a colon, comma, or semicolon). Enforced
+# in Swift sources because the rule had leaked into comments before anything
+# checked. An en dash (range separator, e.g. 0x00-0x1F) is unaffected.
+custom_rules:
+  no_em_dash:
+    name: "No Em Dash"
+    regex: '\x{2014}'
+    message: "No em dashes: use a colon, comma, or semicolon."
+    severity: error
+
 excluded:
   - .build
   - Tests/MPPVectorsTests/Fixtures

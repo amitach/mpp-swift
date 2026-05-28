@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import MPPCore
 
-// Spec: draft-httpauth-payment-00 §5.1 — expires/timestamp are RFC 3339
+// Spec: draft-httpauth-payment-00 §5.1: expires/timestamp are RFC 3339
 // date-time strings. The original string is preserved verbatim; comparisons use
 // the parsed instant.
 @Suite("RFC3339DateTime")

@@ -10,7 +10,7 @@
 /// This is the strict on-wire form. Human-readable decimal input (for example
 /// `"1.5"` with a decimals scale) is converted to base units by a separate
 /// helper at the charge layer; a decimal string is not itself a valid
-/// `Amount`. There is no floating-point representation anywhere — amounts are
+/// `Amount`. There is no floating-point representation anywhere; amounts are
 /// exact integers. Validation is intentionally strict: it enforces the
 /// normative canonical discovery grammar (non-negative integer base units, no
 /// leading zeros) for the value that travels on the wire, rather than accepting

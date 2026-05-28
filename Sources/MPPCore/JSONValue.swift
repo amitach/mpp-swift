@@ -4,7 +4,7 @@
 ///
 /// MPP deliberately carries monetary amounts as *strings* (see ``Amount``), so
 /// request JSON never contains floating-point numbers; modelling numbers as
-/// integers here makes that guarantee structural — a non-integer number cannot
+/// integers here makes that guarantee structural: a non-integer number cannot
 /// be represented, so ``canonicalized()`` cannot silently mis-serialize one.
 ///
 /// ``canonicalized()`` produces the RFC 8785 (JSON Canonicalization Scheme)
