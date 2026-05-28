@@ -118,4 +118,47 @@ struct AcceptPaymentTests {
             try AcceptPayment.parse(header)
         }
     }
+
+    @Test(
+        "rejects q forms outside the RFC 9110 qvalue grammar",
+        arguments: [
+            "tempo/charge;q=0.1234", // > 3 decimals
+            "tempo/charge;q=0x1p0", // hex float
+            "tempo/charge;q=1e0", // scientific
+            "tempo/charge;q=.5", // no leading digit
+            "tempo/charge;q=+0.5", // signed
+            "tempo/charge;q=1.5", // > 1 via the "1" branch
+        ]
+    )
+    func rejectsNonQValueForms(header: String) {
+        #expect(throws: AcceptPayment.ParseError.self) {
+            try AcceptPayment.parse(header)
+        }
+    }
+
+    @Test("accepts the qvalue boundary forms (0, 1, 1.000, three decimals)")
+    func acceptsQValueBoundaries() throws {
+        let zero = try AcceptPayment.parse("a/charge;q=0")
+        let one = try AcceptPayment.parse("a/charge;q=1")
+        let oneThousandths = try AcceptPayment.parse("a/charge;q=1.000")
+        let threeDecimals = try AcceptPayment.parse("a/charge;q=0.999")
+        #expect(zero[0].quality == 0)
+        #expect(one[0].quality == 1)
+        #expect(oneThousandths[0].quality == 1)
+        #expect(threeDecimals[0].quality == 0.999)
+    }
+
+    @Test(
+        "rejects more than one parameter (the ABNF allows only the weight)",
+        arguments: [
+            "tempo/charge;q=0.5;q=0.8", // duplicate q (no last-wins)
+            "tempo/charge;q=0.5;ext=1", // extra param after q
+            "tempo/charge;ext=1;q=0.5", // extra param before q
+        ]
+    )
+    func rejectsExtraParameters(header: String) {
+        #expect(throws: AcceptPayment.ParseError.self) {
+            try AcceptPayment.parse(header)
+        }
+    }
 }

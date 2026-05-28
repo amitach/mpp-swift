@@ -120,14 +120,29 @@ public enum AcceptPayment {
 
     private static func parseQuality(_ params: [Substring]) throws(ParseError) -> Double {
         guard let first = params.first else { return 1 }
+        // The ABNF allows at most one weight and no other parameter, so anything
+        // past a single `q=` segment is malformed (no last-wins, no extras).
+        guard params.count == 1 else { throw .malformedToken(params.joined(separator: ";")) }
         let param = first.trimmingCharacters(in: .whitespaces)
-        let lower = param.lowercased()
-        guard lower.hasPrefix("q=") else { throw .malformedToken(param) }
+        guard param.lowercased().hasPrefix("q=") else { throw .malformedToken(param) }
         let raw = String(param.dropFirst(2))
-        guard let value = Double(raw), (0 ... 1).contains(value) else {
-            throw .invalidQuality(raw)
-        }
+        guard isQValue(raw), let value = Double(raw) else { throw .invalidQuality(raw) }
         return value
+    }
+
+    /// Whether `raw` is an RFC 9110 §12.4.2 `qvalue`:
+    /// `( "0" [ "." 0*3DIGIT ] ) / ( "1" [ "." 0*3("0") ] )`. Stricter than
+    /// `Double`, which would admit hex, scientific, signed, and >3-decimal forms.
+    private static func isQValue(_ raw: String) -> Bool {
+        guard let lead = raw.first, lead == "0" || lead == "1" else { return false }
+        let rest = raw.dropFirst()
+        if rest.isEmpty { return true } // "0" or "1"
+        guard rest.first == ".", rest.count <= 4 else { return false } // "." + 0*3
+        let fraction = rest.dropFirst()
+        guard !fraction.isEmpty else { return false }
+        return lead == "0"
+            ? fraction.unicodeScalars.allSatisfy { (0x30 ... 0x39).contains($0.value) }
+            : fraction.allSatisfy { $0 == "0" }
     }
 
     private static func token(_ wildcard: Wildcard<some RawStringValidated>) -> String {
