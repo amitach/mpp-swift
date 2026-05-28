@@ -56,6 +56,13 @@ struct ContentDigestTests {
         #expect(try ContentDigest.verify(body, matches: upper))
     }
 
+    @Test("treats an empty byte sequence (sha-256=::) as a legal, non-matching member")
+    func acceptsEmptyByteSequence() throws {
+        // RFC 8941 permits an empty byte sequence; it parses (no throw) and just
+        // cannot match a real body's digest.
+        #expect(try !ContentDigest.verify(Data("body".utf8), matches: "sha-256=::"))
+    }
+
     @Test(
         "rejects a malformed Content-Digest value",
         arguments: [
