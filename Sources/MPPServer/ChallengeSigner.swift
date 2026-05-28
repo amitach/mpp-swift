@@ -42,6 +42,8 @@ public struct ChallengeSigner: Sendable {
     /// not valid unpadded base64url cannot be a valid MAC, so it returns `false`.
     public func verify(_ challenge: Challenge) -> Bool {
         guard let mac = try? Base64URL.decode(challenge.id) else { return false }
+        // Never compare the id with `==` / a string compare; the keyed MAC check
+        // below is the constant-time path.
         return HMAC<SHA256>.isValidAuthenticationCode(
             mac,
             authenticating: Data(challenge.bindingInput.utf8),

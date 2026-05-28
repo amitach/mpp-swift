@@ -33,14 +33,63 @@ struct ChallengeSignerTests {
         )
     }
 
-    @Test("computes the openssl-derived golden id over the binding input")
-    func computesGoldenID() throws {
-        // Independently computed:
-        //   printf '%s' 'api.example.com|tempo|charge|e30|||' \
-        //     | openssl dgst -sha256 -hmac 'test-secret-key-12345' -binary \
-        //     | openssl base64 | tr '+/' '-_' | tr -d '='
-        #expect(try signer()
-            .computeID(for: draft()) == "r0Ljf4etU6bMy6evbN16GVjjo1UBSOtatsJ7ZkKeVlo")
+    @Test("matches the known-answer id for every optional-slot shape")
+    func knownAnswerVectors() throws {
+        // Expected ids computed independently with openssl over the exact binding
+        // input, secret 'test-secret-key-12345':
+        //   printf '%s' '<bindingInput>' | openssl dgst -sha256 -hmac '<secret>' \
+        //     -binary | openssl base64 | tr '+/' '-_' | tr -d '='
+        let signer = signer()
+        let method = try MethodName("tempo")
+        let req = EncodedJSON("e30")
+        let realm = "api.example.com"
+        // (challenge, expected id) — one case per slot that can vary the binding.
+        let cases: [(Challenge, String)] = try [
+            (
+                Challenge(id: "x", realm: realm, method: method, intent: .charge, request: req),
+                "r0Ljf4etU6bMy6evbN16GVjjo1UBSOtatsJ7ZkKeVlo"
+            ), // required only
+            (
+                Challenge(
+                    id: "x",
+                    realm: realm,
+                    method: method,
+                    intent: .charge,
+                    request: req,
+                    expires: Expires("2025-01-06T12:00:00Z")
+                ),
+                "rOcsQP3bC4Me4geUeAxi0uTgpKKZ5271TsEG_vMTb08"
+            ), // + expires
+            (
+                Challenge(
+                    id: "x",
+                    realm: realm,
+                    method: method,
+                    intent: .charge,
+                    request: req,
+                    digest: "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:"
+                ),
+                "ThTdCGVn-JTBoV2M_xqBxud40ueTMrImCQbTY-Et8CI"
+            ), // + digest (slot 6, expires empty)
+            (
+                Challenge(
+                    id: "x",
+                    realm: realm,
+                    method: method,
+                    intent: .charge,
+                    request: req,
+                    opaque: EncodedJSON("T3Bx")
+                ),
+                "VlW7gvFwGn1-zG62rqhzPdJEoiWE1VOxJSHKXtNlVMQ"
+            ), // + opaque
+            (
+                Challenge(id: "x", realm: realm, method: method, intent: .session, request: req),
+                "wdVGhT3h1woD3_D22rVvTAD4bxcwU40ZO5FI7_WoLcs"
+            ), // different intent
+        ]
+        for (challenge, expected) in cases {
+            #expect(signer.computeID(for: challenge) == expected)
+        }
     }
 
     @Test("the id is unpadded base64url")
@@ -84,21 +133,5 @@ struct ChallengeSignerTests {
     func rejectsMalformedID() throws {
         let bad = try draft(id: "not valid base64url!!")
         #expect(!signer().verify(bad))
-    }
-
-    @Test("binds every optional slot: adding expires changes the id and re-verifies")
-    func bindsOptionalSlots() throws {
-        let signer = signer()
-        let base = try sign(draft(), with: signer)
-        let withExpires = try sign(
-            Challenge(
-                id: "x", realm: "api.example.com", method: MethodName("tempo"),
-                intent: .charge, request: EncodedJSON("e30"),
-                expires: Expires("2026-01-01T00:00:00Z")
-            ),
-            with: signer
-        )
-        #expect(base.id != withExpires.id)
-        #expect(signer.verify(withExpires))
     }
 }
