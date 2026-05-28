@@ -4,10 +4,13 @@ import Testing
 
 // Spec: draft-payment-intent-charge-00 — request/credential are base64url,
 // no padding (RFC 4648 §5). Reference comparison:
-//   mppx  Base64.fromString(json, { pad: false, url: true })
-//   mpp-rs base64url_encode/decode (URL_SAFE_NO_PAD)
-// Verdict (G3.5): both unpadded base64url; we match, and decode strictly
-// (reject standard-base64 chars and padding).
+//   mppx   delegates to ox's Base64 (`{ pad: false, url: true }`) — no dedicated
+//          base64url test to port.
+//   mpp-rs delegates to the `base64` crate (URL_SAFE_NO_PAD) — likewise.
+// Since both refs delegate base64url to a library, there is no ref grammar test
+// to port; RFC 4648 §5 is the authoritative vector source, tested directly here.
+// Verdict (G3.5): both are unpadded base64url; we match, and decode strictly
+// (reject standard-base64 chars and padding, as URL_SAFE_NO_PAD does).
 @Suite("Base64URL")
 struct Base64URLTests {
     @Test("matches RFC 4648 test vectors, unpadded")
@@ -38,12 +41,20 @@ struct Base64URLTests {
         #expect(!encoded.contains("/"))
     }
 
-    @Test("round-trips arbitrary bytes")
+    @Test("round-trips bytes across all lengths and byte values, deterministically")
     func roundTrips() throws {
+        // Deterministic byte pattern (no system randomness — see the no-flaky
+        // contract). The multiplier walks every residue mod 256, so over the
+        // length range every byte value is exercised.
         for length in 0 ... 64 {
-            let data = Data((0 ..< length).map { _ in UInt8.random(in: 0 ... 255) })
+            let data = Data((0 ..< length).map { UInt8(($0 &* 131 &+ 17) & 0xFF) })
             let decoded = try Base64URL.decode(Base64URL.encode(data))
             #expect(decoded == data)
+        }
+        // Exhaustive single-byte coverage (all 256 values).
+        for byte in UInt8.min ... UInt8.max {
+            let data = Data([byte])
+            #expect(try Base64URL.decode(Base64URL.encode(data)) == data)
         }
     }
 
