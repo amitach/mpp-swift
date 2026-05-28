@@ -10,4 +10,4 @@
 --trimwhitespace always
 # trailingCommas is owned by swiftlint (mandatory_comma); docComments is too
 # aggressive for file-header comments. Disable both here to avoid tool conflicts.
---disable redundantReturn,trailingCommas,docComments
+--disable redundantReturn,trailingCommas,docComments,wrapMultilineStatementBraces

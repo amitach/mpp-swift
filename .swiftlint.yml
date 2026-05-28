@@ -29,7 +29,6 @@ opt_in_rules:
   - redundant_nil_coalescing
   - closure_spacing
   - operator_usage_whitespace
-  - unused_import
 
 # Force unwrapping is banned in library code (use guard/throw).
 force_unwrapping:
