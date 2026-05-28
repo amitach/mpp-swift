@@ -1,0 +1,44 @@
+# SwiftLint configuration for mpp-swift.
+# File-size discipline is intentional: one type per file, split before a file sprawls.
+
+# Trailing commas in multiline collections are idiomatic and reduce diff noise; require them.
+trailing_comma:
+  mandatory_comma: true
+
+file_length:
+  warning: 400
+  error: 600
+type_body_length:
+  warning: 250
+  error: 400
+function_body_length:
+  warning: 50
+  error: 100
+line_length:
+  warning: 100
+  error: 140
+  ignores_comments: true
+  ignores_urls: true
+
+opt_in_rules:
+  - force_unwrapping
+  - empty_count
+  - explicit_init
+  - first_where
+  - sorted_first_last
+  - redundant_nil_coalescing
+  - closure_spacing
+  - operator_usage_whitespace
+  - unused_import
+
+# Force unwrapping is banned in library code (use guard/throw).
+force_unwrapping:
+  severity: error
+force_try:
+  severity: error
+force_cast:
+  severity: error
+
+excluded:
+  - .build
+  - Tests/MPPVectorsTests/Fixtures

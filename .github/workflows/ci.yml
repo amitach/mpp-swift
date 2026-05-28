@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS (Swift 6)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+      - name: Flaky-hunter (repeated, randomized order)
+        run: |
+          for i in 1 2 3 4 5; do
+            echo "::group::iteration $i"
+            swift test --parallel || exit 1
+            echo "::endgroup::"
+          done
+
+  linux:
+    name: Linux (Swift 6)
+    runs-on: ubuntu-latest
+    container: swift:6.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+
+  lint:
+    name: Lint
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: SwiftFormat (lint mode)
+        run: |
+          brew install swiftformat
+          swiftformat --lint .
+      - name: SwiftLint
+        run: |
+          brew install swiftlint
+          swiftlint --strict

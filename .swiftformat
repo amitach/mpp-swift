@@ -1,0 +1,12 @@
+# swiftformat configuration for mpp-swift
+--swiftversion 6.0
+--indent 4
+--maxwidth 100
+--wraparguments before-first
+--wrapparameters before-first
+--wrapcollections before-first
+--self remove
+--importgrouping testable-bottom
+--commas inline
+--trimwhitespace always
+--disable redundantReturn
