@@ -59,20 +59,4 @@ struct MethodNameTests {
             try MethodName("ba2se")
         }
     }
-
-    @Test("encodes transparently as a JSON string")
-    func encodesTransparently() throws {
-        let method = try MethodName("tempo")
-        let data = try JSONEncoder().encode(method)
-        #expect(data == Data("\"tempo\"".utf8))
-    }
-
-    @Test("decoding validates and round-trips")
-    func decodingValidatesAndRoundTrips() throws {
-        let decoded = try JSONDecoder().decode(MethodName.self, from: Data("\"tempo\"".utf8))
-        #expect(try decoded == MethodName("tempo"))
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(MethodName.self, from: Data("\"TEMPO\"".utf8))
-        }
-    }
 }

@@ -28,15 +28,6 @@ public struct MethodName: Sendable, Hashable {
         self.rawValue = rawValue
     }
 
-    /// Creates a method name without validation.
-    ///
-    /// For compile-time-known-valid identifiers defined within the package
-    /// (for example a rail module declaring its own method constant). The
-    /// caller is responsible for conformance to `1*LOWERALPHA`.
-    package init(unchecked rawValue: String) {
-        self.rawValue = rawValue
-    }
-
     /// A reason a candidate value is not a valid ``MethodName``.
     public enum ValidationError: Error, Sendable, Hashable {
         /// The value had no characters; at least one is required.

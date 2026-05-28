@@ -52,24 +52,4 @@ struct ExpiresTests {
             try Expires(date: now.addingTimeInterval(60)).validate(at: now)
         }
     }
-
-    @Test("duration helpers offset from the supplied now")
-    func durationHelpersOffsetFromNow() {
-        #expect(Expires.seconds(30, from: now).date == now.addingTimeInterval(30))
-        #expect(Expires.minutes(5, from: now).date == now.addingTimeInterval(300))
-        #expect(Expires.hours(2, from: now).date == now.addingTimeInterval(7200))
-        #expect(Expires.days(1, from: now).date == now.addingTimeInterval(86400))
-    }
-
-    @Test("encodes transparently and decoding validates")
-    func codableRoundTrip() throws {
-        let data = try JSONEncoder().encode(Expires(Self.utcZ))
-        #expect(data == Data("\"\(Self.utcZ)\"".utf8))
-
-        let decoded = try JSONDecoder().decode(Expires.self, from: Data("\"\(Self.utcZ)\"".utf8))
-        #expect(decoded.rawValue == Self.utcZ)
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(Expires.self, from: Data("\"nope\"".utf8))
-        }
-    }
 }

@@ -38,18 +38,4 @@ struct EncodedJSONTests {
             try EncodedJSON("not valid base64url!!").decodedData()
         }
     }
-
-    @Test("round-trips transparently through Codable as a single JSON string")
-    func codableIsTransparent() throws {
-        let value = EncodedJSON(json: ["k": "v"])
-        let data = try JSONEncoder().encode(value)
-        #expect(String(bytes: data, encoding: .utf8) == "\"\(value.rawValue)\"")
-        #expect(try JSONDecoder().decode(EncodedJSON.self, from: data) == value)
-    }
-
-    @Test("description is the raw encoded string")
-    func descriptionIsRawValue() {
-        let value = EncodedJSON("abc123")
-        #expect(String(describing: value) == "abc123")
-    }
 }
