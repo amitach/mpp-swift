@@ -8,7 +8,7 @@ import MPPCore
 ///
 /// The pipeline runs in order: parse the credential; confirm its echoed challenge
 /// is one this server signed (HMAC, via ``ChallengeSigner``); confirm the
-/// challenge's realm/method/intent match the route's ``ExpectedBinding``; confirm
+/// challenge's realm/method/intent match the route's ``RouteBinding``; confirm
 /// it has not expired; confirm the request body matches the challenge digest
 /// (when the challenge carries one); and finally consume the challenge id exactly
 /// once (``ReplayStore``).
@@ -41,7 +41,7 @@ public struct PaymentVerifier: Sendable {
         authorization: String,
         body: Data,
         now: Date,
-        expecting: ExpectedBinding
+        expecting: RouteBinding
     ) async -> Outcome {
         guard let credential = try? Credential(headerValue: authorization) else {
             return .rejected(.malformedCredential)
@@ -70,30 +70,6 @@ public struct PaymentVerifier: Sendable {
         guard await replayStore.consume(challenge.id) else { return .rejected(.replayed) }
 
         return .verified(MPPVerified(credential: credential))
-    }
-
-    /// The `(realm, method, intent)` a route requires, which a credential's
-    /// echoed challenge must match. These are the protocol-identity slots of the
-    /// challenge-id binding; the method-specific `request` is checked by the
-    /// payment method, not here.
-    public struct ExpectedBinding: Sendable, Hashable {
-        /// The protection space (RFC 9110 realm) this route charges under.
-        public let realm: String
-        /// The payment method this route accepts.
-        public let method: MethodName
-        /// The payment intent this route requires.
-        public let intent: IntentName
-
-        /// Creates the binding a route requires a credential's challenge to match.
-        public init(realm: String, method: MethodName, intent: IntentName) {
-            self.realm = realm
-            self.method = method
-            self.intent = intent
-        }
-
-        func matches(_ challenge: Challenge) -> Bool {
-            challenge.realm == realm && challenge.method == method && challenge.intent == intent
-        }
     }
 
     /// The result of verifying a credential.
