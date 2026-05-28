@@ -4,11 +4,8 @@ import Testing
 
 // Spec: draft-httpauth-payment-00 §5.1.1 + Appendix A
 //   payment-method-id = 1*LOWERALPHA ; LOWERALPHA = %x61-7A (a-z)
-// Reference comparison:
-//   mppx  src/Challenge.ts:31  -> method: z.string()      (no validation)
-//   mpp-rs src/protocol/core/types.rs:38 -> normalizes to lowercase (does not reject)
-// Verdict (G3.5): no convincing justification for the ref deviations; spec wins.
-// We validate strictly and reject non-conforming input.
+// We validate strictly and reject non-conforming input (uppercase, digits,
+// hyphens, non-ASCII, empty) per the grammar, rather than normalizing it.
 @Suite("MethodName")
 struct MethodNameTests {
     @Test("accepts a lowercase-ASCII identifier (spec 1*LOWERALPHA)")
@@ -26,7 +23,6 @@ struct MethodNameTests {
     }
 
     // Spec: uppercase violates the lowercase requirement and is rejected.
-    // This is where we diverge deliberately from mpp-rs, which would lowercase.
     @Test("rejects uppercase rather than normalizing it")
     func rejectsUppercase() {
         #expect(throws: MethodName.ValidationError.self) {
@@ -64,7 +60,7 @@ struct MethodNameTests {
         }
     }
 
-    @Test("encodes transparently as a JSON string (mpp-rs serde-transparent parity)")
+    @Test("encodes transparently as a JSON string")
     func encodesTransparently() throws {
         let method = try MethodName("tempo")
         let data = try JSONEncoder().encode(method)

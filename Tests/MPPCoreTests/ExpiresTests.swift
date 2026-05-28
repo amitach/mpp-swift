@@ -3,11 +3,8 @@ import Testing
 @testable import MPPCore
 
 // Spec: draft-httpauth-payment-00 §5.1 — `expires` is an RFC 3339 date-time.
-// Reference comparison:
-//   mppx  src/Expires.ts:23   -> assert(...) reads `new Date()` internally
-//   mpp-rs src/expires.rs:84  -> compares against `OffsetDateTime::now_utc()`
-// Verdict (G3.5): both read the system clock inside the check, which is
-// untestable/flaky. We take an explicit `now` instead (anti-flakiness rule #1).
+// Expiry checks take an explicit `now` rather than reading the system clock,
+// so the check is deterministic (anti-flakiness rule #1).
 // All time-dependent tests use fixed instants; none read the system clock.
 @Suite("Expires")
 struct ExpiresTests {

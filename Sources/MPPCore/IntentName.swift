@@ -8,8 +8,8 @@
 ///
 /// Unlike ``MethodName``, the spec does **not** require intent values to be
 /// lowercase, so case is preserved exactly. This is intentionally different
-/// from `mpp-rs`, which lowercases the intent on creation (`types.rs:107`) and
-/// would corrupt a spec-legal mixed-case token; comparison is case-sensitive,
+/// case-normalization, which would corrupt a spec-legal mixed-case token;
+/// comparison is case-sensitive,
 /// matching the registered (lowercase) intent names.
 public struct IntentName: Sendable, Hashable {
     /// The validated identifier, guaranteed to match `1*( ALPHA / DIGIT / "-" )`.
@@ -64,29 +64,5 @@ public extension IntentName {
     static let subscription = IntentName(unchecked: "subscription")
 }
 
-extension IntentName: CustomStringConvertible {
-    public var description: String {
-        rawValue
-    }
-}
-
-extension IntentName: Codable {
-    public init(from decoder: any Decoder) throws {
-        let rawValue = try decoder.singleValueContainer().decode(String.self)
-        do {
-            self = try IntentName(rawValue)
-        } catch {
-            throw DecodingError.dataCorrupted(
-                .init(
-                    codingPath: decoder.codingPath,
-                    debugDescription: "Invalid intent name \"\(rawValue)\": \(error)"
-                )
-            )
-        }
-    }
-
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(rawValue)
-    }
-}
+// Transparent Codable + description come from RawStringValidated.
+extension IntentName: RawStringValidated {}

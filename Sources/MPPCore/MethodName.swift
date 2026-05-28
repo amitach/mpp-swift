@@ -8,10 +8,8 @@
 /// the wire grammar.
 ///
 /// Construction is validating and strict: non-conforming input (uppercase,
-/// digits, hyphens, or empty) is rejected rather than normalized. This is
-/// intentionally stricter than the reference SDKs — `mppx` performs no
-/// validation and `mpp-rs` silently lowercases — matching the spec's
-/// requirement that non-conforming input be rejected.
+/// digits, hyphens, or empty) is rejected rather than normalized, matching the
+/// spec's requirement that non-conforming input be rejected.
 public struct MethodName: Sendable, Hashable {
     /// The validated identifier, guaranteed to match `1*LOWERALPHA`.
     public let rawValue: String
@@ -48,29 +46,5 @@ public struct MethodName: Sendable, Hashable {
     }
 }
 
-extension MethodName: CustomStringConvertible {
-    public var description: String {
-        rawValue
-    }
-}
-
-extension MethodName: Codable {
-    public init(from decoder: any Decoder) throws {
-        let rawValue = try decoder.singleValueContainer().decode(String.self)
-        do {
-            self = try MethodName(rawValue)
-        } catch {
-            throw DecodingError.dataCorrupted(
-                .init(
-                    codingPath: decoder.codingPath,
-                    debugDescription: "Invalid method name \"\(rawValue)\": \(error)"
-                )
-            )
-        }
-    }
-
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(rawValue)
-    }
-}
+// Transparent Codable + description come from RawStringValidated.
+extension MethodName: RawStringValidated {}

@@ -3,9 +3,7 @@ import Testing
 
 // Spec: RFC 8785 (JSON Canonicalization Scheme), used for the base64url `request`
 // parameter (draft-payment-intent-charge-00: "serialized using JCS").
-// Reference comparison: both refs delegate JCS to a library — mppx to ox's
-// Json.canonicalize, mpp-rs to the serde_json_canonicalizer crate — so there is
-// no ref code to port; RFC 8785 is authoritative. MPP request JSON is
+// RFC 8785 is authoritative. MPP request JSON is
 // integer-only (amounts are strings), so the float-serialization rule is not
 // exercised; numbers are modelled as integers, structurally excluding floats.
 @Suite("JSONValue canonicalization (RFC 8785)")

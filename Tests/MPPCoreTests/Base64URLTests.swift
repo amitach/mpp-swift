@@ -3,14 +3,9 @@ import Testing
 @testable import MPPCore
 
 // Spec: draft-payment-intent-charge-00 — request/credential are base64url,
-// no padding (RFC 4648 §5). Reference comparison:
-//   mppx   delegates to ox's Base64 (`{ pad: false, url: true }`) — no dedicated
-//          base64url test to port.
-//   mpp-rs delegates to the `base64` crate (URL_SAFE_NO_PAD) — likewise.
-// Since both refs delegate base64url to a library, there is no ref grammar test
-// to port; RFC 4648 §5 is the authoritative vector source, tested directly here.
-// Verdict (G3.5): both are unpadded base64url; we match, and decode strictly
-// (reject standard-base64 chars and padding, as URL_SAFE_NO_PAD does).
+// no padding (RFC 4648 §5). RFC 4648 §5 is the authoritative vector source,
+// tested directly here. Decoding is strict: standard-base64 characters and
+// padding are rejected.
 @Suite("Base64URL")
 struct Base64URLTests {
     @Test("matches RFC 4648 test vectors, unpadded")

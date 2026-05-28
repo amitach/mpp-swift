@@ -8,9 +8,8 @@
 /// be represented, so ``canonicalized()`` cannot silently mis-serialize one.
 ///
 /// ``canonicalized()`` produces the RFC 8785 (JSON Canonicalization Scheme)
-/// form used for the base64url-encoded `request` parameter. Both reference SDKs
-/// delegate JCS to a library (mppx to `ox`, mpp-rs to `serde_json_canonicalizer`),
-/// so RFC 8785 is the authoritative reference; this implements the subset the
+/// form used for the base64url-encoded `request` parameter. RFC 8785 is the
+/// authoritative reference; this implements the subset the
 /// protocol uses, byte-for-byte: object keys sorted by UTF-16 code units, RFC
 /// 8785 string escaping, integers as plain decimals, and no insignificant
 /// whitespace.
