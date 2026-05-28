@@ -127,6 +127,43 @@ public struct Challenge: Sendable, Hashable, Codable {
         return PaymentAuthScheme.formatParameters(parameters)
     }
 
+    /// The canonical string a server's HMAC binds the challenge ``id`` to.
+    ///
+    /// Per `draft-httpauth-payment-00` §5.1.2.1.1, the binding input is seven
+    /// fixed positional slots joined by `|`:
+    /// `realm | method | intent | request | expires | digest | opaque`. The
+    /// `request` and `opaque` slots are their base64url(JCS) wire values
+    /// (``EncodedJSON/rawValue``); absent optionals (`expires`, `digest`,
+    /// `opaque`) contribute an empty slot, never a dropped one. The server then
+    /// computes `id = base64url(HMAC-SHA256(secret, bindingInput))`.
+    ///
+    /// The binding slot order (`expires` then `digest`) is set by §5.1.2.1.1 and
+    /// is deliberately **not** the field/header order (where `digest` precedes
+    /// `expires`, per the §5.1 parameter listing and ``headerValue``). The header
+    /// order is cosmetic (auth-params are unordered, parsed by name); the binding
+    /// order is load-bearing and fixed by the spec. Do not "align" them.
+    /// `description` is also absent here: it is display-only and not bound.
+    ///
+    /// `id` itself is excluded: it is the HMAC output, not an input. The slots
+    /// carry their verbatim wire bytes so the value re-derives identically on the
+    /// server. The positional, fixed-count layout means a `|` inside `realm` is
+    /// harmless: the server recomputes this exact string from the same fields and
+    /// compares HMAC outputs, so determinism (not reversibility) is what matters.
+    ///
+    /// The keyed HMAC lives in the server layer (it needs the secret); this is
+    /// the pure, secret-free construction of its input.
+    public var bindingInput: String {
+        [
+            realm,
+            method.rawValue,
+            intent.rawValue,
+            request.rawValue,
+            expires?.rawValue ?? "",
+            digest ?? "",
+            opaque?.rawValue ?? "",
+        ].joined(separator: "|")
+    }
+
     private static func require(
         _ parameters: [String: String], _ name: String
     ) throws(ParsingError) -> String {
