@@ -15,11 +15,17 @@
 /// 8785 string escaping, integers as plain decimals, and no insignificant
 /// whitespace.
 public indirect enum JSONValue: Sendable, Hashable {
+    /// A JSON object; keys are sorted by UTF-16 code units when canonicalized.
     case object([String: JSONValue])
+    /// A JSON array; element order is preserved.
     case array([JSONValue])
+    /// A JSON string.
     case string(String)
+    /// A JSON integer (MPP request numbers are integers; floats are excluded).
     case integer(Int64)
+    /// A JSON boolean.
     case bool(Bool)
+    /// JSON `null`.
     case null
 
     /// The RFC 8785 canonical JSON serialization of this value.
@@ -47,7 +53,7 @@ public indirect enum JSONValue: Sendable, Hashable {
     /// Escapes a string per RFC 8785 §3.2.2.2: minimal JSON escaping with
     /// lowercase `\u00xx` for the remaining control characters, and every other
     /// character (including non-ASCII) emitted literally.
-    static func escapeString(_ value: String) -> String {
+    private static func escapeString(_ value: String) -> String {
         var result = "\""
         for scalar in value.unicodeScalars {
             switch scalar {
@@ -89,11 +95,8 @@ extension JSONValue: ExpressibleByBooleanLiteral {
     }
 }
 
-extension JSONValue: ExpressibleByNilLiteral {
-    public init(nilLiteral _: ()) {
-        self = .null
-    }
-}
+// Intentionally no ExpressibleByNilLiteral: it would make `nil` ambiguous with
+// Optional<JSONValue>. Use `.null` explicitly.
 
 extension JSONValue: ExpressibleByArrayLiteral {
     public init(arrayLiteral elements: JSONValue...) {
@@ -103,6 +106,8 @@ extension JSONValue: ExpressibleByArrayLiteral {
 
 extension JSONValue: ExpressibleByDictionaryLiteral {
     public init(dictionaryLiteral elements: (String, JSONValue)...) {
-        self = .object(Dictionary(uniqueKeysWithValues: elements))
+        // Last value wins on a duplicate key rather than trapping; a JSON object
+        // should not have duplicate keys, but a crash here would be worse.
+        self = .object(Dictionary(elements, uniquingKeysWith: { _, last in last }))
     }
 }
