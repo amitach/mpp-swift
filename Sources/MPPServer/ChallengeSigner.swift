@@ -21,6 +21,12 @@ public struct ChallengeSigner: Sendable {
     private let secret: Data
 
     /// Creates a signer over raw server-secret bytes.
+    ///
+    /// The secret must be a strong, high-entropy key (at least 32 bytes for
+    /// HMAC-SHA256). This type is a pure HMAC primitive and does not police key
+    /// strength: validating the secret's length and provenance is the job of the
+    /// secret-management layer (the forthcoming `SecretStore`), the same way
+    /// HMAC itself accepts a key of any length per RFC 2104.
     public init(secret: Data) {
         self.secret = secret
     }
