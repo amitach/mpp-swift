@@ -13,6 +13,13 @@ public protocol ReplayStore: Sendable {
     ///   payment); `false` if it was already consumed (a replay: reject). The
     ///   check-and-record is atomic: for concurrent calls with the same `id`,
     ///   exactly one returns `true`.
+    ///
+    /// The method does not throw, on purpose: it must always render a
+    /// accept-or-reject decision. An implementation that cannot determine first
+    /// use (for example a backing store is unavailable) MUST **fail closed** and
+    /// return `false` (reject), never accept a payment it cannot prove is
+    /// un-replayed. A throwing signature would invite a caller to treat a store
+    /// error as a retry/500 and accidentally fail open.
     func consume(_ id: String) async -> Bool
 }
 
