@@ -7,7 +7,7 @@
 /// out of scope for this type, which validates only the wire grammar.
 ///
 /// Unlike ``MethodName``, the spec does **not** require intent values to be
-/// lowercase, so case is preserved exactly. This is intentionally different
+/// lowercase, so case is preserved exactly. This intentionally avoids
 /// case-normalization, which would corrupt a spec-legal mixed-case token;
 /// comparison is case-sensitive,
 /// matching the registered (lowercase) intent names.

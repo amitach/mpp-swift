@@ -8,9 +8,8 @@ import Foundation
 /// because the challenge-id HMAC binds the literal `expires` value; reformatting
 /// it (for example dropping fractional seconds) would break that binding.
 ///
-/// Expiry checks take an explicit `now` rather than reading the system clock, so
-/// callers (and tests) are deterministic, rather than reading `Date.now`
-/// internally.
+/// Expiry checks take an explicit `now` rather than reading `Date.now`
+/// internally, so callers (and tests) are deterministic.
 public struct Expires: Sendable, Hashable {
     /// The RFC 3339 timestamp exactly as received, preserved for binding integrity.
     public let rawValue: String
