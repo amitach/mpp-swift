@@ -16,10 +16,15 @@ public protocol RawStringValidated: Codable, CustomStringConvertible, Sendable, 
 }
 
 public extension RawStringValidated {
+    /// The validated canonical string (``rawValue``).
     var description: String {
         rawValue
     }
 
+    /// Decodes from a single-value string container and re-validates it.
+    ///
+    /// Throws `DecodingError.dataCorrupted` if the decoded string fails the
+    /// conformer's grammar, preserving the underlying validation error.
     init(from decoder: any Decoder) throws {
         let rawValue = try decoder.singleValueContainer().decode(String.self)
         do {
@@ -34,6 +39,7 @@ public extension RawStringValidated {
         }
     }
 
+    /// Encodes as a single string value equal to ``rawValue``.
     func encode(to encoder: any Encoder) throws {
         var container = encoder.singleValueContainer()
         try container.encode(rawValue)
