@@ -54,8 +54,11 @@ jobs:
       - name: No em dashes (repo-wide)
         run: |
           # swiftlint enforces .swift; this covers markdown, configs, everything
-          # tracked. An en dash (U+2013, range separator) is allowed.
-          if git grep -n -P '\x{2014}' -- . ; then
+          # tracked. Fixed-string match (-F) on the literal U+2014 bytes, so it
+          # does not depend on PCRE (-P) support, which could otherwise error and
+          # silently pass. An en dash (U+2013, range separator) is allowed.
+          emdash=$(printf '\xe2\x80\x94')
+          if git grep -nF "$emdash" -- . ; then
             echo "::error::Em dash (U+2014) found. Use a colon, comma, or semicolon."
             exit 1
           fi
