@@ -131,6 +131,9 @@ public struct Challenge: Sendable, Hashable, Codable {
         _ parameters: [String: String], _ name: String
     ) throws(ParsingError) -> String {
         guard let value = parameters[name] else { throw .missingParameter(name) }
+        // A present-but-empty required value does not satisfy the requirement and
+        // would bind an empty slot in the challenge-id HMAC; reject it here.
+        guard !value.isEmpty else { throw .emptyParameter(name) }
         return value
     }
 
@@ -140,6 +143,8 @@ public struct Challenge: Sendable, Hashable, Codable {
         case header(PaymentAuthScheme.ParseError)
         /// A required parameter was absent.
         case missingParameter(String)
+        /// A required parameter was present but had an empty value.
+        case emptyParameter(String)
         /// The `method` value is not a valid ``MethodName``.
         case invalidMethod(MethodName.ValidationError)
         /// The `intent` value is not a valid ``IntentName``.

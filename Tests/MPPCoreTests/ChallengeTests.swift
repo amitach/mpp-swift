@@ -85,6 +85,17 @@ struct ChallengeTests {
         }
     }
 
+    @Test(
+        "rejects a present-but-empty required parameter",
+        arguments: ["id", "realm", "request"]
+    )
+    func rejectsEmptyRequired(empty: String) {
+        let pairs = required().map { $0.0 == empty ? ($0.0, "") : $0 }
+        #expect(throws: Challenge.ParsingError.emptyParameter(empty)) {
+            try Challenge(headerValue: header(pairs))
+        }
+    }
+
     @Test("rejects an uppercase method (spec requires lowercase)")
     func rejectsInvalidMethod() {
         let value = header([
