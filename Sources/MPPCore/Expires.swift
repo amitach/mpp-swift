@@ -44,6 +44,12 @@ public struct Expires: Sendable, Hashable {
     }
 
     /// Whether the challenge has expired as of `now`.
+    ///
+    /// The expiry instant itself is still valid: the window is `now <= expires`,
+    /// so `now == expires` returns `false` and a challenge is expired only once
+    /// `now` is strictly past `expires`. `draft-httpauth-payment-00` §5.1 is
+    /// silent on the exact instant; this is a deliberate interop choice (the
+    /// boundary semantics are verified identical across both reference SDKs).
     public func isExpired(at now: Date) -> Bool {
         date < now
     }
