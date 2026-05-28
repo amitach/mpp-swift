@@ -38,11 +38,17 @@ public struct PaymentRange: Sendable, Hashable {
     public let quality: Double
 
     /// Creates a payment range.
+    ///
+    /// - Throws: ``ValidationError/qualityOutOfRange(_:)`` if `quality` is not a
+    ///   finite value in `0...1`, so a range can never format to an invalid `q`.
     public init(
         method: Wildcard<MethodName>,
         intent: Wildcard<IntentName>,
         quality: Double = 1
-    ) {
+    ) throws(ValidationError) {
+        guard quality.isFinite, (0 ... 1).contains(quality) else {
+            throw .qualityOutOfRange(quality)
+        }
         self.method = method
         self.intent = intent
         self.quality = quality
@@ -52,6 +58,12 @@ public struct PaymentRange: Sendable, Hashable {
     /// (wildcards match anything). Does not consider the quality weight.
     public func matches(method: MethodName, intent: IntentName) -> Bool {
         self.method.matches(method) && self.intent.matches(intent)
+    }
+
+    /// A reason a ``PaymentRange`` could not be constructed.
+    public enum ValidationError: Error, Sendable, Hashable {
+        /// The quality weight was not a finite value in `0...1`.
+        case qualityOutOfRange(Double)
     }
 }
 
@@ -97,7 +109,13 @@ public enum AcceptPayment {
         let intent = try parseIntent(String(slash[1]).trimmingCharacters(in: .whitespaces))
 
         let quality = try parseQuality(Array(parts.dropFirst()))
-        return PaymentRange(method: method, intent: intent, quality: quality)
+        // A grammar-valid qvalue is always in 0...1, so this init never throws on
+        // the parse path; map defensively to keep the typed throws coherent.
+        do {
+            return try PaymentRange(method: method, intent: intent, quality: quality)
+        } catch {
+            throw .invalidQuality(String(quality))
+        }
     }
 
     private static func parseMethod(_ value: String) throws(ParseError) -> Wildcard<MethodName> {
@@ -126,20 +144,27 @@ public enum AcceptPayment {
         let param = first.trimmingCharacters(in: .whitespaces)
         guard param.lowercased().hasPrefix("q=") else { throw .malformedToken(param) }
         let raw = String(param.dropFirst(2))
-        guard isQValue(raw), let value = Double(raw) else { throw .invalidQuality(raw) }
+        guard isQValue(raw) else { throw .invalidQuality(raw) }
+        // A grammar-valid qvalue is in 0...1 by construction, so the range is not
+        // re-checked here. Normalize a bare trailing dot ("0." / "1.") so `Double`
+        // can parse it.
+        let numeric = raw.hasSuffix(".") ? String(raw.dropLast()) : raw
+        guard let value = Double(numeric) else { throw .invalidQuality(raw) }
         return value
     }
 
     /// Whether `raw` is an RFC 9110 §12.4.2 `qvalue`:
     /// `( "0" [ "." 0*3DIGIT ] ) / ( "1" [ "." 0*3("0") ] )`. Stricter than
-    /// `Double`, which would admit hex, scientific, signed, and >3-decimal forms.
+    /// `Double`, which would admit hex, scientific, signed, and >3-decimal forms;
+    /// a bare trailing dot ("0." / "1.") is allowed, as the ABNF's `0*3` permits
+    /// zero fractional digits.
     private static func isQValue(_ raw: String) -> Bool {
         guard let lead = raw.first, lead == "0" || lead == "1" else { return false }
         let rest = raw.dropFirst()
         if rest.isEmpty { return true } // "0" or "1"
-        guard rest.first == ".", rest.count <= 4 else { return false } // "." + 0*3
+        guard rest.first == "." else { return false } // a fractional part must follow
         let fraction = rest.dropFirst()
-        guard !fraction.isEmpty else { return false }
+        guard fraction.count <= 3 else { return false } // 0*3 (empty allowed: "0." / "1.")
         return lead == "0"
             ? fraction.unicodeScalars.allSatisfy { (0x30 ... 0x39).contains($0.value) }
             : fraction.allSatisfy { $0 == "0" }

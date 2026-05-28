@@ -54,16 +54,16 @@ struct AcceptPaymentTests {
         let stripe = try MethodName("stripe")
         let solana = try MethodName("solana")
 
-        let tempoAny = PaymentRange(method: .value(tempo), intent: .any)
+        let tempoAny = try PaymentRange(method: .value(tempo), intent: .any)
         #expect(tempoAny.matches(method: tempo, intent: .charge))
         #expect(tempoAny.matches(method: tempo, intent: .session))
         #expect(!tempoAny.matches(method: stripe, intent: .charge))
 
-        let anySession = PaymentRange(method: .any, intent: .value(.session))
+        let anySession = try PaymentRange(method: .any, intent: .value(.session))
         #expect(anySession.matches(method: solana, intent: .session))
         #expect(!anySession.matches(method: solana, intent: .charge))
 
-        let exact = PaymentRange(method: .value(tempo), intent: .value(.charge))
+        let exact = try PaymentRange(method: .value(tempo), intent: .value(.charge))
         #expect(exact.matches(method: tempo, intent: .charge))
         #expect(!exact.matches(method: tempo, intent: .session))
     }
@@ -136,16 +136,30 @@ struct AcceptPaymentTests {
         }
     }
 
-    @Test("accepts the qvalue boundary forms (0, 1, 1.000, three decimals)")
+    @Test("accepts the qvalue boundary forms, including a bare trailing dot")
     func acceptsQValueBoundaries() throws {
         let zero = try AcceptPayment.parse("a/charge;q=0")
         let one = try AcceptPayment.parse("a/charge;q=1")
         let oneThousandths = try AcceptPayment.parse("a/charge;q=1.000")
         let threeDecimals = try AcceptPayment.parse("a/charge;q=0.999")
+        let zeroDot = try AcceptPayment.parse("a/charge;q=0.") // ABNF 0*3 permits no digits
+        let oneDot = try AcceptPayment.parse("a/charge;q=1.")
         #expect(zero[0].quality == 0)
         #expect(one[0].quality == 1)
         #expect(oneThousandths[0].quality == 1)
         #expect(threeDecimals[0].quality == 0.999)
+        #expect(zeroDot[0].quality == 0)
+        #expect(oneDot[0].quality == 1)
+    }
+
+    @Test(
+        "the initializer rejects a quality weight outside 0...1 or non-finite",
+        arguments: [1.5, -0.1, Double.nan, Double.infinity]
+    )
+    func initRejectsOutOfRangeQuality(quality: Double) {
+        #expect(throws: PaymentRange.ValidationError.self) {
+            try PaymentRange(method: .any, intent: .any, quality: quality)
+        }
     }
 
     @Test(
