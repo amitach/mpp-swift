@@ -87,7 +87,10 @@ struct ChallengeTests {
 
     @Test(
         "rejects a present-but-empty required parameter",
-        arguments: ["id", "realm", "request"]
+        // method/intent take this path too: the require guard fires before
+        // MethodName/IntentName validation, so an empty value is reported as
+        // .emptyParameter, not .invalidMethod/.invalidIntent.
+        arguments: ["id", "realm", "method", "intent", "request"]
     )
     func rejectsEmptyRequired(empty: String) {
         let pairs = required().map { $0.0 == empty ? ($0.0, "") : $0 }
