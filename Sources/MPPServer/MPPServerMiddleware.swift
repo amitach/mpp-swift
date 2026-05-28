@@ -126,7 +126,8 @@ public struct MPPServerMiddleware: Sendable {
 
     /// Runs the route over `apple/swift-http-types` values: reads the credential
     /// and body, evaluates, and either answers `402`/`413` or runs `handler` and
-    /// decorates its response with `Cache-Control: private`.
+    /// applies `Cache-Control: private` to its response unless the handler already
+    /// set a directive (a stricter handler choice such as `no-store` is kept).
     public func handle(
         _ request: HTTPRequest,
         body: Data,
@@ -141,7 +142,12 @@ public struct MPPServerMiddleware: Sendable {
             return Self.paymentRequiredResponse(challenge: challenge, problem: problem)
         case .proceed(let verified):
             var (response, responseBody) = handler(request, verified)
-            response.headerFields[.cacheControl] = "private"
+            // `private` is the §11.10 floor for a paid response, but never weaken a
+            // directive the handler chose (e.g. a one-shot body marked `no-store`):
+            // only set it when the handler left Cache-Control absent.
+            if response.headerFields[.cacheControl] == nil {
+                response.headerFields[.cacheControl] = "private"
+            }
             return (response, responseBody)
         }
     }
@@ -195,7 +201,9 @@ public struct MPPServerMiddleware: Sendable {
             return make("verification-failed", "Verification Failed",
                         "The request body did not match the challenge digest.")
         case .rejection(.replayed):
-            return make("verification-failed", "Verification Failed",
+            // §8.2 / §4.2: an already-used challenge id is an `invalid-challenge`
+            // ("unknown, expired, or already used"), not a proof failure.
+            return make("invalid-challenge", "Invalid Challenge",
                         "The challenge has already been used.")
         }
     }

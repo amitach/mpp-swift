@@ -39,7 +39,8 @@ public struct ChallengeMinter: Sendable {
         opaque: EncodedJSON? = nil
     ) -> Challenge {
         // The id is an HMAC over bindingInput, which excludes the id itself, so a
-        // draft with an empty id computes the same code as the finished challenge.
+        // draft with an empty id computes the same code as the finished challenge;
+        // stamp the computed id back onto the draft (see `Challenge.withID`).
         let draft = Challenge(
             id: "",
             realm: binding.realm,
@@ -51,16 +52,6 @@ public struct ChallengeMinter: Sendable {
             description: description,
             opaque: opaque
         )
-        return Challenge(
-            id: signer.computeID(for: draft),
-            realm: binding.realm,
-            method: binding.method,
-            intent: binding.intent,
-            request: request,
-            digest: digest,
-            expires: expires,
-            description: description,
-            opaque: opaque
-        )
+        return draft.withID(signer.computeID(for: draft))
     }
 }

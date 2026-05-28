@@ -56,6 +56,25 @@ public struct Challenge: Sendable, Hashable, Codable {
         self.opaque = opaque
     }
 
+    /// A copy of this challenge with `id` replaced.
+    ///
+    /// Minting computes `id = base64url(HMAC-SHA256(secret, bindingInput))` from a
+    /// draft, and `id` is not part of ``bindingInput``, so stamping the computed id
+    /// onto the draft yields the finished challenge without re-listing every field.
+    public func withID(_ id: String) -> Challenge {
+        Challenge(
+            id: id,
+            realm: realm,
+            method: method,
+            intent: intent,
+            request: request,
+            digest: digest,
+            expires: expires,
+            description: description,
+            opaque: opaque
+        )
+    }
+
     /// Parses a challenge from a `WWW-Authenticate` header value.
     ///
     /// - Parameter headerValue: The full header value, which may contain other

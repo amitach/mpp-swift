@@ -64,6 +64,18 @@ struct ChallengeMinterTests {
             expires: try Expires("2027-01-01T00:00:00Z")
         )
         #expect(withExpiry.id != base.id)
+        // Adding a digest (a bound optional slot) must yield a different id.
+        let withDigest = minter.mint(
+            binding: route, request: EncodedJSON("e30"), digest: "sha-256=:abc:"
+        )
+        #expect(withDigest.id != base.id)
+        #expect(makeSigner().verify(withDigest))
+        // Adding opaque (a bound optional slot) must yield a different id.
+        let withOpaque = minter.mint(
+            binding: route, request: EncodedJSON("e30"), opaque: EncodedJSON("eyJrIjoxfQ")
+        )
+        #expect(withOpaque.id != base.id)
+        #expect(makeSigner().verify(withOpaque))
         // A different realm/method/intent must yield a different id.
         let otherRoute = try RouteBinding(
             realm: "other.example.com", method: MethodName("tempo"), intent: .charge

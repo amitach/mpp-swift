@@ -36,9 +36,33 @@ struct MPPServerMiddlewareTests {
 
     /// An `Authorization: Payment` value whose challenge is minted for the route.
     private func paidHeader() throws -> String {
-        let challenge = ChallengeMinter(signer: ChallengeSigner(secret: secret))
-            .mint(binding: try makeBinding(), request: EncodedJSON("e30"))
+        try headerFor()
+    }
+
+    /// A credential header minted with overridable secret/binding/expiry/digest,
+    /// to drive each `PaymentVerifier.Rejection` through the middleware.
+    private func headerFor(
+        signedWith customSecret: Data? = nil,
+        binding customBinding: RouteBinding? = nil,
+        expires: Expires? = nil,
+        digest: String? = nil
+    ) throws -> String {
+        let signer = ChallengeSigner(secret: customSecret ?? secret)
+        let route = try customBinding ?? makeBinding()
+        let challenge = ChallengeMinter(signer: signer).mint(
+            binding: route, request: EncodedJSON("e30"), digest: digest, expires: expires
+        )
         return try Credential(challenge: challenge, payload: ["proof": "0xabc"]).headerValue
+    }
+
+    /// Drives `header` through `evaluate` and returns the resulting 402 problem type.
+    private func rejectionProblemType(
+        _ header: String, body: Data = Data()
+    ) async throws -> String? {
+        let decision = try await makeMiddleware().evaluate(
+            authorization: header, body: body, now: now
+        )
+        return challengeOf(decision)?.1.type
     }
 
     private func makeRequest(authorization: String? = nil) -> HTTPRequest {
@@ -135,7 +159,7 @@ struct MPPServerMiddlewareTests {
         #expect(lastEventName(box) == "paymentRejected")
     }
 
-    @Test("a replayed credential is rejected on its second use")
+    @Test("a replayed credential is rejected as invalid-challenge on its second use")
     func replayRejected() async throws {
         let middleware = try makeMiddleware(store: InMemoryReplayStore())
         let header = try paidHeader()
@@ -143,7 +167,34 @@ struct MPPServerMiddlewareTests {
         #expect(isProceed(first))
         let second = await middleware.evaluate(authorization: header, body: Data(), now: now)
         let (_, problem) = try #require(challengeOf(second))
+        #expect(problem.type == "https://paymentauth.org/problems/invalid-challenge")
         #expect(problem.detail == "The challenge has already been used.")
+    }
+
+    @Test("each rejection maps to its spec problem type at the middleware layer")
+    func rejectionProblemTypes() async throws {
+        // A credential signed by a different secret fails the HMAC check.
+        let forged = try headerFor(signedWith: Data("a-totally-different-secret-000".utf8))
+        #expect(try await rejectionProblemType(forged)
+            == "https://paymentauth.org/problems/invalid-challenge")
+
+        // A validly signed credential minted for a different route (binding mismatch).
+        let otherRoute = try RouteBinding(
+            realm: "other.example.com", method: MethodName("tempo"), intent: .charge
+        )
+        let wrongRoute = try headerFor(binding: otherRoute)
+        #expect(try await rejectionProblemType(wrongRoute)
+            == "https://paymentauth.org/problems/verification-failed")
+
+        // An expired challenge.
+        let expired = try headerFor(expires: Expires("2020-01-01T00:00:00Z"))
+        #expect(try await rejectionProblemType(expired)
+            == "https://paymentauth.org/problems/payment-expired")
+
+        // A challenge that binds a digest the request body does not satisfy.
+        let badDigest = try headerFor(digest: "sha-256=:bm90LXRoZS1yaWdodC1ib2R5LWRpZ2VzdA==:")
+        #expect(try await rejectionProblemType(badDigest, body: Data("hello".utf8))
+            == "https://paymentauth.org/problems/verification-failed")
     }
 
     // MARK: - handle (swift-http-types binding)
@@ -180,6 +231,42 @@ struct MPPServerMiddlewareTests {
         #expect(response.status.code == 413)
         #expect(response.headerFields[.cacheControl] == "no-store")
         #expect(!handlerRan)
+    }
+
+    @Test("a rejected credential answers 402 through handle with WWW-Authenticate + no-store")
+    func http402OnRejection() async throws {
+        let middleware = try makeMiddleware()
+        let request = makeRequest(authorization: "Bearer not-a-payment")
+        let (response, body) = await middleware.handle(request, body: Data(), now: now) { _, _ in
+            (HTTPResponse(status: .ok), Data())
+        }
+        #expect(response.status.code == 402)
+        #expect(response.headerFields[.wwwAuthenticate]?.hasPrefix("Payment ") == true)
+        #expect(response.headerFields[.cacheControl] == "no-store")
+        #expect(response.headerFields[.contentType] == "application/problem+json")
+        #expect(!body.isEmpty)
+    }
+
+    @Test("a body of exactly maxBodyBytes is allowed (the cap is inclusive)")
+    func bodyCapBoundary() async throws {
+        let middleware = try makeMiddleware(maxBodyBytes: 16)
+        let decision = await middleware.evaluate(
+            authorization: try paidHeader(), body: Data(count: 16), now: now
+        )
+        #expect(isProceed(decision))
+    }
+
+    @Test("a handler's own stricter Cache-Control survives (not downgraded to private)")
+    func handlerCacheControlPreserved() async throws {
+        let middleware = try makeMiddleware()
+        let request = makeRequest(authorization: try paidHeader())
+        let (response, _) = await middleware.handle(request, body: Data(), now: now) { _, _ in
+            var response = HTTPResponse(status: .ok)
+            response.headerFields[.cacheControl] = "no-store"
+            return (response, Data())
+        }
+        #expect(response.status.code == 200)
+        #expect(response.headerFields[.cacheControl] == "no-store")
     }
 
     @Test("a paid request runs the handler and decorates the 200 with Cache-Control: private")
