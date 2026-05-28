@@ -123,8 +123,9 @@ public struct MPPServerMiddleware: Sendable {
 
     /// Runs the route over `apple/swift-http-types` values: reads the credential
     /// and body, evaluates, and either answers `402`/`413` or runs `handler` and
-    /// applies `Cache-Control: private` to its response unless the handler already
-    /// set a directive (a stricter handler choice such as `no-store` is kept).
+    /// enforces the `Cache-Control: private` floor on its response (§11.10): a
+    /// stricter directive the handler chose (`no-store`, or an explicit `private`)
+    /// is kept; anything weaker or absent becomes `private`.
     public func handle(
         _ request: HTTPRequest,
         body: Data,
@@ -139,10 +140,13 @@ public struct MPPServerMiddleware: Sendable {
             return Self.paymentRequiredResponse(challenge: challenge, problem: problem)
         case let .proceed(verified):
             var (response, responseBody) = await handler(request, verified)
-            // `private` is the §11.10 floor for a paid response, but never weaken a
-            // directive the handler chose (e.g. a one-shot body marked `no-store`):
-            // only set it when the handler left Cache-Control absent.
-            if response.headerFields[.cacheControl] == nil {
+            // §11.10 floor: a paid response must be at least `private`. Keep a
+            // directive that already meets it (the stricter `no-store`, or an
+            // explicit `private`); otherwise enforce `private`, covering an absent
+            // value, a `public`, or a bare `max-age` a handler may have set.
+            let cacheControl = response.headerFields[.cacheControl]
+            let meetsFloor = cacheControl.map { $0.contains("no-store") || $0.contains("private") }
+            if meetsFloor != true {
                 response.headerFields[.cacheControl] = "private"
             }
             return (response, responseBody)

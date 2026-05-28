@@ -282,6 +282,19 @@ struct MPPServerMiddlewareTests {
         #expect(response.headerFields[.cacheControl] == "no-store")
     }
 
+    @Test("a handler's weaker Cache-Control is raised to the private floor")
+    func handlerWeakerCacheControlRaisedToFloor() async throws {
+        let middleware = try makeMiddleware()
+        let request = try makeRequest(authorization: paidHeader())
+        let (response, _) = await middleware.handle(request, body: Data(), now: now) { _, _ in
+            var response = HTTPResponse(status: .ok)
+            response.headerFields[.cacheControl] = "public"
+            return (response, Data())
+        }
+        // `public` would let shared caches store a paid response; §11.10 forbids it.
+        #expect(response.headerFields[.cacheControl] == "private")
+    }
+
     @Test("a paid request runs the handler and decorates the 200 with Cache-Control: private")
     func http200Receipted() async throws {
         let middleware = try makeMiddleware()
