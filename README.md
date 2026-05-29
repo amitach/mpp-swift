@@ -10,7 +10,7 @@ MPP standardizes machine-to-machine payments using a **challenge → credential 
 
 This is the canonical Swift implementation of the protocol. The **client** and **server** are independent: a Swift client can pay any MPP server in any language, and a Swift server can charge any client.
 
-> **Status:** early development. The package is built one module at a time with a strict quality bar (spec-traced tests, cross-SDK conformance, no flaky tests). `MPPCore` (protocol primitives) is the first module; client, server, MCP, discovery, proxy, and the Tempo/Stripe rails follow.
+> **Status:** early development (pre-1.0), built one module at a time with a strict quality bar (spec-traced tests, cross-SDK conformance vs the reference SDKs, no flaky tests). The protocol core, body-digest, server middleware, the 402 client flow, and the EVM message-signing layer (Keccak-256, secp256k1, EIP-712 proof + session voucher) are implemented; the Tempo/Stripe rails, discovery, MCP, proxy, and WebSocket follow. See the module table below.
 
 ## Installation
 
@@ -30,13 +30,16 @@ Then depend on the products you need (you pull only those):
 
 | Product | Status | Purpose |
 |---|---|---|
-| `MPPCore` | in progress | Protocol primitives: Challenge, Credential, Receipt, JCS, Amount, policies |
-| `MPPClient` | planned | The 402 client flow |
-| `MPPServer` | planned | Framework-agnostic server middleware |
-| `MPPMCP` | planned | JSON-RPC / Model Context Protocol binding |
+| `MPPCore` | available | Protocol primitives: Challenge, Credential, JCS, Amount, ProblemDetails, RouteBinding, multi-challenge parsing |
+| `MPPBodyDigest` | available | RFC 9530 `Content-Digest` (SHA-256) |
+| `MPPServer` | available | Framework-agnostic middleware over `swift-http-types`: challenge mint, replay, verify pipeline |
+| `MPPClient` | available | The 402 client flow (send → parse → select → build → retry); concrete transports in progress |
+| `MPPEVM` | available | EVM message-signing: Keccak-256, secp256k1 recoverable signer, EIP-712 zero-amount proof + `did:pkh` source, session voucher |
 | `MPPDiscovery` | planned | OpenAPI `x-payment-info` discovery |
-| `MPPProxy` | planned | 402-protected reverse proxy |
-| `MPPTempo` / `MPPStripe` | planned | Payment rails |
+| `MPPMCP` | planned | JSON-RPC / Model Context Protocol binding |
+| `MPPProxy` / `MPPWebSocket` | planned | 402-protected reverse proxy; WebSocket transport |
+| `MPPTempo` / `MPPStripe` | planned | Payment rails (Tempo charge + channel/voucher settlement, subscription; Stripe) |
+| `MPPVapor` / `MPPHummingbird` | planned | Server framework adapters |
 
 ## Design
 
