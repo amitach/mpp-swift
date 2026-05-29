@@ -10,12 +10,8 @@ import Testing
 // "1"). Fixed inputs: private key 0x..01, chainId 1, challengeId "test-challenge".
 @Suite("EIP712 zero-amount proof")
 struct EIP712ProofTests {
-    private func hex(_ data: Data) -> String {
-        data.map { String(format: "%02x", $0) }.joined()
-    }
-
     private func signer() throws -> Secp256k1Signer {
-        try Secp256k1Signer(privateKey: Data([UInt8](repeating: 0, count: 31) + [1]))
+        try key1Signer()
     }
 
     private let chainId: UInt64 = 1
@@ -113,20 +109,17 @@ struct EIP712ProofTests {
     }
 
     @Test("the two variants produce different signing hashes (version + field differ)")
-    func variantsDiffer() throws {
+    func variantsDiffer() {
         let v2Hash = ZeroAmountProof.v2Realm(challengeId: challengeId, realm: realm)
             .signingHash(chainId: chainId)
-        let wallet =
-            try #require(EthereumAddress(hex: "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf"))
-        let v1Hash = ZeroAmountProof.v1Wallet(challengeId: challengeId, wallet: wallet)
+        let v1Hash = ZeroAmountProof.v1Wallet(challengeId: challengeId, wallet: key1Address)
             .signingHash(chainId: chainId)
         #expect(v1Hash != v2Hash)
     }
 
     @Test("address word is left-padded to 32 bytes; uint256 is big-endian")
-    func wordEncoding() throws {
-        let wallet =
-            try #require(EthereumAddress(hex: "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf"))
+    func wordEncoding() {
+        let wallet = key1Address
         #expect(wallet.word.count == 32)
         #expect(hex(wallet.word) ==
             "0000000000000000000000007e5f4552091a69125d5dfcb7b8c2659029395bdf")

@@ -2,27 +2,6 @@ import Foundation
 import Testing
 @testable import MPPEVM
 
-private func testAddress(_ hex: String) -> EthereumAddress {
-    guard let address = EthereumAddress(hex: hex) else {
-        preconditionFailure("invalid test address \(hex)")
-    }
-    return address
-}
-
-private func hexData(_ hex: String) -> Data {
-    var data = Data()
-    var index = hex.startIndex
-    while index < hex.endIndex {
-        let next = hex.index(index, offsetBy: 2)
-        guard let byte = UInt8(hex[index ..< next], radix: 16) else {
-            preconditionFailure("invalid test hex \(hex)")
-        }
-        data.append(byte)
-        index = next
-    }
-    return data
-}
-
 // Session voucher, pinned byte-for-byte against viem 2.51.3 (hashDomain /
 // hashStruct / hashTypedData / signTypedData). Domain "Tempo Stream Channel" v1
 // with the escrow as verifyingContract; Voucher(bytes32 channelId,uint128
@@ -31,17 +10,13 @@ private func hexData(_ hex: String) -> Data {
 // fixed inputs. Signer = key=1 (address 0x7E5F...Bdf).
 @Suite("Voucher")
 struct VoucherTests {
-    private func hex(_ data: Data) -> String {
-        data.map { String(format: "%02x", $0) }.joined()
-    }
-
     private func signer() throws -> Secp256k1Signer {
-        try Secp256k1Signer(privateKey: Data([UInt8](repeating: 0, count: 31) + [1]))
+        try key1Signer()
     }
 
     private let chainId: UInt64 = 1
     private let escrow = testAddress("0x5FbDB2315678afecb367f032d93F642f64180aa3")
-    private let payer = testAddress("0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf")
+    private let payer = key1Address
     private let payee = testAddress("0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF")
     private let amount = "1000000"
     private let channelID =
