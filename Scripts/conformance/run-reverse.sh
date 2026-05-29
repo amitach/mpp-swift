@@ -39,6 +39,11 @@ done
 grep -q "listening" "$LOG" || { echo "server did not become ready:"; cat "$LOG"; exit 1; }
 cat "$LOG"
 
+# Use the actually-bound port from the log, not the requested one: with PORT=0 the
+# OS assigns an ephemeral port, so $PORT would point the client at the wrong address.
+ACTUAL_PORT=$(grep -oE 'listening http://127\.0\.0\.1:[0-9]+' "$LOG" | grep -oE '[0-9]+$')
+ACTUAL_PORT="${ACTUAL_PORT:-$PORT}"
+
 echo "==> the mppx client pays our server"
-SERVER_URL="http://127.0.0.1:$PORT/proof" node "$HERE/reverse-client.mjs"
+SERVER_URL="http://127.0.0.1:$ACTUAL_PORT/proof" node "$HERE/reverse-client.mjs"
 echo "==> reverse conformance PASSED"
