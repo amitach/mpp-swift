@@ -34,6 +34,19 @@ jobs:
             echo "::endgroup::"
           done
 
+  audit:
+    name: Dependency audit (OSV)
+    runs-on: macos-15 # has swift + jq + curl preinstalled
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Resolve dependencies
+        run: swift package resolve
+      - name: OSV advisory scan (SwiftURL, both name forms)
+        # Fails the build if any pinned dependency version has a known advisory
+        # in the OSV/GitHub Advisory Database. Backs the SECURITY.md monitoring
+        # policy with an enforced gate.
+        run: ./Scripts/dependency-audit.sh Package.resolved
+
   linux:
     name: Tests (Linux, Swift 6)
     runs-on: ubuntu-latest

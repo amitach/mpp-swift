@@ -72,7 +72,7 @@ Git tags are mutable: a maintainer, or an attacker with write access, can move a
 
 ### Dependency monitoring
 
-GitHub Security Advisories (GHSA) and NVD are monitored for every dependency. Dependabot proposes GitHub Actions bumps (kept on pinned SHAs); SwiftPM dependency bumps are evaluated manually against advisories, since the library does not commit `Package.resolved`.
+**A CI gate scans every pinned dependency against the OSV / GitHub Advisory Database on every push and PR** (`Scripts/dependency-audit.sh`, the `Dependency audit (OSV)` job): it resolves the graph and queries OSV.dev for each pin, failing the build if any version has a matching advisory. (`osv-scanner` has no `Package.resolved` extractor, and OSV's Swift records are inconsistent on package naming, so the script queries the OSV API directly for both the bare and full repository-name forms and unions the results.) Dependabot additionally proposes GitHub Actions bumps (kept on pinned SHAs); SwiftPM dependency bumps are reviewed manually against advisories, since the library does not commit `Package.resolved`.
 
 ### Build-tooling isolation (test-vector generation)
 
