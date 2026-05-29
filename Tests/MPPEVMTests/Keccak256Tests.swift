@@ -11,10 +11,6 @@ import Testing
 // future provider swap regressing the result.
 @Suite("Keccak256")
 struct Keccak256Tests {
-    private func hex(_ data: Data) -> String {
-        data.map { String(format: "%02x", $0) }.joined()
-    }
-
     private func keccak(_ string: String) -> String {
         hex(Keccak256.hash(Data(string.utf8)))
     }

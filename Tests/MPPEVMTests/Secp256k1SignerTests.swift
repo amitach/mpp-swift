@@ -10,15 +10,11 @@ import Testing
 struct Secp256k1SignerTests {
     // A fixed, valid 32-byte private key (0x01) and a fixed 32-byte message hash.
     private func key() -> Data {
-        Data([UInt8](repeating: 0, count: 31) + [1])
+        key1PrivateKey
     }
 
     private func hash() -> Data {
         Data((0 ..< 32).map { UInt8($0) })
-    }
-
-    private func hex(_ data: Data) -> String {
-        data.map { String(format: "%02x", $0) }.joined()
     }
 
     @Test("a 32-byte hash signs to a 64-byte compact signature + recovery id")

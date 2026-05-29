@@ -2,27 +2,6 @@ import Foundation
 import Testing
 @testable import MPPEVM
 
-private func testAddress(_ hex: String) -> EthereumAddress {
-    guard let address = EthereumAddress(hex: hex) else {
-        preconditionFailure("invalid test address \(hex)")
-    }
-    return address
-}
-
-private func hexData(_ hex: String) -> Data {
-    var data = Data()
-    var index = hex.startIndex
-    while index < hex.endIndex {
-        let next = hex.index(index, offsetBy: 2)
-        guard let byte = UInt8(hex[index ..< next], radix: 16) else {
-            preconditionFailure("invalid test hex \(hex)")
-        }
-        data.append(byte)
-        index = next
-    }
-    return data
-}
-
 // channelId = keccak256(abi.encode(payer, payee, token, salt, authorizedSigner,
 // escrowContract, chainId)), the escrow contract's computeChannelId. The byte-exact
 // test pins the ABI encoding by hand-building the 224-byte preimage (seven static
@@ -117,13 +96,16 @@ struct ChannelTests {
         // bound to and signed over. key=1 -> address 0x7E5F...Bdf (per VoucherTests).
         let channelID = try #require(id())
         let voucher = try #require(Voucher(channelID: channelID, cumulativeAmount: "1000000"))
-        let signer = try Secp256k1Signer(privateKey: Data([UInt8](repeating: 0, count: 31) + [1]))
-        let signature = try voucher.sign(escrowContract: escrow, chainId: chainId, with: signer)
+        let signature = try voucher.sign(
+            escrowContract: escrow,
+            chainId: chainId,
+            with: key1Signer()
+        )
         #expect(voucher.verify(
             escrowContract: escrow,
             chainId: chainId,
             signature: signature,
-            expectedSigner: testAddress("0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf")
+            expectedSigner: key1Address
         ))
     }
 }
