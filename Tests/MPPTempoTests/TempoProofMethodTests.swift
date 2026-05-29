@@ -22,6 +22,8 @@ struct TempoProofMethodTests {
         + "daff057ce1854ee7328b3bc06e4ec952051b534bcf4a4d21c74e9efb5579aa3a20d6be1b"
     private static let v1Signature = "0x7744bdd24959436cace9677f5850168e387eb2a319cbdac69fcf06aff2"
         + "b19ab919fb941c39f18ca8c2b5858659a7b92e51fc0e8bb926d013e427b446e2665f881b"
+    private static let specSignature = "0x864872e5ccf7559d9921b163f5a9e4136c03098e0bbaab656de9993"
+        + "e4e183da00e377b98c77aed27ab86689b6c1a52ba5e53cf7b2838992da8a404e4f6768cf21b"
 
     private func signer() throws -> Secp256k1Signer {
         try Secp256k1Signer(privateKey: Data([UInt8](repeating: 0, count: 31) + [1]))
@@ -81,6 +83,14 @@ struct TempoProofMethodTests {
         let credential = try await method(variant: .v1Wallet)
             .buildCredential(for: chargeChallenge())
         #expect(credential.payload["signature"] == .string(Self.v1Signature))
+        #expect(credential.payload["type"] == .string("proof"))
+    }
+
+    @Test("spec variant emits the normative single-field signature")
+    func specCredential() async throws {
+        let credential = try await method(variant: .specChallengeId)
+            .buildCredential(for: chargeChallenge())
+        #expect(credential.payload["signature"] == .string(Self.specSignature))
         #expect(credential.payload["type"] == .string("proof"))
     }
 

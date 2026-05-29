@@ -127,6 +127,7 @@ public struct TempoProofMethod: PaymentMethodClient {
         let proof: ZeroAmountProof = switch variant {
         case .v2Realm: .v2Realm(challengeId: challenge.id, realm: challenge.realm)
         case .v1Wallet: .v1Wallet(challengeId: challenge.id, wallet: wallet)
+        case .specChallengeId: .v1ChallengeId(challengeId: challenge.id)
         }
         let signature: Data
         do {

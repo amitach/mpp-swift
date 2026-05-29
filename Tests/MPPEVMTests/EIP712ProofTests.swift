@@ -70,6 +70,20 @@ struct EIP712ProofTests {
             + "b19ab919fb941c39f18ca8c2b5858659a7b92e51fc0e8bb926d013e427b446e2665f881b")
     }
 
+    @Test("spec single-field (v1 challengeId-only): structHash, digest, signature match viem")
+    func proofSpecV1() throws {
+        // draft-tempo-charge-00 normative form: domain version "1",
+        // Proof(string challengeId). Pinned against viem 2.51.3 signTypedData.
+        let proof = ZeroAmountProof.v1ChallengeId(challengeId: challengeId)
+        #expect(hex(proof.structHash)
+            == "b211262a3ec0d24072c4b153d6d207af2344921e7de4108cb2c82a5652007961")
+        #expect(hex(proof.signingHash(chainId: chainId))
+            == "e1d9824d50717ea38a8178599a804f27e0d17ca0c0559d843e34fd68c5e46fbf")
+        let signature = try proof.sign(chainId: chainId, with: signer())
+        #expect(hex(signature) == "864872e5ccf7559d9921b163f5a9e4136c03098e0bbaab656de9993e4e183da0"
+            + "0e377b98c77aed27ab86689b6c1a52ba5e53cf7b2838992da8a404e4f6768cf21b")
+    }
+
     @Test("recoverSigner round-trips: the recovered address equals the signer's")
     func recoverRoundTrip() throws {
         let wallet = try #require(EthereumAddress(uncompressedPublicKey: signer().publicKey))
