@@ -76,7 +76,7 @@ struct TempoProofVerifierTests {
         let verifier = TempoProofVerifier()
         for variant in [ProofVariant.v2Realm, .v1Wallet, .specChallengeId] {
             let credential = try await method(variant: variant).buildCredential(for: challenge())
-            #expect(throws: Never.self) { try verifier.verify(credential) }
+            await #expect(throws: Never.self) { try await verifier.verify(credential) }
         }
     }
 
@@ -91,8 +91,8 @@ struct TempoProofVerifierTests {
             chars[5] = chars[5] == "a" ? "b" : "a"
             return String(chars)
         }
-        #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
-            try TempoProofVerifier().verify(tampered)
+        await #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
+            try await TempoProofVerifier().verify(tampered)
         }
     }
 
@@ -104,8 +104,8 @@ struct TempoProofVerifierTests {
             source: credential.source,
             payload: credential.payload
         )
-        #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
-            try TempoProofVerifier().verify(moved)
+        await #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
+            try await TempoProofVerifier().verify(moved)
         }
     }
 
@@ -118,8 +118,8 @@ struct TempoProofVerifierTests {
             source: credential.source,
             payload: credential.payload
         )
-        #expect(throws: TempoProofVerifier.VerifyError.chainIdMismatch) {
-            try TempoProofVerifier().verify(mismatched)
+        await #expect(throws: TempoProofVerifier.VerifyError.chainIdMismatch) {
+            try await TempoProofVerifier().verify(mismatched)
         }
     }
 
@@ -133,22 +133,22 @@ struct TempoProofVerifierTests {
                 "signature": base.payload["signature"] ?? .null,
             ]
         )
-        #expect(throws: TempoProofVerifier.VerifyError.notAProof) {
-            try TempoProofVerifier().verify(notProof)
+        await #expect(throws: TempoProofVerifier.VerifyError.notAProof) {
+            try await TempoProofVerifier().verify(notProof)
         }
 
         let noSig = Credential(
             challenge: base.challenge, source: base.source, payload: ["type": .string("proof")]
         )
-        #expect(throws: TempoProofVerifier.VerifyError.missingSignature) {
-            try TempoProofVerifier().verify(noSig)
+        await #expect(throws: TempoProofVerifier.VerifyError.missingSignature) {
+            try await TempoProofVerifier().verify(noSig)
         }
 
         let noSource = Credential(
             challenge: base.challenge, source: nil, payload: base.payload
         )
-        #expect(throws: TempoProofVerifier.VerifyError.invalidSource) {
-            try TempoProofVerifier().verify(noSource)
+        await #expect(throws: TempoProofVerifier.VerifyError.invalidSource) {
+            try await TempoProofVerifier().verify(noSource)
         }
     }
 
@@ -159,8 +159,8 @@ struct TempoProofVerifierTests {
             challenge: base.challenge, source: base.source,
             payload: ["type": .string("proof"), "signature": .string("0xdeadbeef")]
         )
-        #expect(throws: TempoProofVerifier.VerifyError.malformedSignature) {
-            try TempoProofVerifier().verify(bad)
+        await #expect(throws: TempoProofVerifier.VerifyError.malformedSignature) {
+            try await TempoProofVerifier().verify(bad)
         }
     }
 
@@ -174,8 +174,8 @@ struct TempoProofVerifierTests {
             source: ProofSource.did(address: method(byte: 1).address, chainId: chainId),
             payload: signedByTwo.payload
         )
-        #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
-            try TempoProofVerifier().verify(claimSignerOne)
+        await #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
+            try await TempoProofVerifier().verify(claimSignerOne)
         }
     }
 
@@ -186,8 +186,8 @@ struct TempoProofVerifierTests {
             challenge: base.challenge, source: base.source,
             payload: ["type": .string("hash"), "hash": .string("0xabc123")]
         )
-        #expect(throws: TempoProofVerifier.VerifyError.notAProof) {
-            try TempoProofVerifier().verify(hashPayload)
+        await #expect(throws: TempoProofVerifier.VerifyError.notAProof) {
+            try await TempoProofVerifier().verify(hashPayload)
         }
     }
 
@@ -197,8 +197,8 @@ struct TempoProofVerifierTests {
         let onNonZero = try Credential(
             challenge: challenge(amount: "100"), source: base.source, payload: base.payload
         )
-        #expect(throws: TempoProofVerifier.VerifyError.notAZeroAmountCharge) {
-            try TempoProofVerifier().verify(onNonZero)
+        await #expect(throws: TempoProofVerifier.VerifyError.notAZeroAmountCharge) {
+            try await TempoProofVerifier().verify(onNonZero)
         }
     }
 
@@ -211,8 +211,8 @@ struct TempoProofVerifierTests {
         let moved = try Credential(
             challenge: challenge(realm: realm), source: evil.source, payload: evil.payload
         )
-        #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
-            try TempoProofVerifier().verify(moved)
+        await #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
+            try await TempoProofVerifier().verify(moved)
         }
     }
 
@@ -226,8 +226,8 @@ struct TempoProofVerifierTests {
             source: ProofSource.did(address: method().address, chainId: 1),
             payload: signedOnTwo.payload
         )
-        #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
-            try TempoProofVerifier().verify(moved)
+        await #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
+            try await TempoProofVerifier().verify(moved)
         }
     }
 
@@ -237,11 +237,12 @@ struct TempoProofVerifierTests {
     func restrictedVariants() async throws {
         let specCredential = try await method(variant: .specChallengeId)
             .buildCredential(for: challenge())
-        #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
-            try TempoProofVerifier(acceptedVariants: [.v2Realm]).verify(specCredential)
+        await #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
+            try await TempoProofVerifier(acceptedVariants: [.v2Realm]).verify(specCredential)
         }
-        #expect(throws: Never.self) {
-            try TempoProofVerifier(acceptedVariants: [.specChallengeId]).verify(specCredential)
+        await #expect(throws: Never.self) {
+            try await TempoProofVerifier(acceptedVariants: [.specChallengeId])
+                .verify(specCredential)
         }
     }
 
@@ -252,13 +253,14 @@ struct TempoProofVerifierTests {
         let chainless = try challenge(chainId: nil)
         let credential = try await method(defaultChainId: TempoChain.moderatoTestnet)
             .buildCredential(for: chainless)
-        #expect(throws: Never.self) {
-            try TempoProofVerifier(defaultChainId: TempoChain.moderatoTestnet).verify(credential)
+        await #expect(throws: Never.self) {
+            try await TempoProofVerifier(defaultChainId: TempoChain.moderatoTestnet)
+                .verify(credential)
         }
         // A verifier with a different default resolves a different chain, so the
         // source chainId no longer matches.
-        #expect(throws: TempoProofVerifier.VerifyError.chainIdMismatch) {
-            try TempoProofVerifier(defaultChainId: TempoChain.mainnet).verify(credential)
+        await #expect(throws: TempoProofVerifier.VerifyError.chainIdMismatch) {
+            try await TempoProofVerifier(defaultChainId: TempoChain.mainnet).verify(credential)
         }
     }
 

@@ -97,7 +97,7 @@ public struct PaymentVerifier: Sendable {
                 return .rejected(.noSupportingMethod)
             }
             do {
-                try method.verify(credential)
+                try await method.verify(credential)
             } catch {
                 return .rejected(.settlementUnverified(reason: String(describing: error)))
             }

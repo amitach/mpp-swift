@@ -63,7 +63,7 @@ public struct TempoProofVerifier: PaymentMethodServer {
     ///   the payload is not a `proof`, the `source` is missing or its chain does
     ///   not match, the signature is malformed, or the signature does not recover
     ///   to the source wallet under any accepted variant.
-    public func verify(_ credential: Credential) throws(VerifyError) {
+    public func verify(_ credential: Credential) async throws(VerifyError) {
         let challenge = credential.challenge
         let request: TempoChargeRequest
         do {

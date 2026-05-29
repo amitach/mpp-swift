@@ -24,5 +24,10 @@ public protocol PaymentMethodServer: Sendable {
     /// payload was the wrong shape). The verifier runs this BEFORE consuming the
     /// challenge id, so a credential rejected here does not burn a legitimate
     /// payer's challenge.
-    func verify(_ credential: Credential) throws
+    ///
+    /// `async` because a settlement check may consult an external service: a
+    /// zero-amount proof is pure local recovery, but a settled transfer confirms
+    /// the transaction on-chain over an RPC. Defining the seam as `async` now keeps
+    /// that later method from forcing a source-breaking protocol change.
+    func verify(_ credential: Credential) async throws
 }
