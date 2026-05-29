@@ -109,6 +109,65 @@ struct TempoProofMethodTests {
         #expect(credential.source == "did:pkh:eip155:1:\(Self.address)")
     }
 
+    @Test("the challenge chainId overrides a configured default")
+    func challengeChainIdOverridesDefault() async throws {
+        // Default 999, but the challenge carries chainId 1: the challenge wins, so
+        // the result is the chainId-1 vector, not a chainId-999 signature.
+        let subject = try method(defaultChainId: 999)
+        let credential = try await subject.buildCredential(for: chargeChallenge(chainId: 1))
+        #expect(credential.payload["signature"] == .string(Self.v2Signature))
+        #expect(credential.source == "did:pkh:eip155:1:\(Self.address)")
+    }
+
+    @Test("extra transfer fields on a zero-amount charge are ignored, proof unaffected")
+    func extraFieldsIgnored() async throws {
+        // A zero-amount charge that still carries currency/recipient/decimals (as
+        // the reference servers emit). They are surfaced for approval but do not
+        // change the proof, which is still byte-exact.
+        let request = EncodedJSON(json: .object([
+            "amount": .string("0"),
+            "currency": .string("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+            "recipient": .string("0x1111111111111111111111111111111111111111"),
+            "decimals": .integer(6),
+            "methodDetails": .object(["chainId": .integer(1)]),
+        ]))
+        let challenge = try chargeChallenge(requestOverride: request)
+
+        let seen = FactsBox()
+        let policy = TempoApprovalPolicy { facts in
+            await seen.set(facts)
+            return true
+        }
+        let credential = try await method(approval: policy).buildCredential(for: challenge)
+        #expect(credential.payload["signature"] == .string(Self.v2Signature))
+        let facts = await seen.value
+        #expect(facts?.currency == "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+        #expect(facts?.recipient == "0x1111111111111111111111111111111111111111")
+    }
+
+    @Test("a non-canonical amount is rejected")
+    func rejectsNonCanonicalAmount() async throws {
+        // "01" has a leading zero; not a canonical base-units integer.
+        let request = EncodedJSON(json: .object([
+            "amount": .string("01"),
+            "methodDetails": .object(["chainId": .integer(1)]),
+        ]))
+        let challenge = try chargeChallenge(requestOverride: request)
+        #expect(try method().supports(challenge) == false)
+        let subject = try method()
+        await #expect(throws: (any Error).self) {
+            _ = try await subject.buildCredential(for: challenge)
+        }
+    }
+
+    @Test("buildCredential refuses a wrong method/intent even when called directly")
+    func buildCredentialRefusesWrongMethodIntent() async throws {
+        let subject = try method()
+        await #expect(throws: TempoMethodError.wrongMethodOrIntent) {
+            _ = try await subject.buildCredential(for: chargeChallenge(intent: "session"))
+        }
+    }
+
     // MARK: supports() matrix
 
     @Test("supports a zero-amount tempo/charge challenge")

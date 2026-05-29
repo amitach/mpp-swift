@@ -96,6 +96,13 @@ public struct TempoProofMethod: PaymentMethodClient {
     /// - Throws: ``TempoMethodError`` for a malformed request, a non-zero amount,
     ///   an unresolvable chain, a rejected approval, or a signing failure.
     public func buildCredential(for challenge: Challenge) async throws -> Credential {
+        // Authoritative re-check (the flow filters with supports() first, but this
+        // method is public): the proof binds only (challengeId, realm), not the
+        // method/intent, so never sign one for a challenge that is not a Tempo
+        // charge, even if called directly.
+        guard challenge.method == Self.tempoMethod, challenge.intent == Self.chargeIntent else {
+            throw TempoMethodError.wrongMethodOrIntent
+        }
         let request: TempoChargeRequest
         do {
             request = try TempoChargeRequest(challenge: challenge)
@@ -162,6 +169,8 @@ public struct TempoProofMethod: PaymentMethodClient {
 
 /// A reason ``TempoProofMethod`` could not build a credential.
 public enum TempoMethodError: Error, Sendable, Hashable {
+    /// The challenge is not a Tempo charge (wrong `method` or `intent`).
+    case wrongMethodOrIntent
     /// The challenge `request` could not be decoded.
     case malformedRequest(TempoChargeRequest.DecodingFailure)
     /// The charge is not zero-amount; a settled transfer needs the transaction
