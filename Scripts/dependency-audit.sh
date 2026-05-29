@@ -8,28 +8,60 @@
 # OSV API directly for BOTH name forms and union the results. OSV mirrors the
 # GitHub Advisory Database, which carries Swift (SwiftURL) advisories.
 #
+# This gate FAILS CLOSED: a parse error, an empty pin set, or an OSV/network
+# failure exits non-zero (it never silently passes having checked nothing).
+#
 # Usage: Scripts/dependency-audit.sh [Package.resolved]
-# Exit 1 if any pinned version has a matching advisory. Requires: jq, curl, and a
-# resolved Package.resolved (run `swift package resolve` first).
+# Exit 0 = all pins clean; 1 = an advisory matched a pin; 2 = the audit could not
+# run (parse/network/API failure). Requires: jq, curl, a resolved Package.resolved.
 set -euo pipefail
 
 resolved="${1:-Package.resolved}"
 if [ ! -f "$resolved" ]; then
-  echo "::error::$resolved not found (run 'swift package resolve' first)"
-  exit 1
+  echo "::error::$resolved not found (run 'swift package resolve' first); failing closed"
+  exit 2
 fi
+
+# Parse pins up front. Fail CLOSED if jq cannot parse the lockfile (a schema
+# change or parse error must never make the gate silently pass), and if no
+# versioned pins are found (this package always has dependencies).
+if ! pins="$(jq -r '.pins[] | select(.state.version != null) | "\(.location)\t\(.state.version)"' "$resolved")"; then
+  echo "::error::could not parse $resolved (jq failed); failing closed"
+  exit 2
+fi
+if [ -z "$pins" ]; then
+  echo "::error::no versioned pins found in $resolved (unexpected); failing closed"
+  exit 2
+fi
+
+# Query OSV for one (name, version). Prints advisory ids on stdout. Returns
+# non-zero on ANY query failure (curl error after retries, or a non-JSON body),
+# so the caller fails closed instead of treating an unreachable OSV as "safe".
+query_osv() {
+  local name="$1" ver="$2" resp
+  if ! resp="$(curl -fsS --retry 3 --retry-delay 2 --max-time 30 \
+      -X POST "https://api.osv.dev/v1/query" \
+      -d "{\"version\":\"$ver\",\"package\":{\"ecosystem\":\"SwiftURL\",\"name\":\"$name\"}}")"; then
+    return 1
+  fi
+  # A successful OSV query returns a JSON object ({} when no vulns, or
+  # {"vulns":[...]}). Anything else is a failed query.
+  printf '%s' "$resp" | jq -e 'type == "object"' >/dev/null 2>&1 || return 1
+  printf '%s' "$resp" | jq -r '.vulns[]?.id'
+}
 
 fail=0
 while IFS=$'\t' read -r url ver; do
-  [ -n "$ver" ] || continue # skip branch/revision pins (no semver to match)
+  [ -n "$ver" ] || continue
   repo=$(basename "$url" .git)
   short=$(printf '%s' "$url" | sed -E 's#^https?://##; s#\.git$##')
   ids=""
   for name in "$repo" "$short"; do
-    found=$(curl -fsS --max-time 25 -X POST "https://api.osv.dev/v1/query" \
-      -d "{\"version\":\"$ver\",\"package\":{\"ecosystem\":\"SwiftURL\",\"name\":\"$name\"}}" 2>/dev/null \
-      | jq -r '.vulns[]?.id' 2>/dev/null || true)
-    [ -n "$found" ] && ids="$ids $found"
+    if ! out="$(query_osv "$name" "$ver")"; then
+      echo "::error::OSV query failed for $name@$ver (network/API); failing closed"
+      exit 2
+    fi
+    [ -n "$out" ] && ids="$ids $out"
   done
   ids=$(printf '%s' "$ids" | tr ' ' '\n' | sed '/^$/d' | sort -u | tr '\n' ' ' | sed 's/ *$//')
   if [ -n "$ids" ]; then
@@ -38,9 +70,9 @@ while IFS=$'\t' read -r url ver; do
   else
     echo "ok: $repo $ver"
   fi
-done < <(jq -r '.pins[] | select(.state.version != null) | "\(.location)\t\(.state.version)"' "$resolved")
+done <<< "$pins"
 
 if [ "$fail" -ne 0 ]; then
   echo "::error::Vulnerable dependency pin(s) found. Bump the pin past the fix, or document an accepted risk."
 fi
-exit $fail
+exit "$fail"
