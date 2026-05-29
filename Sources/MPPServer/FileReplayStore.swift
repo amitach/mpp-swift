@@ -95,12 +95,17 @@ public actor FileReplayStore: ReplayStore {
     }
 
     public func consume(_ id: String) -> Bool {
+        // Decide for THIS id first, so its verdict can never depend on a prune in
+        // the same call (a prune that removed this id's record before recording
+        // would let it be consumed twice). Expiry cleanup of OTHER ids is an
+        // amortized housekeeping step that runs afterwards.
+        let firstUse = record(id)
         consumesSincePrune += 1
         if consumesSincePrune >= pruneInterval {
             consumesSincePrune = 0
             Self.prune(in: directoryURL, retentionSeconds: retentionSeconds, asOf: now())
         }
-        return record(id)
+        return firstUse
     }
 
     // MARK: - Recording
@@ -130,14 +135,28 @@ public actor FileReplayStore: ReplayStore {
         return true
     }
 
-    /// Writes `content` and flushes it to disk. Returns whether both succeeded.
+    /// Writes `content` in full and flushes it to disk. Returns whether both
+    /// succeeded. Retries on `EINTR` and on short writes (POSIX `write` may do
+    /// either), so a signal does not spuriously fail the consume closed.
     private func writeAndSync(_ content: String, to descriptor: Int32) -> Bool {
         let bytes = Array(content.utf8)
-        let written = bytes.withUnsafeBytes { buffer in
-            write(descriptor, buffer.baseAddress, buffer.count)
+        var offset = 0
+        while offset < bytes.count {
+            let written = bytes[offset...].withUnsafeBytes { buffer in
+                write(descriptor, buffer.baseAddress, buffer.count)
+            }
+            if written < 0 {
+                if errno == EINTR { continue }
+                return false
+            }
+            if written == 0 { return false } // no progress: avoid an infinite loop
+            offset += written
         }
-        guard written == bytes.count else { return false }
-        return fsync(descriptor) == 0
+        while fsync(descriptor) != 0 {
+            if errno == EINTR { continue }
+            return false
+        }
+        return true
     }
 
     /// Flushes the directory entry so a newly created record survives a crash.
@@ -159,7 +178,8 @@ public actor FileReplayStore: ReplayStore {
     private static func prune(in directory: URL, retentionSeconds: Double, asOf instant: Date) {
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: directory,
-            includingPropertiesForKeys: nil
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
         ) else { return }
         for entry in entries
             where isExpired(entry, retentionSeconds: retentionSeconds, asOf: instant) {
