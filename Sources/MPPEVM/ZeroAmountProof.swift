@@ -73,7 +73,7 @@ public enum ZeroAmountProof: Sendable, Hashable {
         guard signature.count == 65 else { return nil }
         let compact = signature.prefix(64)
         let recoveryByte = signature[signature.startIndex + 64]
-        guard recoveryByte >= 27, let recoverable = RecoverableSignature(
+        guard (27 ... 30).contains(recoveryByte), let recoverable = RecoverableSignature(
             compact: Data(compact), recoveryID: recoveryByte - 27
         ) else { return nil }
         guard let publicKey = Secp256k1Signer.recoverPublicKey(

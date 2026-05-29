@@ -99,18 +99,14 @@ struct EIP712ProofTests {
     }
 
     @Test("the two variants produce different signing hashes (version + field differ)")
-    func variantsDiffer() {
+    func variantsDiffer() throws {
         let v2Hash = ZeroAmountProof.v2Realm(challengeId: challengeId, realm: realm)
             .signingHash(chainId: chainId)
-        let v1Wallet = EthereumAddress(uncompressedPublicKey: Data([0x04] + [UInt8](
-            repeating: 1,
-            count: 64
-        )))
-        if let wallet = v1Wallet {
-            let v1Hash = ZeroAmountProof.v1Wallet(challengeId: challengeId, wallet: wallet)
-                .signingHash(chainId: chainId)
-            #expect(v1Hash != v2Hash)
-        }
+        let wallet =
+            try #require(EthereumAddress(hex: "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf"))
+        let v1Hash = ZeroAmountProof.v1Wallet(challengeId: challengeId, wallet: wallet)
+            .signingHash(chainId: chainId)
+        #expect(v1Hash != v2Hash)
     }
 
     @Test("address word is left-padded to 32 bytes; uint256 is big-endian")
