@@ -17,7 +17,10 @@ import MPPTempoServer
 // verified by our code. Raw POSIX sockets, no new dependency; not shipped (an
 // executable target with no product). Serves one request per connection then closes.
 
-private let port = UInt16(ProcessInfo.processInfo.environment["PORT"].flatMap(Int.init) ?? 8799)
+// The requested port (PORT=0 asks the OS for an ephemeral one); UInt16(exactly:)
+// so an out-of-range PORT falls back to the default rather than trapping.
+private let requestedPort = ProcessInfo.processInfo.environment["PORT"]
+    .flatMap(UInt16.init) ?? 8799
 // Moderato testnet chain id, put in the challenge so a Tempo client signs for it.
 private let chainId: UInt64 = 42431
 private let secret = Data("mpp-swift-reverse-conformance-secret-key-0123456789".utf8)
@@ -26,7 +29,9 @@ private let secret = Data("mpp-swift-reverse-conformance-secret-key-0123456789".
 private let verbose = ProcessInfo.processInfo.environment["CONFORMANCE_VERBOSE"] == "1"
 
 private func log(_ message: @autoclosure () -> String) {
-    if verbose { print(message()); fflush(stdout) }
+    // fflush(nil) flushes all streams without referencing the global `stdout` var,
+    // which is not concurrency-safe under Swift 6 on Glibc.
+    if verbose { print(message()); fflush(nil) }
 }
 
 private func makeMiddleware() throws -> MPPServerMiddleware {
@@ -60,13 +65,13 @@ private func makeMiddleware() throws -> MPPServerMiddleware {
     }
 }
 
-/// Reads `count` more bytes from `descriptor` into `buffer` (one syscall), or
+/// Reads up to 4096 more bytes from `descriptor` into `buffer` (one syscall), or
 /// returns false at EOF/error.
 private func readMore(_ descriptor: Int32, into buffer: inout Data) -> Bool {
     var chunk = [UInt8](repeating: 0, count: 4096)
-    let read = read(descriptor, &chunk, chunk.count)
-    guard read > 0 else { return false }
-    buffer.append(contentsOf: chunk[0 ..< read])
+    let bytesRead = read(descriptor, &chunk, chunk.count)
+    guard bytesRead > 0 else { return false }
+    buffer.append(contentsOf: chunk[0 ..< bytesRead])
     return true
 }
 
@@ -124,7 +129,7 @@ private func readRequest(_ descriptor: Int32) -> (HTTPRequest, Data)? {
     var request = HTTPRequest(
         method: HTTPRequest.Method(head.method) ?? .get,
         scheme: "http",
-        authority: head.host.isEmpty ? "127.0.0.1:\(port)" : head.host,
+        authority: head.host.isEmpty ? "127.0.0.1:\(requestedPort)" : head.host,
         path: head.target
     )
     request.headerFields = head.fields
@@ -142,7 +147,14 @@ private func writeResponse(_ response: HTTPResponse, _ body: Data, to descriptor
     var out = Data(head.utf8)
     out.append(body)
     out.withUnsafeBytes { raw in
-        _ = write(descriptor, raw.baseAddress, raw.count)
+        guard let base = raw.baseAddress else { return }
+        // Loop over short writes: write() may return fewer bytes than requested.
+        var offset = 0
+        while offset < raw.count {
+            let written = write(descriptor, base + offset, raw.count - offset)
+            if written <= 0 { break }
+            offset += written
+        }
     }
 }
 
@@ -178,7 +190,7 @@ enum ConformanceServer {
 
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = port.bigEndian
+        addr.sin_port = requestedPort.bigEndian
         addr.sin_addr.s_addr = inet_addr("127.0.0.1")
         let bound = withUnsafePointer(to: &addr) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -187,9 +199,18 @@ enum ConformanceServer {
         }
         guard bound == 0, listen(listener, 16) == 0 else { fatalError("bind/listen failed") }
 
-        // The run script waits for this line before starting the client.
-        print("reverse-conformance-server listening http://127.0.0.1:\(port)/proof")
-        fflush(stdout)
+        // The actually-bound port (PORT=0 asks the OS for an ephemeral one); the run
+        // script parses this line to learn where to send the client.
+        var local = sockaddr_in()
+        var localLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &local) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                getsockname(listener, $0, &localLen)
+            }
+        }
+        let boundPort = UInt16(bigEndian: local.sin_port)
+        print("reverse-conformance-server listening http://127.0.0.1:\(boundPort)/proof")
+        fflush(nil)
 
         while true {
             let connection = accept(listener, nil, nil)
