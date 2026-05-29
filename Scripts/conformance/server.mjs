@@ -114,6 +114,8 @@ if (MODE === 'testnet') {
 }
 
 server.listen(PORT, '127.0.0.1', () => {
-  // The run script waits for this line before starting the Swift test.
-  console.log(`conformance-server (${MODE}) listening http://127.0.0.1:${PORT}/proof`)
+  // The run script waits for this line before starting the Swift test. Log the
+  // actually-bound port (not the env value) so a PORT=0 OS-assigned port is real.
+  const port = server.address()?.port ?? PORT
+  console.log(`conformance-server (${MODE}) listening http://127.0.0.1:${port}/proof`)
 })

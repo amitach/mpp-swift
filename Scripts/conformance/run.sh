@@ -30,7 +30,11 @@ echo "==> booting mppx server ($MODE) on port $PORT"
 LOG="$(mktemp)"
 PORT="$PORT" CONFORMANCE_MODE="$MODE" node "$HERE/server.mjs" >"$LOG" 2>&1 &
 SERVER_PID=$!
-cleanup() { kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; }
+cleanup() {
+  kill "$SERVER_PID" 2>/dev/null || true
+  wait "$SERVER_PID" 2>/dev/null || true
+  rm -f "$LOG"
+}
 trap cleanup EXIT
 
 for _ in $(seq 1 50); do
