@@ -51,6 +51,18 @@ struct AcceptPaymentPolicyTests {
         #expect(try !policy.allows(url("https://notwild.example.com/r")))
     }
 
+    @Test(
+        "an exact-origin pattern normalizes its default port; a bare host-only pattern is rejected"
+    )
+    func originPatternEdges() throws {
+        // The pattern's explicit default port equals the request's implicit one.
+        let withPort = AcceptPaymentPolicy.origins(["https://example.com:443"])
+        #expect(try withPort.allows(url("https://example.com/r")))
+        // A host without a scheme is neither an exact origin nor a *.wildcard: rejected.
+        let hostOnly = AcceptPaymentPolicy.origins(["api.example.com"])
+        #expect(try !hostOnly.allows(url("https://api.example.com/r")))
+    }
+
     @Test("a URL without a host or scheme is not advertised to (except under always)")
     func malformedOrigin() throws {
         let policy = try AcceptPaymentPolicy.sameOrigin(url("https://api.example.com"))

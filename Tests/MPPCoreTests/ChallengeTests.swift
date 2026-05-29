@@ -41,6 +41,29 @@ struct ChallengeTests {
         #expect(challenge.opaque == nil)
     }
 
+    @Test("challenges(inHeaderValue:) parses several comma-separated challenges on one line")
+    func parsesMultipleChallengesOnOneLine() {
+        let first = header([
+            ("id", "a"), ("realm", "r1"), ("method", "stripe"),
+            ("intent", "charge"), ("request", request),
+        ])
+        let second = header([
+            ("id", "b"), ("realm", "r2"), ("method", "tempo"),
+            ("intent", "charge"), ("request", request),
+        ])
+        let challenges = Challenge.challenges(inHeaderValue: "\(first), \(second)")
+        #expect(challenges.map(\.method.rawValue) == ["stripe", "tempo"])
+        #expect(challenges.map(\.id) == ["a", "b"])
+    }
+
+    @Test("challenges(inHeaderValue:) keeps only Payment challenges, and is empty when none parse")
+    func challengesFiltersNonPayment() {
+        #expect(Challenge.challenges(inHeaderValue: "Bearer realm=\"x\"").isEmpty)
+        let mixed = "Bearer realm=\"x\", " + header(required())
+        #expect(Challenge.challenges(inHeaderValue: mixed).count == 1)
+        #expect(Challenge.challenges(inHeaderValue: header(required())).count == 1)
+    }
+
     @Test("parses all optional parameters")
     func parsesOptionalParameters() throws {
         let challenge = try Challenge(headerValue: header([

@@ -34,6 +34,18 @@ public enum PaymentAuthScheme {
         return try parseAuthParameters(parameters)
     }
 
+    /// The parameters of **every** `Payment` challenge in a header value.
+    ///
+    /// Per RFC 9110 §11.6.1, a `WWW-Authenticate` value may carry more than one
+    /// challenge, comma-separated on a single line (`Payment …, Payment …`).
+    /// This returns one parameter set per `Payment` challenge, in order;
+    /// non-`Payment` schemes and any challenge whose params are malformed are
+    /// skipped (callers that want strict single-challenge parsing use
+    /// ``parseParameters(from:)``).
+    public static func allParameters(from headerValue: String) -> [[String: String]] {
+        schemeParameterStrings(from: headerValue).compactMap { try? parseAuthParameters($0) }
+    }
+
     /// Formats ordered parameters as a `Payment` header value, quoting and
     /// escaping every value.
     public static func formatParameters(_ parameters: [(key: String, value: String)]) -> String {
@@ -95,6 +107,52 @@ public enum PaymentAuthScheme {
             index += 1
         }
         return nil
+    }
+
+    /// The post-scheme parameter substring after each top-level `Payment` token,
+    /// in order. Each substring runs to the end of the header; ``parseAuthParameters``
+    /// stops at the next scheme token, so parsing one substring yields exactly
+    /// that challenge's parameters. Quote-aware, so a `Payment` inside another
+    /// scheme's quoted value is not mistaken for a scheme boundary.
+    private static func schemeParameterStrings(from header: String) -> [String] {
+        let characters = Array(header)
+        let scheme = Array(name)
+        var inQuotes = false
+        var escaped = false
+        var index = 0
+        var results: [String] = []
+
+        while index < characters.count {
+            let character = characters[index]
+            if inQuotes {
+                if escaped {
+                    escaped = false
+                } else if character == "\\" {
+                    escaped = true
+                } else if character == "\"" {
+                    inQuotes = false
+                }
+                index += 1
+                continue
+            }
+            if character == "\"" {
+                inQuotes = true
+                index += 1
+                continue
+            }
+            if startsWithSchemeToken(characters, at: index, scheme: scheme),
+               prefixAllowsScheme(characters, before: index) {
+                var start = index + scheme.count
+                while start < characters.count, characters[start].isWhitespace {
+                    start += 1
+                }
+                results.append(String(characters[start...]))
+                index = start
+                continue
+            }
+            index += 1
+        }
+        return results
     }
 
     /// Whether `Payment` (case-insensitive) starts at `index` and is followed by

@@ -62,11 +62,11 @@ public struct PaymentClient: Sendable {
         _ request: HTTPRequest,
         body: Data = Data()
     ) async throws -> (HTTPResponse, Data) {
-        try guardTransportSecurity(request)
+        let url = Self.url(of: request)
+        try guardTransportSecurity(scheme: request.scheme, url: url)
 
         var request = request
-        if let advertise,
-           let url = Self.url(of: request),
+        if let advertise, let url,
            acceptPaymentPolicy.allows(url),
            request.headerFields[Self.acceptPayment] == nil {
             request.headerFields[Self.acceptPayment] = advertise
@@ -75,9 +75,11 @@ public struct PaymentClient: Sendable {
         let (response, responseBody) = try await transport.send(request, body: body)
         guard response.status.code == 402 else { return (response, responseBody) }
 
-        // Parse every WWW-Authenticate value; keep the parseable Payment challenges.
+        // Parse every Payment challenge across all WWW-Authenticate values. A
+        // value may pack several comma-separated challenges (RFC 9110 §11.6.1),
+        // and a response may also carry multiple WWW-Authenticate lines.
         let challenges = response.headerFields[values: .wwwAuthenticate]
-            .compactMap { try? Challenge(headerValue: $0) }
+            .flatMap { Challenge.challenges(inHeaderValue: $0) }
         guard !challenges.isEmpty else {
             onEvent(.paymentFailed(.malformedChallenge))
             throw PaymentClientError.malformedChallenge
@@ -114,13 +116,12 @@ public struct PaymentClient: Sendable {
         return nil
     }
 
-    private func guardTransportSecurity(_ request: HTTPRequest) throws {
-        if request.scheme?.lowercased() == "https" { return }
-        if allowInsecureLocal, let host = Self.url(of: request)?.host(percentEncoded: false),
-           Self.isLoopback(host) {
+    private func guardTransportSecurity(scheme: String?, url: URL?) throws {
+        if scheme?.lowercased() == "https" { return }
+        if allowInsecureLocal, let host = url?.host(percentEncoded: false), Self.isLoopback(host) {
             return
         }
-        let target = Self.url(of: request)?.absoluteString ?? (request.authority ?? "")
+        let target = url?.absoluteString ?? ""
         onEvent(.paymentFailed(.insecureTransport(url: target)))
         throw PaymentClientError.insecureTransport(url: target)
     }
@@ -146,4 +147,18 @@ public struct PaymentClient: Sendable {
         }
         return name
     }
+}
+
+/// A flow-level reason ``PaymentClient`` did not complete a payment.
+///
+/// These are the flow's own rejections. An error thrown by the transport or by a
+/// payment method propagates to the caller unwrapped (the flow does not relabel
+/// another layer's typed error).
+public enum PaymentClientError: Error, Sendable, Hashable {
+    /// The request URL was not `https` and `allowInsecureLocal` did not permit it.
+    case insecureTransport(url: String)
+    /// The `402` response carried no parseable `Payment` challenge.
+    case malformedChallenge
+    /// No registered payment method supports any offered challenge.
+    case noSupportedMethod
 }
