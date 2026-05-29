@@ -10,42 +10,64 @@ import Testing
 // holds, an invalid proof does not burn the challenge id (it is rejected before
 // the replay consume), an unsupported challenge fails closed, and a full
 // mint -> pay -> verify round-trip proceeds.
+// File-scope fixtures (kept out of the suite body so it stays under the type-length
+// cap; one home for the shared helpers).
+private let chainId: UInt64 = 1
+private let realm = "https://api.example.com"
+
+private func signer(byte: UInt8 = 1) throws -> Secp256k1Signer {
+    try Secp256k1Signer(privateKey: Data([UInt8](repeating: 0, count: 31) + [byte]))
+}
+
+private func method(
+    byte: UInt8 = 1,
+    variant: ProofVariant = .v2Realm,
+    defaultChainId: UInt64 = TempoChain.mainnet
+) throws -> TempoProofMethod {
+    try #require(TempoProofMethod(
+        signer: signer(byte: byte), defaultChainId: defaultChainId, variant: variant
+    ))
+}
+
+/// The charge-request JSON a server puts in the challenge. A `nil` `chainId` omits
+/// `methodDetails` entirely (so the configured default resolves it).
+private func request(amount: String = "0", chainId: UInt64? = chainId) -> EncodedJSON {
+    var members: [String: JSONValue] = ["amount": .string(amount)]
+    if let chainId {
+        members["methodDetails"] = .object(["chainId": .integer(Int64(chainId))])
+    }
+    return EncodedJSON(json: .object(members))
+}
+
+private func challenge(
+    amount: String = "0",
+    chainId: UInt64? = chainId,
+    id: String = "test-challenge",
+    realm: String = realm,
+    method: String = "tempo",
+    intent: String = "charge"
+) throws -> Challenge {
+    try Challenge(
+        id: id, realm: realm,
+        method: MethodName(method), intent: IntentName(intent),
+        request: request(amount: amount, chainId: chainId)
+    )
+}
+
+/// Rebuilds `credential` with its `signature` payload string transformed.
+private func withSignature(
+    _ credential: Credential, _ transform: (String) -> String
+) throws -> Credential {
+    let hex = try #require(credential.payload["signature"].flatMap {
+        if case let .string(value) = $0 { return value } else { return nil }
+    })
+    var payload = credential.payload
+    payload["signature"] = .string(transform(hex))
+    return Credential(challenge: credential.challenge, source: credential.source, payload: payload)
+}
+
 @Suite("TempoProofVerifier")
 struct TempoProofVerifierTests {
-    private static let chainId: UInt64 = 1
-    private static let realm = "https://api.example.com"
-
-    private func signer(byte: UInt8 = 1) throws -> Secp256k1Signer {
-        try Secp256k1Signer(privateKey: Data([UInt8](repeating: 0, count: 31) + [byte]))
-    }
-
-    private func method(byte: UInt8 = 1, variant: ProofVariant = .v2Realm) throws
-        -> TempoProofMethod {
-        try #require(TempoProofMethod(signer: signer(byte: byte), variant: variant))
-    }
-
-    /// The charge-request JSON a server puts in the challenge.
-    private func request(amount: String = "0", chainId: UInt64 = chainId) -> EncodedJSON {
-        EncodedJSON(json: .object([
-            "amount": .string(amount),
-            "methodDetails": .object(["chainId": .integer(Int64(chainId))]),
-        ]))
-    }
-
-    private func challenge(
-        amount: String = "0",
-        chainId: UInt64 = chainId,
-        id: String = "test-challenge",
-        method: String = "tempo",
-        intent: String = "charge"
-    ) throws -> Challenge {
-        try Challenge(
-            id: id, realm: Self.realm,
-            method: MethodName(method), intent: IntentName(intent),
-            request: request(amount: amount, chainId: chainId)
-        )
-    }
-
     // MARK: accept
 
     @Test("accepts a credential from every client proof variant")
@@ -63,7 +85,7 @@ struct TempoProofVerifierTests {
     func rejectsWrongSignature() async throws {
         let credential = try await method().buildCredential(for: challenge())
         // Flip a byte in the signature so it recovers to some other address.
-        let tampered = try Self.withSignature(credential) { hex in
+        let tampered = try withSignature(credential) { hex in
             var chars = Array(hex)
             chars[5] = chars[5] == "a" ? "b" : "a"
             return String(chars)
@@ -127,6 +149,98 @@ struct TempoProofVerifierTests {
         #expect(throws: VerifyError.malformedSignature) { try TempoProofVerifier().verify(bad) }
     }
 
+    @Test("rejects a valid signature whose recovered signer is not the claimed source")
+    func rejectsValidSignatureFromWrongSigner() async throws {
+        // Signer 2 produces a well-formed proof, but the credential claims signer 1's
+        // wallet as its source: recovery yields signer 2's address, not the claim.
+        let signedByTwo = try await method(byte: 2).buildCredential(for: challenge())
+        let claimSignerOne = try Credential(
+            challenge: signedByTwo.challenge,
+            source: ProofSource.did(address: method(byte: 1).address, chainId: chainId),
+            payload: signedByTwo.payload
+        )
+        #expect(throws: VerifyError.signatureMismatch) {
+            try TempoProofVerifier().verify(claimSignerOne)
+        }
+    }
+
+    @Test("rejects a hash payload on a zero-amount challenge (proof required)")
+    func rejectsHashPayload() async throws {
+        let base = try await method().buildCredential(for: challenge())
+        let hashPayload = Credential(
+            challenge: base.challenge, source: base.source,
+            payload: ["type": .string("hash"), "hash": .string("0xabc123")]
+        )
+        #expect(throws: VerifyError.notAProof) { try TempoProofVerifier().verify(hashPayload) }
+    }
+
+    @Test("rejects a proof presented against a non-zero charge")
+    func rejectsProofOnNonZeroCharge() async throws {
+        let base = try await method().buildCredential(for: challenge())
+        let onNonZero = try Credential(
+            challenge: challenge(amount: "100"), source: base.source, payload: base.payload
+        )
+        #expect(throws: VerifyError.notAZeroAmountCharge) {
+            try TempoProofVerifier().verify(onNonZero)
+        }
+    }
+
+    @Test("rejects a proof signed over a different realm")
+    func rejectsWrongRealm() async throws {
+        // The v2 proof binds realm; signing over a different realm must not verify
+        // against the real challenge (the other variants do not recover either).
+        let evil = try await method(variant: .v2Realm)
+            .buildCredential(for: challenge(realm: "evil.example.com"))
+        let moved = try Credential(
+            challenge: challenge(realm: realm), source: evil.source, payload: evil.payload
+        )
+        #expect(throws: VerifyError.signatureMismatch) { try TempoProofVerifier().verify(moved) }
+    }
+
+    @Test("rejects a proof signed under a different chainId domain")
+    func rejectsWrongChainIdDomain() async throws {
+        // Signed under chainId 2, but the source claims chainId 1 against a chainId-1
+        // challenge: the chainId pin passes, but recovery under chainId 1 fails.
+        let signedOnTwo = try await method().buildCredential(for: challenge(chainId: 2))
+        let moved = try Credential(
+            challenge: challenge(chainId: 1),
+            source: ProofSource.did(address: method().address, chainId: 1),
+            payload: signedOnTwo.payload
+        )
+        #expect(throws: VerifyError.signatureMismatch) { try TempoProofVerifier().verify(moved) }
+    }
+
+    // MARK: configuration (acceptedVariants, defaultChainId)
+
+    @Test("a restricted accepted-variant set rejects an excluded variant, accepts an allowed one")
+    func restrictedVariants() async throws {
+        let specCredential = try await method(variant: .specChallengeId)
+            .buildCredential(for: challenge())
+        #expect(throws: VerifyError.signatureMismatch) {
+            try TempoProofVerifier(acceptedVariants: [.v2Realm]).verify(specCredential)
+        }
+        #expect(throws: Never.self) {
+            try TempoProofVerifier(acceptedVariants: [.specChallengeId]).verify(specCredential)
+        }
+    }
+
+    @Test("the configured defaultChainId resolves a challenge that omits chainId")
+    func defaultChainIdResolves() async throws {
+        // The challenge carries no methodDetails.chainId; client and verifier agree
+        // on the testnet default, so the proof verifies.
+        let chainless = try challenge(chainId: nil)
+        let credential = try await method(defaultChainId: TempoChain.moderatoTestnet)
+            .buildCredential(for: chainless)
+        #expect(throws: Never.self) {
+            try TempoProofVerifier(defaultChainId: TempoChain.moderatoTestnet).verify(credential)
+        }
+        // A verifier with a different default resolves a different chain, so the
+        // source chainId no longer matches.
+        #expect(throws: VerifyError.chainIdMismatch) {
+            try TempoProofVerifier(defaultChainId: TempoChain.mainnet).verify(credential)
+        }
+    }
+
     // MARK: replay ordering (Decision A) + fail closed (Decision B), via PaymentVerifier
 
     @Test("an invalid proof does not consume the challenge id; a later valid one succeeds")
@@ -140,14 +254,14 @@ struct TempoProofVerifierTests {
             methods: [TempoProofVerifier()]
         )
         let binding = try RouteBinding(
-            realm: Self.realm,
+            realm: realm,
             method: MethodName("tempo"),
             intent: .charge
         )
         let minted = minter.mint(binding: binding, request: request())
 
         let good = try await method().buildCredential(for: minted)
-        let bad = try Self.withSignature(good) { hex in
+        let bad = try withSignature(good) { hex in
             var chars = Array(hex); chars[5] = chars[5] == "a" ? "b" : "a"; return String(chars)
         }
         let now = Date(timeIntervalSince1970: 1_700_000_000)
@@ -178,7 +292,7 @@ struct TempoProofVerifierTests {
             methods: [TempoProofVerifier()]
         )
         let binding = try RouteBinding(
-            realm: Self.realm,
+            realm: realm,
             method: MethodName("tempo"),
             intent: .charge
         )
@@ -200,7 +314,7 @@ struct TempoProofVerifierTests {
     func endToEnd() async throws {
         let secret = Data("conformance-fixed-secret-key-0123456789".utf8)
         let binding = try RouteBinding(
-            realm: Self.realm,
+            realm: realm,
             method: MethodName("tempo"),
             intent: .charge
         )
@@ -231,21 +345,5 @@ struct TempoProofVerifierTests {
         guard case .proceed = decision else {
             Issue.record("expected proceed, got \(decision)"); return
         }
-    }
-
-    /// Rebuilds `credential` with its `signature` payload string transformed.
-    private static func withSignature(
-        _ credential: Credential, _ transform: (String) -> String
-    ) throws -> Credential {
-        let hex = try #require(credential.payload["signature"].flatMap {
-            if case let .string(value) = $0 { return value } else { return nil }
-        })
-        var payload = credential.payload
-        payload["signature"] = .string(transform(hex))
-        return Credential(
-            challenge: credential.challenge,
-            source: credential.source,
-            payload: payload
-        )
     }
 }

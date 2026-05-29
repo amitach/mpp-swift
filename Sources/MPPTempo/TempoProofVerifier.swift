@@ -17,6 +17,13 @@ import MPPServer
 /// wallet (default: all three). That is safe: the `challengeId` is unforgeable
 /// (the server's challenge-id HMAC) and the source address is pinned, so the
 /// proof's own `realm`/`wallet` binding is belt-and-suspenders.
+///
+/// - Important: this proves only **control of the wallet named in the credential's
+///   `source`** (which is self-asserted by the payer), for the bound challenge. It
+///   does NOT establish that that wallet is funded, allow-listed, or otherwise
+///   authorized to access the resource. A caller that gates on identity must
+///   authorize the verified `source` wallet out of band; "verified" here means
+///   "the bearer controls this wallet," not "this payer is entitled."
 public struct TempoProofVerifier: PaymentMethodServer {
     private let defaultChainId: UInt64
     private let acceptedVariants: [ProofVariant]
@@ -71,7 +78,7 @@ public struct TempoProofVerifier: PaymentMethodServer {
             throw .invalidSource
         }
         guard parsed.chainId == chainId else { throw .chainIdMismatch }
-        guard let signature = Self.bytes(fromHex: signatureHex), signature.count == 65 else {
+        guard let signature = Data(hexPrefixed: signatureHex), signature.count == 65 else {
             throw .malformedSignature
         }
         guard recovers(
@@ -96,23 +103,6 @@ public struct TempoProofVerifier: PaymentMethodServer {
             }
         }
         return false
-    }
-
-    /// Parses a `0x`-prefixed hex string into bytes, or `nil` if malformed.
-    private static func bytes(fromHex hex: String) -> Data? {
-        guard hex.hasPrefix("0x") else { return nil }
-        let digits = Array(hex.dropFirst(2))
-        guard digits.count.isMultiple(of: 2) else { return nil }
-        var raw = Data()
-        raw.reserveCapacity(digits.count / 2)
-        var index = 0
-        while index < digits.count {
-            guard let high = digits[index].hexDigitValue,
-                  let low = digits[index + 1].hexDigitValue else { return nil }
-            raw.append(UInt8(high << 4 | low))
-            index += 2
-        }
-        return raw
     }
 }
 
