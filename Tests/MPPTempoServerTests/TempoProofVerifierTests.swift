@@ -2,8 +2,9 @@ import Foundation
 import MPPCore
 import MPPEVM
 import MPPServer
+import MPPTempo
+import MPPTempoServer
 import Testing
-@testable import MPPTempo
 
 // Server-side proof verification, the counterpart to TempoProofMethodTests: the
 // credentials our client mints (all three variants) verify, the reject matrix
@@ -90,7 +91,9 @@ struct TempoProofVerifierTests {
             chars[5] = chars[5] == "a" ? "b" : "a"
             return String(chars)
         }
-        #expect(throws: VerifyError.signatureMismatch) { try TempoProofVerifier().verify(tampered) }
+        #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
+            try TempoProofVerifier().verify(tampered)
+        }
     }
 
     @Test("rejects a tampered challenge id (proof was signed over a different id)")
@@ -101,7 +104,9 @@ struct TempoProofVerifierTests {
             source: credential.source,
             payload: credential.payload
         )
-        #expect(throws: VerifyError.signatureMismatch) { try TempoProofVerifier().verify(moved) }
+        #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
+            try TempoProofVerifier().verify(moved)
+        }
     }
 
     @Test("rejects when the source chain does not match the challenge chain")
@@ -113,7 +118,9 @@ struct TempoProofVerifierTests {
             source: credential.source,
             payload: credential.payload
         )
-        #expect(throws: VerifyError.chainIdMismatch) { try TempoProofVerifier().verify(mismatched) }
+        #expect(throws: TempoProofVerifier.VerifyError.chainIdMismatch) {
+            try TempoProofVerifier().verify(mismatched)
+        }
     }
 
     @Test("rejects a non-proof payload, a missing signature, and a missing source")
@@ -126,17 +133,23 @@ struct TempoProofVerifierTests {
                 "signature": base.payload["signature"] ?? .null,
             ]
         )
-        #expect(throws: VerifyError.notAProof) { try TempoProofVerifier().verify(notProof) }
+        #expect(throws: TempoProofVerifier.VerifyError.notAProof) {
+            try TempoProofVerifier().verify(notProof)
+        }
 
         let noSig = Credential(
             challenge: base.challenge, source: base.source, payload: ["type": .string("proof")]
         )
-        #expect(throws: VerifyError.missingSignature) { try TempoProofVerifier().verify(noSig) }
+        #expect(throws: TempoProofVerifier.VerifyError.missingSignature) {
+            try TempoProofVerifier().verify(noSig)
+        }
 
         let noSource = Credential(
             challenge: base.challenge, source: nil, payload: base.payload
         )
-        #expect(throws: VerifyError.invalidSource) { try TempoProofVerifier().verify(noSource) }
+        #expect(throws: TempoProofVerifier.VerifyError.invalidSource) {
+            try TempoProofVerifier().verify(noSource)
+        }
     }
 
     @Test("rejects a malformed (non-hex / wrong-length) signature")
@@ -146,7 +159,9 @@ struct TempoProofVerifierTests {
             challenge: base.challenge, source: base.source,
             payload: ["type": .string("proof"), "signature": .string("0xdeadbeef")]
         )
-        #expect(throws: VerifyError.malformedSignature) { try TempoProofVerifier().verify(bad) }
+        #expect(throws: TempoProofVerifier.VerifyError.malformedSignature) {
+            try TempoProofVerifier().verify(bad)
+        }
     }
 
     @Test("rejects a valid signature whose recovered signer is not the claimed source")
@@ -159,7 +174,7 @@ struct TempoProofVerifierTests {
             source: ProofSource.did(address: method(byte: 1).address, chainId: chainId),
             payload: signedByTwo.payload
         )
-        #expect(throws: VerifyError.signatureMismatch) {
+        #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
             try TempoProofVerifier().verify(claimSignerOne)
         }
     }
@@ -171,7 +186,9 @@ struct TempoProofVerifierTests {
             challenge: base.challenge, source: base.source,
             payload: ["type": .string("hash"), "hash": .string("0xabc123")]
         )
-        #expect(throws: VerifyError.notAProof) { try TempoProofVerifier().verify(hashPayload) }
+        #expect(throws: TempoProofVerifier.VerifyError.notAProof) {
+            try TempoProofVerifier().verify(hashPayload)
+        }
     }
 
     @Test("rejects a proof presented against a non-zero charge")
@@ -180,7 +197,7 @@ struct TempoProofVerifierTests {
         let onNonZero = try Credential(
             challenge: challenge(amount: "100"), source: base.source, payload: base.payload
         )
-        #expect(throws: VerifyError.notAZeroAmountCharge) {
+        #expect(throws: TempoProofVerifier.VerifyError.notAZeroAmountCharge) {
             try TempoProofVerifier().verify(onNonZero)
         }
     }
@@ -194,7 +211,9 @@ struct TempoProofVerifierTests {
         let moved = try Credential(
             challenge: challenge(realm: realm), source: evil.source, payload: evil.payload
         )
-        #expect(throws: VerifyError.signatureMismatch) { try TempoProofVerifier().verify(moved) }
+        #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
+            try TempoProofVerifier().verify(moved)
+        }
     }
 
     @Test("rejects a proof signed under a different chainId domain")
@@ -207,7 +226,9 @@ struct TempoProofVerifierTests {
             source: ProofSource.did(address: method().address, chainId: 1),
             payload: signedOnTwo.payload
         )
-        #expect(throws: VerifyError.signatureMismatch) { try TempoProofVerifier().verify(moved) }
+        #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
+            try TempoProofVerifier().verify(moved)
+        }
     }
 
     // MARK: configuration (acceptedVariants, defaultChainId)
@@ -216,7 +237,7 @@ struct TempoProofVerifierTests {
     func restrictedVariants() async throws {
         let specCredential = try await method(variant: .specChallengeId)
             .buildCredential(for: challenge())
-        #expect(throws: VerifyError.signatureMismatch) {
+        #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
             try TempoProofVerifier(acceptedVariants: [.v2Realm]).verify(specCredential)
         }
         #expect(throws: Never.self) {
@@ -236,7 +257,7 @@ struct TempoProofVerifierTests {
         }
         // A verifier with a different default resolves a different chain, so the
         // source chainId no longer matches.
-        #expect(throws: VerifyError.chainIdMismatch) {
+        #expect(throws: TempoProofVerifier.VerifyError.chainIdMismatch) {
             try TempoProofVerifier(defaultChainId: TempoChain.mainnet).verify(credential)
         }
     }

@@ -7,8 +7,8 @@ public extension Data {
     /// The shared `0x`-hex decoder for the EVM layer: an Ethereum address, an
     /// EIP-712 signature, and other on-wire values all arrive as `0x`-prefixed hex.
     init?(hexPrefixed string: String) {
-        let lowered = string.prefix(2)
-        guard lowered == "0x" || lowered == "0X" else { return nil }
+        let head = string.prefix(2)
+        guard head == "0x" || head == "0X" else { return nil }
         let digits = Array(string.dropFirst(2))
         guard digits.count.isMultiple(of: 2) else { return nil }
         var raw = Data()

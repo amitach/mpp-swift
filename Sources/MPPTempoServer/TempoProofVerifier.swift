@@ -2,6 +2,7 @@ import Foundation
 import MPPCore
 import MPPEVM
 import MPPServer
+import MPPTempo
 
 /// The server-side Tempo charge method, for the zero-amount EIP-712 proof path:
 /// the verify counterpart to ``TempoProofMethod``.
@@ -40,6 +41,9 @@ public struct TempoProofVerifier: PaymentMethodServer {
         defaultChainId: UInt64 = TempoChain.mainnet,
         acceptedVariants: [ProofVariant] = [.v2Realm, .v1Wallet, .specChallengeId]
     ) {
+        // An empty set would reject every proof with `.signatureMismatch`; that is a
+        // configuration error, so fail fast rather than silently reject everything.
+        precondition(!acceptedVariants.isEmpty, "acceptedVariants must not be empty")
         self.defaultChainId = defaultChainId
         self.acceptedVariants = acceptedVariants
     }
@@ -104,26 +108,26 @@ public struct TempoProofVerifier: PaymentMethodServer {
         }
         return false
     }
-}
 
-/// A reason ``TempoProofVerifier`` rejected a credential.
-public enum VerifyError: Error, Sendable, Hashable {
-    /// The challenge `request` could not be decoded.
-    case malformedRequest(TempoChargeRequest.DecodingFailure)
-    /// The charge is not zero-amount; this verifier only settles proofs.
-    case notAZeroAmountCharge
-    /// The credential payload was not a `proof` (missing or wrong `type`).
-    case notAProof
-    /// The proof payload had no `signature`.
-    case missingSignature
-    /// The credential had no `source`, or it was not a valid `did:pkh:eip155` DID.
-    case invalidSource
-    /// The `source` chain did not match the challenge's chain.
-    case chainIdMismatch
-    /// The signature was not 65 bytes of `0x`-prefixed hex.
-    case malformedSignature
-    /// The signature did not recover to the source wallet under any accepted variant.
-    case signatureMismatch
+    /// A reason ``TempoProofVerifier`` rejected a credential.
+    public enum VerifyError: Error, Sendable, Hashable {
+        /// The challenge `request` could not be decoded.
+        case malformedRequest(TempoChargeRequest.DecodingFailure)
+        /// The charge is not zero-amount; this verifier only settles proofs.
+        case notAZeroAmountCharge
+        /// The credential payload was not a `proof` (missing or wrong `type`).
+        case notAProof
+        /// The proof payload had no `signature`.
+        case missingSignature
+        /// The credential had no `source`, or it was not a valid `did:pkh:eip155` DID.
+        case invalidSource
+        /// The `source` chain did not match the challenge's chain.
+        case chainIdMismatch
+        /// The signature was not 65 bytes of `0x`-prefixed hex.
+        case malformedSignature
+        /// The signature did not recover to the source wallet under any accepted variant.
+        case signatureMismatch
+    }
 }
 
 private extension JSONValue {
