@@ -21,7 +21,7 @@ Credentials, receipts, and secret keys must never appear in logs, error messages
 
 ## Cryptographic dependencies
 
-EVM signing depends on vetted libraries (`swift-secp256k1`, a vetted Keccak implementation, a fixed-width integer package) and, for Tempo transaction construction, an FFI binding to Tempo's own primitives. All crypto dependencies are version-pinned and audited; hand-rolled cryptography is avoided.
+EVM signing depends on vetted libraries (`swift-secp256k1` for ECDSA, `CryptoSwift` for Keccak-256, and a fixed-width integer package where needed) and, for Tempo transaction construction, an FFI binding to Tempo's own primitives. All crypto dependencies are version-pinned (exact) and audited; hand-rolled cryptography is avoided.
 
 ## Supported versions
 

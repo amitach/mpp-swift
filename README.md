@@ -48,4 +48,8 @@ Then depend on the products you need (you pull only those):
 
 Dual-licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at your option.
 
+### Acknowledgments
+
+This product includes software developed by Marcin Krzyzanowski (https://krzyzanowskim.com/), the [CryptoSwift](https://github.com/krzyzanowskim/CryptoSwift) library, used for Keccak-256.
+
 Security policy: see [SECURITY.md](SECURITY.md). Contributing: see [CONTRIBUTING.md](CONTRIBUTING.md).
