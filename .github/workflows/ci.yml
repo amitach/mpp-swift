@@ -98,8 +98,15 @@ jobs:
           # so EVERY tracked file (including the workflows themselves) is scanned and
           # only the pattern file is excluded (it would otherwise self-match). Extend
           # by editing .github/secret-scan-patterns.txt.
-          if git grep -nE -f .github/secret-scan-patterns.txt \
-               -- . ':(exclude).github/secret-scan-patterns.txt' ; then
+          # git grep exit: 0 = match (fail), 1 = no match (pass), >=2 = error.
+          # Capture the status so an error fails CLOSED instead of passing silently.
+          rc=0
+          git grep -nE -f .github/secret-scan-patterns.txt \
+            -- . ':(exclude).github/secret-scan-patterns.txt' || rc=$?
+          if [ "$rc" -eq 0 ]; then
             echo "::error::Possible committed credential. Remove it and rotate the secret."
+            exit 1
+          elif [ "$rc" -ne 1 ]; then
+            echo "::error::secret scan failed to run (git grep exit $rc); failing closed."
             exit 1
           fi
