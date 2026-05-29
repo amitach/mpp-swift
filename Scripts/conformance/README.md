@@ -11,15 +11,21 @@ This is **dev-only tooling**. Nothing here ships in any product, and the default
 ## Run
 
 ```sh
-Scripts/conformance/run.sh            # local self-contained mppx server (no network)
-Scripts/conformance/run.sh --testnet  # also probe the live Moderato node (42431)
+Scripts/conformance/run.sh            # forward, local self-contained mppx server (no network)
+Scripts/conformance/run.sh --testnet  # forward, also probe the live Moderato node (42431)
+Scripts/conformance/run-reverse.sh     # reverse: the mppx CLIENT pays our Swift server
 ```
 
-`run.sh` installs the Node deps, boots `server.mjs`, runs the
+`run.sh` (forward) installs the Node deps, boots `server.mjs`, runs the
 `MPP_CONFORMANCE_URL`-gated Swift test (`ConformanceProofTests`) against it, and
 tears the server down. A pass means: the Swift client parsed the mppx 402, built
 the EIP-712 proof credential, sent `Authorization: Payment`, and mppx verified it
 and returned `200 {paid:true}`.
+
+`run-reverse.sh` boots `MPPConformanceServer` (a dev-only Swift HTTP listener backed
+by `TempoProofVerifier`) and has the mppx client (`reverse-client.mjs`) pay it: a
+pass proves a FOREIGN client's proof verifies against our server. Same offline
+property (ecrecover, no RPC) and npm hardening as the forward offline run.
 
 ## Modes
 

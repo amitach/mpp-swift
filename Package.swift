@@ -163,6 +163,21 @@ let package = Package(
             name: "MPPTempoServerTests",
             dependencies: ["MPPTempoServer", "MPPTempo", "MPPCore", "MPPEVM", "MPPServer"]
         ),
+        // MPPConformanceServer: a dev-only HTTP listener (raw sockets, no new dep)
+        // that exposes MPPTempoServer's verifier so the mppx reference CLIENT can pay
+        // our server over a real socket (the reverse conformance direction). No
+        // `.executable` product is declared, so it is internal tooling (run via
+        // `swift run MPPConformanceServer`), never part of the shipped library surface.
+        .executableTarget(
+            name: "MPPConformanceServer",
+            dependencies: [
+                "MPPCore",
+                "MPPServer",
+                "MPPTempo",
+                "MPPTempoServer",
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+            ]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )
