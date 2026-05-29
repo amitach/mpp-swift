@@ -21,7 +21,7 @@ jobs:
     steps:
       # Actions are pinned to a full commit SHA, never a mutable tag (tj-actions
       # CVE-2025-30066). Dependabot bumps the SHA.
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Build
         run: swift build
       - name: Test
@@ -38,7 +38,7 @@ jobs:
     name: Dependency audit (OSV)
     runs-on: macos-15 # has swift + jq + curl preinstalled
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Resolve dependencies
         run: swift package resolve
       - name: OSV advisory scan (SwiftURL, both name forms)
@@ -59,7 +59,7 @@ jobs:
     # not the OS image, so this manual cadence is the control for the base layer.
     container: swift@sha256:cf429de05c3e84a230a75e68eaa7bf7d1367ef9dde0a1278fb2a3d53d1881040
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Build
         run: swift build
       - name: Test
@@ -69,7 +69,7 @@ jobs:
     name: Lint
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: SwiftFormat (lint mode)
         run: |
           brew install swiftformat
