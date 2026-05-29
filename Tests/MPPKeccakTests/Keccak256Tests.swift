@@ -45,4 +45,10 @@ struct Keccak256Tests {
         #expect(keccak(String(repeating: "x", count: 300))
             == "956875d0d3af4718863b89e475911881cebd1cd08cfe3c2fcd0890d29def1e37")
     }
+
+    @Test("binary (non-UTF8) input: bytes 0x00...0xff")
+    func binaryInput() {
+        let digest = Keccak256.hash(Data((0 ... 255).map { UInt8($0) }))
+        #expect(hex(digest) == "dc924469b334aed2a19fac7252e9961aea41f8d91996366029dbe0884229bf36")
+    }
 }
