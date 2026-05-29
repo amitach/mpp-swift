@@ -92,6 +92,10 @@ let package = Package(
             dependencies: [
                 "MPPCore",
                 .product(name: "HTTPTypes", package: "swift-http-types"),
+                // HTTPTypesFoundation (same package) provides URLSession <-> HTTPRequest/
+                // HTTPResponse bridging for the concrete URLSession transport. No new
+                // package dependency.
+                .product(name: "HTTPTypesFoundation", package: "swift-http-types"),
             ]
         ),
         .testTarget(
