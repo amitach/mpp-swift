@@ -30,7 +30,11 @@ echo "==> booting mppx server ($MODE) on port $PORT"
 LOG="$(mktemp)"
 PORT="$PORT" CONFORMANCE_MODE="$MODE" node "$HERE/server.mjs" >"$LOG" 2>&1 &
 SERVER_PID=$!
-cleanup() { kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; }
+cleanup() {
+  kill "$SERVER_PID" 2>/dev/null || true
+  wait "$SERVER_PID" 2>/dev/null || true
+  rm -f "$LOG"
+}
 trap cleanup EXIT
 
 for _ in $(seq 1 50); do
@@ -41,8 +45,13 @@ done
 grep -q "listening" "$LOG" || { echo "server did not become ready:"; cat "$LOG"; exit 1; }
 cat "$LOG"
 
+# Use the actually-bound port from the log, not the requested one: with PORT=0 the
+# OS assigns an ephemeral port, so $PORT would point the test at the wrong address.
+ACTUAL_PORT=$(grep -oE 'listening http://127\.0\.0\.1:[0-9]+' "$LOG" | grep -oE '[0-9]+$')
+ACTUAL_PORT="${ACTUAL_PORT:-$PORT}"
+
 echo "==> running the gated Swift conformance test"
 cd "$REPO"
-MPP_CONFORMANCE_URL="http://127.0.0.1:$PORT/proof" \
+MPP_CONFORMANCE_URL="http://127.0.0.1:$ACTUAL_PORT/proof" \
   swift test --filter ConformanceProofTests
 echo "==> conformance PASSED ($MODE)"
