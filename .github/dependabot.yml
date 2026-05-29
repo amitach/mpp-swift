@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Keep SHA-pinned GitHub Actions current (Dependabot bumps the pinned commit
+  # SHA and updates the version comment). SwiftPM dependency bumps are handled
+  # manually against GHSA/NVD advisories, since this library does not commit
+  # Package.resolved (see SECURITY.md).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci(deps)"
