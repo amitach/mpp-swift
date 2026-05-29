@@ -78,6 +78,11 @@ public struct Voucher: Sendable, Hashable {
         expectedSigner: EthereumAddress
     ) -> Bool {
         let stripped = Self.strippingMagicTrailer(signature)
+        // Load-bearing reject: accept ONLY a bare 65-byte secp256k1 signature. The
+        // `count != 65 && isKeychainEnvelope` condition rejects an envelope outright
+        // rather than trusting its embedded address (there is no inner-signature
+        // check here); a genuine envelope is never 65 bytes. Everything past this
+        // point goes through full ECDSA recovery and an address equality check.
         if stripped.count != 65, Self.isKeychainEnvelope(stripped) { return false }
         guard let recovered = EthereumAddress.recover(
             hash: signingHash(escrowContract: escrowContract, chainId: chainId),

@@ -119,6 +119,21 @@ struct VoucherTests {
         ) == false)
     }
 
+    @Test("verify is bound to the domain: a different chainId or escrow rejects")
+    func verifyDomainBinding() throws {
+        let voucher = try #require(Voucher(channelID: channelID, cumulativeAmount: amount))
+        let signature = try voucher.sign(escrowContract: escrow, chainId: chainId, with: signer())
+        // Same voucher + signature, verified under a different chainId -> different
+        // domain separator -> recovers a different address -> rejected.
+        #expect(voucher.verify(
+            escrowContract: escrow, chainId: 8453, signature: signature, expectedSigner: payer
+        ) == false)
+        // Same, under a different escrow (verifyingContract).
+        #expect(voucher.verify(
+            escrowContract: payee, chainId: chainId, signature: signature, expectedSigner: payer
+        ) == false)
+    }
+
     @Test("decimal uint256 encoder: zero, value, overflow, malformed")
     func decimalEncoder() throws {
         #expect(try hex(#require(EIP712.uint256(decimal: "0")))
