@@ -17,7 +17,7 @@ struct PaymentVerifierTests {
     }
 
     /// The route binding the signed test credentials are minted for.
-    private func expected() throws -> PaymentVerifier.ExpectedBinding {
+    private func expected() throws -> RouteBinding {
         try .init(realm: "api.example.com", method: MethodName("tempo"), intent: .charge)
     }
 
@@ -31,11 +31,7 @@ struct PaymentVerifierTests {
             id: "unsigned", realm: "api.example.com", method: MethodName("tempo"),
             intent: .charge, request: EncodedJSON("e30"), digest: digest, expires: expires
         )
-        let signed = Challenge(
-            id: signer.computeID(for: unsigned), realm: unsigned.realm, method: unsigned.method,
-            intent: unsigned.intent, request: unsigned.request, digest: unsigned.digest,
-            expires: unsigned.expires
-        )
+        let signed = unsigned.withID(signer.computeID(for: unsigned))
         return Credential(challenge: signed, payload: ["proof": "0xabc"])
     }
 
@@ -98,7 +94,7 @@ struct PaymentVerifierTests {
     func rejectsBindingMismatch() async throws {
         let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
         let header = try signedCredential(signer: signer()).headerValue // realm api.example.com
-        let otherRoute = try PaymentVerifier.ExpectedBinding(
+        let otherRoute = try RouteBinding(
             realm: "other.example.com", method: MethodName("tempo"), intent: .charge
         )
         let outcome = await verifier.verify(
@@ -111,7 +107,7 @@ struct PaymentVerifierTests {
     func rejectsIntentMismatch() async throws {
         let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
         let header = try signedCredential(signer: signer()).headerValue // intent: .charge
-        let sessionRoute = try PaymentVerifier.ExpectedBinding(
+        let sessionRoute = try RouteBinding(
             realm: "api.example.com", method: MethodName("tempo"), intent: .session
         )
         let outcome = await verifier.verify(
@@ -124,7 +120,7 @@ struct PaymentVerifierTests {
     func rejectsMethodMismatch() async throws {
         let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
         let header = try signedCredential(signer: signer()).headerValue // method: tempo
-        let stripeRoute = try PaymentVerifier.ExpectedBinding(
+        let stripeRoute = try RouteBinding(
             realm: "api.example.com", method: MethodName("stripe"), intent: .charge
         )
         let outcome = await verifier.verify(

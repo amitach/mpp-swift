@@ -24,12 +24,7 @@ struct ChallengeSignerTests {
 
     /// Returns `challenge` with its id replaced by this signer's HMAC.
     private func sign(_ challenge: Challenge, with signer: ChallengeSigner) -> Challenge {
-        Challenge(
-            id: signer.computeID(for: challenge),
-            realm: challenge.realm, method: challenge.method, intent: challenge.intent,
-            request: challenge.request, digest: challenge.digest, expires: challenge.expires,
-            description: challenge.description, opaque: challenge.opaque
-        )
+        challenge.withID(signer.computeID(for: challenge))
     }
 
     @Test("matches the known-answer id for every optional-slot shape")

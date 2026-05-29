@@ -25,6 +25,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
+        .package(url: "https://github.com/apple/swift-http-types.git", from: "1.0.0"),
     ],
     targets: [
         .target(name: "MPPCore"),
@@ -46,6 +47,7 @@ let package = Package(
                 "MPPCore",
                 "MPPBodyDigest",
                 .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "HTTPTypes", package: "swift-http-types"),
             ]
         ),
         .testTarget(
