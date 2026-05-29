@@ -24,6 +24,8 @@ let package = Package(
         .library(name: "MPPServer", targets: ["MPPServer"]),
         .library(name: "MPPClient", targets: ["MPPClient"]),
         .library(name: "MPPEVM", targets: ["MPPEVM"]),
+        .library(name: "MPPDiscovery", targets: ["MPPDiscovery"]),
+        .library(name: "MPPTempo", targets: ["MPPTempo"]),
     ],
     dependencies: [
         // swift-crypto and CryptoSwift (below) do NOT overlap; neither replaces the
@@ -91,6 +93,10 @@ let package = Package(
             dependencies: [
                 "MPPCore",
                 .product(name: "HTTPTypes", package: "swift-http-types"),
+                // HTTPTypesFoundation (same package) provides URLSession <-> HTTPRequest/
+                // HTTPResponse bridging for the concrete URLSession transport. No new
+                // package dependency.
+                .product(name: "HTTPTypesFoundation", package: "swift-http-types"),
             ]
         ),
         .testTarget(
@@ -110,6 +116,37 @@ let package = Package(
         .testTarget(
             name: "MPPEVMTests",
             dependencies: ["MPPEVM"]
+        ),
+        // MPPDiscovery: OpenAPI 3.x discovery (x-payment-info / x-service-info).
+        // Reuses MPPCore's Amount (integer-string validation) and pure Foundation
+        // JSON; no EVM / crypto dependency.
+        .target(
+            name: "MPPDiscovery",
+            dependencies: ["MPPCore"]
+        ),
+        .testTarget(
+            name: "MPPDiscoveryTests",
+            dependencies: ["MPPDiscovery", "MPPCore"]
+        ),
+        // MPPTempo: the Tempo charge payment method on the client side. PR-A ships
+        // the zero-amount EIP-712 proof credential only (no on-chain settlement, no
+        // FFI 0x76 transaction layer). Wires MPPEVM's proof signer into MPPClient's
+        // PaymentMethodClient seam over MPPCore's Challenge/Credential types. Kept
+        // out of MPPClient so a non-Tempo consumer pulls neither CryptoSwift nor
+        // swift-secp256k1 (both arrive transitively through MPPEVM).
+        .target(
+            name: "MPPTempo",
+            dependencies: ["MPPCore", "MPPEVM", "MPPClient"]
+        ),
+        .testTarget(
+            name: "MPPTempoTests",
+            dependencies: [
+                "MPPTempo",
+                "MPPCore",
+                "MPPEVM",
+                "MPPClient",
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+            ]
         ),
     ],
     swiftLanguageModes: [.v6]

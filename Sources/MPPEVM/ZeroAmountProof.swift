@@ -1,26 +1,29 @@
 import Foundation
 
 /// A zero-amount charge proof: an EIP-712 credential proving control of a wallet
-/// for a given challenge, with no on-chain settlement. The two reference SDKs
-/// diverge on the proof shape, so both variants are first-class; a server verifies
-/// either, and a client emits ``v2`` by default.
+/// for a given challenge, with no on-chain settlement. Three proof shapes are in
+/// use across the spec and the two reference SDKs, so each is first-class; a
+/// server verifies the one it expects.
 ///
-/// Both use the EIP-712 domain `name = "MPP"` with only `name`, `version`, and
+/// All use the EIP-712 domain `name = "MPP"` with only `name`, `version`, and
 /// `chainId` (no `verifyingContract`, no `salt`). The signing hash is
 /// `keccak256(0x1901 ‖ domainSeparator ‖ hashStruct(Proof))`, signed directly by
-/// ``Secp256k1Signer``.
+/// ``Secp256k1Signer``. The variants differ only in the domain `version` and the
+/// `Proof` struct fields; each type string is the canonical EIP-712 `encodeType`
+/// (no spaces after commas), and its exact bytes determine the type hash.
 public enum ZeroAmountProof: Sendable, Hashable {
-    /// Domain version `"1"`, `Proof(string challengeId,address wallet)` (mpp-rs).
-    /// The type string has no spaces after commas: it is the canonical EIP-712
-    /// `encodeType`, and its exact bytes determine the type hash.
+    /// Domain version `"1"`, `Proof(string challengeId)`: the single-field form
+    /// the `draft-tempo-charge-00` spec defines as normative.
+    case v1ChallengeId(challengeId: String)
+    /// Domain version `"1"`, `Proof(string challengeId,address wallet)`.
     case v1Wallet(challengeId: String, wallet: EthereumAddress)
-    /// Domain version `"2"`, `Proof(string challengeId,string realm)` (mppx).
+    /// Domain version `"2"`, `Proof(string challengeId,string realm)`.
     case v2Realm(challengeId: String, realm: String)
 
     /// The EIP-712 domain version for this variant (`"1"` or `"2"`).
     private var domainVersion: String {
         switch self {
-        case .v1Wallet: "1"
+        case .v1ChallengeId, .v1Wallet: "1"
         case .v2Realm: "2"
         }
     }
@@ -28,6 +31,7 @@ public enum ZeroAmountProof: Sendable, Hashable {
     /// The `Proof` type hash for this variant: `keccak256(encodeType)`.
     private var typeHash: Data {
         switch self {
+        case .v1ChallengeId: Keccak256.hash(Data("Proof(string challengeId)".utf8))
         case .v1Wallet: Keccak256.hash(Data("Proof(string challengeId,address wallet)".utf8))
         case .v2Realm: Keccak256.hash(Data("Proof(string challengeId,string realm)".utf8))
         }
@@ -36,6 +40,8 @@ public enum ZeroAmountProof: Sendable, Hashable {
     /// `hashStruct(Proof)` for this variant.
     public var structHash: Data {
         switch self {
+        case let .v1ChallengeId(challengeId):
+            EIP712.hashStruct(typeHash: typeHash, fields: [EIP712.string(challengeId)])
         case let .v1Wallet(challengeId, wallet):
             EIP712.hashStruct(typeHash: typeHash, fields: [EIP712.string(challengeId), wallet.word])
         case let .v2Realm(challengeId, realm):
