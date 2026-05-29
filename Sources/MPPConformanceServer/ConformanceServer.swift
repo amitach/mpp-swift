@@ -17,8 +17,9 @@ import MPPTempoServer
 // verified by our code. Raw POSIX sockets, no new dependency; not shipped (an
 // executable target with no product). Serves one request per connection then closes.
 
-// The requested port (PORT=0 asks the OS for an ephemeral one); UInt16(exactly:)
-// so an out-of-range PORT falls back to the default rather than trapping.
+// The requested port (PORT=0 asks the OS for an ephemeral one). UInt16's failable
+// string initializer returns nil for a non-numeric or out-of-range PORT, so a bad
+// value falls back to the default rather than trapping.
 private let requestedPort = ProcessInfo.processInfo.environment["PORT"]
     .flatMap(UInt16.init) ?? 8799
 // Moderato testnet chain id, put in the challenge so a Tempo client signs for it.
@@ -129,7 +130,7 @@ private func readRequest(_ descriptor: Int32) -> (HTTPRequest, Data)? {
     var request = HTTPRequest(
         method: HTTPRequest.Method(head.method) ?? .get,
         scheme: "http",
-        authority: head.host.isEmpty ? "127.0.0.1:\(requestedPort)" : head.host,
+        authority: head.host.isEmpty ? "127.0.0.1" : head.host,
         path: head.target
     )
     request.headerFields = head.fields
@@ -181,6 +182,9 @@ private func logIncoming(_ request: HTTPRequest) {
 @main
 enum ConformanceServer {
     static func main() async throws {
+        // A client that disconnects mid-write would otherwise raise SIGPIPE and kill
+        // the process; ignore it and let the write fail (handled by the write loop).
+        signal(SIGPIPE, SIG_IGN)
         let middleware = try makeMiddleware()
 
         let listener = socket(AF_INET, sockStreamType, 0)
