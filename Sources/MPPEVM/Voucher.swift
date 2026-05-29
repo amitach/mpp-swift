@@ -11,8 +11,7 @@ import Foundation
 /// `Voucher(bytes32 channelId,uint128 cumulativeAmount)`. The signing hash is
 /// `keccak256(0x1901 ‖ domainSeparator ‖ hashStruct(Voucher))`.
 public struct Voucher: Sendable, Hashable {
-    /// The 32-byte channel identifier (see
-    /// ``channelID(payer:payee:token:salt:authorizedSigner:escrowContract:chainId:)``).
+    /// The 32-byte channel identifier (see ``Channel/id(_:)``).
     public let channelID: Data
     /// The cumulative authorized amount, as the base-10 string it arrives as on the
     /// wire (a `uint128`).
@@ -86,8 +85,6 @@ public struct Voucher: Sendable, Hashable {
         return recovered == expectedSigner
     }
 
-    // The channel id (keccak256(abi.encode(payer, payee, token, salt,
-    // authorizedSigner, escrowContract, chainId))) is derived in the channel-open
-    // flow (WS-10), which is where its inputs and only callers live; the voucher
-    // credential takes the resulting 32-byte channelId as input.
+    // The channel id is derived by ``Channel/id(_:)``; this voucher credential
+    // takes the resulting 32-byte channelId as input.
 }
