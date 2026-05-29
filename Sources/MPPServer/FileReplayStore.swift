@@ -66,6 +66,8 @@ public actor FileReplayStore: ReplayStore {
     ///     absent. All replay records live here and nothing else should.
     ///   - retention: How long a consumed id is remembered. MUST exceed the
     ///     longest challenge lifetime the server issues (see the type doc).
+    ///   - pruneInterval: How many consumes between amortized expiry sweeps; a
+    ///     tuning knob with a sensible default. Clamped to at least 1.
     ///   - now: The clock, injected for deterministic tests. Defaults to the
     ///     system clock.
     /// - Throws: ``StoreError/nonPositiveRetention`` if `retention <= 0`;
@@ -135,9 +137,10 @@ public actor FileReplayStore: ReplayStore {
         return true
     }
 
-    /// Writes `content` in full and flushes it to disk. Returns whether both
-    /// succeeded. Retries on `EINTR` and on short writes (POSIX `write` may do
-    /// either), so a signal does not spuriously fail the consume closed.
+    /// Writes `content` in full and flushes it to durable storage. Returns
+    /// whether both succeeded. Retries on `EINTR` and on short writes (POSIX
+    /// `write` may do either), so a signal does not spuriously fail the consume
+    /// closed.
     private func writeAndSync(_ content: String, to descriptor: Int32) -> Bool {
         let bytes = Array(content.utf8)
         var offset = 0
@@ -152,6 +155,31 @@ public actor FileReplayStore: ReplayStore {
             if written == 0 { return false } // no progress: avoid an infinite loop
             offset += written
         }
+        return flush(descriptor)
+    }
+
+    /// Flushes `descriptor` to durable storage, retrying on `EINTR`.
+    ///
+    /// On Darwin plain `fsync` only reaches the drive's write cache, so this uses
+    /// `F_FULLFSYNC` for true platter-level durability, falling back to `fsync`
+    /// on a filesystem that does not support it. On Linux `fsync` already
+    /// provides the durability guarantee.
+    private func flush(_ descriptor: Int32) -> Bool {
+        #if canImport(Darwin)
+            while fcntl(descriptor, F_FULLFSYNC) == -1 {
+                switch errno {
+                case EINTR: continue
+                case ENOTSUP, EINVAL: return fsyncRetrying(descriptor) // no F_FULLFSYNC here
+                default: return false
+                }
+            }
+            return true
+        #else
+            return fsyncRetrying(descriptor)
+        #endif
+    }
+
+    private func fsyncRetrying(_ descriptor: Int32) -> Bool {
         while fsync(descriptor) != 0 {
             if errno == EINTR { continue }
             return false
@@ -165,7 +193,7 @@ public actor FileReplayStore: ReplayStore {
     private func syncDirectory() -> Bool {
         let descriptor = directoryURL.path.withCString { open($0, O_RDONLY) }
         guard descriptor >= 0 else { return false }
-        let synced = fsync(descriptor) == 0
+        let synced = flush(descriptor)
         close(descriptor)
         return synced
     }
