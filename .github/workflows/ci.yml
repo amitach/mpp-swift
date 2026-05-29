@@ -65,6 +65,40 @@ jobs:
       - name: Test
         run: swift test
 
+  conformance-local:
+    name: Conformance (local)
+    runs-on: macos-15 # has swift preinstalled; node via setup-node
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "20"
+      # Cross-SDK interop: the Swift client pays a zero-amount Tempo proof 402
+      # issued and verified by the reference mppx (TypeScript) server, over real
+      # HTTP. OFFLINE and deterministic (ecrecover, no RPC), so a compromised npm
+      # dep is contained: this job grants no secrets and (per the repo default)
+      # only `contents: read`, and makes no outbound network calls. The harness
+      # installs with `npm ci --ignore-scripts` against the committed lockfile.
+      - name: Cross-SDK conformance (mppx reference server, offline)
+        run: Scripts/conformance/run.sh
+
+  conformance-testnet:
+    name: Conformance (testnet)
+    runs-on: macos-15
+    # NON-REQUIRED (kept out of branch protection): this job makes outbound calls
+    # to the live Moderato node, so it depends on a third party being up and opens
+    # network egress while third-party npm code runs (the one real delta vs the
+    # offline job; mitigated by no-secrets + contents:read + --ignore-scripts). It
+    # exists to keep a live-chain signal and as the seam for the future
+    # settled-transfer test. Disable if it proves flaky.
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "20"
+      - name: Cross-SDK conformance against live Moderato (chainId 42431)
+        run: Scripts/conformance/run.sh --testnet
+
   lint:
     name: Lint
     runs-on: macos-15

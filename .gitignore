@@ -7,6 +7,6 @@ DerivedData/
 *.swiftmodule
 .netrc
 
-# Conformance harness (dev-only Node tooling); deps are installed on demand.
+# Conformance harness (dev-only Node tooling). The lockfile IS committed so CI
+# uses `npm ci` for reproducible, pinned installs; only the install tree is ignored.
 Scripts/conformance/node_modules/
-Scripts/conformance/package-lock.json

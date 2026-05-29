@@ -15,8 +15,16 @@ PORT="${PORT:-8788}"
 MODE="local"
 [ "${1:-}" = "--testnet" ] && MODE="testnet"
 
-echo "==> installing harness deps"
-(cd "$HERE" && npm install --no-audit --no-fund --loglevel=error)
+echo "==> installing harness deps (pinned, no install scripts)"
+# --ignore-scripts blocks postinstall hooks (the main npm install-time attack
+# vector); mppx/viem are pure JS so nothing needs a build step. Prefer `npm ci`
+# against the committed lockfile for a reproducible tree; fall back to `npm install`
+# only if the lockfile is absent.
+if [ -f "$HERE/package-lock.json" ]; then
+  (cd "$HERE" && npm ci --ignore-scripts --no-audit --no-fund --loglevel=error)
+else
+  (cd "$HERE" && npm install --ignore-scripts --no-audit --no-fund --loglevel=error)
+fi
 
 echo "==> booting mppx server ($MODE) on port $PORT"
 LOG="$(mktemp)"
