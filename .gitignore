@@ -6,3 +6,7 @@ DerivedData/
 .DS_Store
 *.swiftmodule
 .netrc
+
+# Conformance harness (dev-only Node tooling); deps are installed on demand.
+Scripts/conformance/node_modules/
+Scripts/conformance/package-lock.json
