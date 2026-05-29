@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import MPPKeccak
+@testable import MPPEVM
 
 // secp256k1 recoverable ECDSA over a raw 32-byte hash, via Bitcoin Core's
 // libsecp256k1. RFC 6979 deterministic nonce (so signatures are reproducible)

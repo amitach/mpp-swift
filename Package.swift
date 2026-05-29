@@ -23,7 +23,7 @@ let package = Package(
         .library(name: "MPPBodyDigest", targets: ["MPPBodyDigest"]),
         .library(name: "MPPServer", targets: ["MPPServer"]),
         .library(name: "MPPClient", targets: ["MPPClient"]),
-        .library(name: "MPPKeccak", targets: ["MPPKeccak"]),
+        .library(name: "MPPEVM", targets: ["MPPEVM"]),
     ],
     dependencies: [
         // swift-crypto and CryptoSwift (below) do NOT overlap; neither replaces the
@@ -48,7 +48,7 @@ let package = Package(
         // vetted provider: CryptoSwift is the established pure-Swift hash library (no C,
         // no build plugins, zero external package dependencies, tools 5.6 so it resolves
         // on our Swift 6.0 CI). Pinned EXACT; source-vetted 2026-05-29; we use only its
-        // SHA3(.keccak256), wrapped behind MPPKeccak's own Keccak256 type.
+        // SHA3(.keccak256), wrapped behind MPPEVM's own Keccak256 type.
         .package(url: "https://github.com/krzyzanowskim/CryptoSwift.git", exact: "1.10.0"),
     ],
     targets: [
@@ -89,16 +89,19 @@ let package = Package(
             name: "MPPClientTests",
             dependencies: ["MPPClient", "MPPCore"]
         ),
+        // MPPEVM: the EVM message-signing layer (Keccak-256, the secp256k1 recoverable
+        // signer, and EIP-712 struct hashing). Kept out of MPPCore/MPPClient so a
+        // non-EVM consumer pulls neither CryptoSwift nor swift-secp256k1.
         .target(
-            name: "MPPKeccak",
+            name: "MPPEVM",
             dependencies: [
                 .product(name: "libsecp256k1", package: "swift-secp256k1"),
                 .product(name: "CryptoSwift", package: "CryptoSwift"),
             ]
         ),
         .testTarget(
-            name: "MPPKeccakTests",
-            dependencies: ["MPPKeccak"]
+            name: "MPPEVMTests",
+            dependencies: ["MPPEVM"]
         ),
     ],
     swiftLanguageModes: [.v6]

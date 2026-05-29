@@ -1,8 +1,8 @@
 import Foundation
 import Testing
-@testable import MPPKeccak
+@testable import MPPEVM
 
-// Keccak-256 known-answer vectors over the MPPKeccak wrapper. The empty-string
+// Keccak-256 known-answer vectors over the MPPEVM wrapper. The empty-string
 // and "abc" digests are the universally-published Keccak-256 values; the rest were
 // generated with js-sha3 (cross-checked against those two anchors) and deliberately
 // span the rate boundary (135 = one free pad byte, 136 = a full block forcing an
