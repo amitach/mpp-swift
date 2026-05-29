@@ -65,28 +65,23 @@ public struct Voucher: Sendable, Hashable {
 
     /// Verifies that `signature` over this voucher recovers to `expectedSigner`.
     ///
-    /// A trailing Tempo magic-bytes block is stripped first. A keychain-envelope
-    /// signature is **rejected**: the escrow verifies raw ECDSA via `ecrecover`, so
-    /// accepting a keychain envelope (which carries only an address, no inner
-    /// signature to check here) would permit trivial forgery. Only a bare 65-byte
-    /// secp256k1 signature is accepted, then recovered and compared. Both reference
-    /// SDKs reject keychain envelopes identically.
+    /// Accepts **only a canonical, bare 65-byte secp256k1 signature** (`r ‖ s ‖ v`).
+    /// Anything else returns `false`: a keychain envelope, or a signature carrying
+    /// Tempo's signature-envelope magic-bytes trailer (a transport artifact appended
+    /// by local-account RPC routing). A voucher signature is canonically magic-free,
+    /// and the escrow redeems only a raw `ecrecover` signature, so canonical-form is
+    /// enforced here rather than defensively stripped. Stripping / envelope unwrap,
+    /// when needed, belongs at the signature-envelope boundary, not in this crypto
+    /// primitive. (`recover` already rejects any non-65-byte input.)
     public func verify(
         escrowContract: EthereumAddress,
         chainId: UInt64,
         signature: Data,
         expectedSigner: EthereumAddress
     ) -> Bool {
-        let stripped = Self.strippingMagicTrailer(signature)
-        // Load-bearing reject: accept ONLY a bare 65-byte secp256k1 signature. The
-        // `count != 65 && isKeychainEnvelope` condition rejects an envelope outright
-        // rather than trusting its embedded address (there is no inner-signature
-        // check here); a genuine envelope is never 65 bytes. Everything past this
-        // point goes through full ECDSA recovery and an address equality check.
-        if stripped.count != 65, Self.isKeychainEnvelope(stripped) { return false }
         guard let recovered = EthereumAddress.recover(
             hash: signingHash(escrowContract: escrowContract, chainId: chainId),
-            signature: stripped
+            signature: signature
         ) else { return false }
         return recovered == expectedSigner
     }
@@ -95,22 +90,4 @@ public struct Voucher: Sendable, Hashable {
     // authorizedSigner, escrowContract, chainId))) is derived in the channel-open
     // flow (WS-10), which is where its inputs and only callers live; the voucher
     // credential takes the resulting 32-byte channelId as input.
-
-    // MARK: - Signature envelope
-
-    /// The 32-byte magic block Tempo may append to a serialized signature envelope.
-    private static let magicTrailer = Data(repeating: 0x77, count: 32)
-    /// The Tempo `SignatureEnvelope` type prefix byte for a keychain signature.
-    private static let keychainPrefix: UInt8 = 0x03
-
-    private static func strippingMagicTrailer(_ signature: Data) -> Data {
-        guard signature.count > 32, signature.suffix(32) == magicTrailer else { return signature }
-        return Data(signature.prefix(signature.count - 32))
-    }
-
-    /// A keychain envelope is `0x03 ‖ userAddress(20) ‖ innerSignature` (at least 21
-    /// bytes), distinguished by its prefix byte.
-    private static func isKeychainEnvelope(_ signature: Data) -> Bool {
-        signature.count >= 21 && signature.first == keychainPrefix
-    }
 }

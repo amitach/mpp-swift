@@ -79,21 +79,23 @@ struct VoucherTests {
         ))
     }
 
-    @Test("verify strips a trailing 32-byte Tempo magic block")
-    func verifyStripsMagicTrailer() throws {
+    @Test(
+        "verify REJECTS a magic-suffixed signature (a voucher signature is canonically magic-free)"
+    )
+    func verifyRejectsMagicSuffixed() throws {
         let voucher = try #require(Voucher(channelID: channelID, cumulativeAmount: amount))
         let signature = try voucher.sign(escrowContract: escrow, chainId: chainId, with: signer())
         let withMagic = signature + Data(repeating: 0x77, count: 32)
         #expect(voucher.verify(
             escrowContract: escrow, chainId: chainId, signature: withMagic, expectedSigner: payer
-        ))
+        ) == false)
     }
 
     @Test("verify REJECTS a keychain envelope even if it embeds the expected signer")
     func verifyRejectsKeychainEnvelope() throws {
         let voucher = try #require(Voucher(channelID: channelID, cumulativeAmount: amount))
         let inner = try voucher.sign(escrowContract: escrow, chainId: chainId, with: signer())
-        // 0x03 prefix || payer address (20) || inner secp256k1 signature.
+        // 0x03 prefix || payer address (20) || inner secp256k1 signature (86 bytes).
         let envelope = Data([0x03]) + payer.bytes + inner
         #expect(voucher.verify(
             escrowContract: escrow, chainId: chainId, signature: envelope, expectedSigner: payer
