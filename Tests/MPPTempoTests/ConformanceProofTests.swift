@@ -21,7 +21,7 @@ struct ConformanceProofTests {
         let raw = try #require(ProcessInfo.processInfo.environment["MPP_CONFORMANCE_URL"])
         let url = try #require(URL(string: raw))
         let scheme = try #require(url.scheme)
-        let host = try #require(url.host)
+        let host = try #require(url.host(percentEncoded: false))
         let authority = url.port.map { "\(host):\($0)" } ?? host
         let path = url.path.isEmpty ? "/" : url.path
 
