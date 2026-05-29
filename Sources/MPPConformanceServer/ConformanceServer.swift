@@ -7,7 +7,9 @@ import MPPTempoServer
 
 #if canImport(Glibc)
     import Glibc
-#else
+#elseif canImport(Musl)
+    import Musl
+#elseif canImport(Darwin)
     import Darwin
 #endif
 
@@ -236,7 +238,8 @@ enum ConformanceServer {
     }
 }
 
-// SOCK_STREAM is an enum on Darwin and an Int32 on Glibc; normalize to Int32.
+// SOCK_STREAM is an enum on Glibc (needs .rawValue) but a plain Int32 on Darwin
+// and Musl; normalize to Int32.
 #if canImport(Glibc)
     private let sockStreamType = Int32(SOCK_STREAM.rawValue)
 #else
