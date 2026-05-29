@@ -92,7 +92,21 @@ public struct Challenge: Sendable, Hashable, Codable {
         } catch {
             throw .header(error)
         }
+        self = try Challenge(parameters: parameters)
+    }
 
+    /// Every `Payment` challenge parseable from a `WWW-Authenticate` value.
+    ///
+    /// A value may list several comma-separated challenges (RFC 9110 §11.6.1);
+    /// non-`Payment` schemes and any challenge that fails validation are skipped,
+    /// so the result is the challenges a client can actually act on.
+    public static func challenges(inHeaderValue headerValue: String) -> [Challenge] {
+        PaymentAuthScheme.allParameters(from: headerValue)
+            .compactMap { try? Challenge(parameters: $0) }
+    }
+
+    /// Builds a challenge from already-parsed `Payment` parameters.
+    private init(parameters: [String: String]) throws(ParsingError) {
         id = try Self.require(parameters, "id")
         realm = try Self.require(parameters, "realm")
 
