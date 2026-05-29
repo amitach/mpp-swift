@@ -57,7 +57,12 @@ struct URLSessionTransportTests {
         let sent = Data("challenge-credential-bytes".utf8)
         StubURLProtocol.respond { request in
             #expect(request.httpMethod == "POST")
-            #expect(request.bodyData == sent)
+            // The upload body is delivered by URLSession but is not exposed to a
+            // URLProtocol stub on Linux Foundation, so assert its content on Apple
+            // only; the round-trip (below) is verified on both platforms.
+            #if !canImport(FoundationNetworking)
+                #expect(request.bodyData == sent)
+            #endif
             return try (self.response(request, 201), Data())
         }
         let request = HTTPRequest(
