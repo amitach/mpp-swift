@@ -24,6 +24,7 @@ let package = Package(
         .library(name: "MPPServer", targets: ["MPPServer"]),
         .library(name: "MPPClient", targets: ["MPPClient"]),
         .library(name: "MPPEVM", targets: ["MPPEVM"]),
+        .library(name: "MPPDiscovery", targets: ["MPPDiscovery"]),
     ],
     dependencies: [
         // swift-crypto and CryptoSwift (below) do NOT overlap; neither replaces the
@@ -102,6 +103,17 @@ let package = Package(
         .testTarget(
             name: "MPPEVMTests",
             dependencies: ["MPPEVM"]
+        ),
+        // MPPDiscovery: OpenAPI 3.x discovery (x-payment-info / x-service-info).
+        // Reuses MPPCore's Amount (integer-string validation) and pure Foundation
+        // JSON; no EVM / crypto dependency.
+        .target(
+            name: "MPPDiscovery",
+            dependencies: ["MPPCore"]
+        ),
+        .testTarget(
+            name: "MPPDiscoveryTests",
+            dependencies: ["MPPDiscovery", "MPPCore"]
         ),
     ],
     swiftLanguageModes: [.v6]
