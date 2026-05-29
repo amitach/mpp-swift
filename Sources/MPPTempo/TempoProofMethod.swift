@@ -18,7 +18,7 @@ import MPPEVM
 public struct TempoProofMethod: PaymentMethodClient {
     private let signer: Secp256k1Signer
     private let wallet: EthereumAddress
-    private let defaultChainId: UInt64?
+    private let defaultChainId: UInt64
     private let variant: ProofVariant
     private let approval: TempoApprovalPolicy
 
@@ -27,7 +27,9 @@ public struct TempoProofMethod: PaymentMethodClient {
     /// - Parameters:
     ///   - signer: The secp256k1 signer; its public key fixes the wallet address.
     ///   - defaultChainId: The chain to bind the proof to when the challenge's
-    ///     `methodDetails.chainId` is absent. With neither, building fails closed.
+    ///     `methodDetails.chainId` is absent. Defaults to ``TempoChain/mainnet``,
+    ///     matching the reference SDKs' fallback; pass another ``TempoChain`` (or
+    ///     any chain id) to target a different network.
     ///   - variant: Which proof shape to emit (defaults to ``ProofVariant/v2Realm``).
     ///   - approval: The pre-sign spending control (defaults to
     ///     ``TempoApprovalPolicy/allowAll``).
@@ -36,7 +38,7 @@ public struct TempoProofMethod: PaymentMethodClient {
     ///   valid private key).
     public init?(
         signer: Secp256k1Signer,
-        defaultChainId: UInt64? = nil,
+        defaultChainId: UInt64 = TempoChain.mainnet,
         variant: ProofVariant = .v2Realm,
         approval: TempoApprovalPolicy = .allowAll
     ) {
@@ -65,18 +67,19 @@ public struct TempoProofMethod: PaymentMethodClient {
     }
 
     /// Whether this is a `tempo` / `charge` challenge with a decodable
-    /// zero-amount request whose chain is resolvable.
+    /// zero-amount request.
     ///
     /// A decode failure means the challenge is not one this method can pay, so it
     /// is mapped to `false` here (the throwing decode is re-run in
     /// ``buildCredential(for:)``, which surfaces the specific reason). A non-zero
-    /// amount is a settled transfer this PR does not handle.
+    /// amount is a settled transfer this PR does not handle. The chain is always
+    /// resolvable (challenge `chainId` or the configured default), so it is not a
+    /// support condition.
     public func supports(_ challenge: Challenge) -> Bool {
         guard challenge.method == Self.tempoMethod, challenge.intent == .charge,
-              let request = try? TempoChargeRequest(challenge: challenge),
-              request.isZeroAmount
+              let request = try? TempoChargeRequest(challenge: challenge)
         else { return false }
-        return (request.chainId ?? defaultChainId) != nil
+        return request.isZeroAmount
     }
 
     /// Builds the zero-amount proof credential for `challenge`.
@@ -103,9 +106,7 @@ public struct TempoProofMethod: PaymentMethodClient {
             throw TempoMethodError.malformedRequest(error)
         }
         guard request.isZeroAmount else { throw TempoMethodError.notAZeroAmountCharge }
-        guard let chainId = request.chainId ?? defaultChainId else {
-            throw TempoMethodError.missingChainId
-        }
+        let chainId = request.chainId ?? defaultChainId
 
         // The approval policy sees the resolved chainId and the challengeId: for a
         // zero-amount proof these (with realm) are the fields that actually bind
@@ -182,8 +183,6 @@ public enum TempoMethodError: Error, Sendable, Hashable {
     /// The charge is not zero-amount; a settled transfer needs the transaction
     /// layer, which this method does not implement.
     case notAZeroAmountCharge
-    /// No chain id in the challenge and none configured on the method.
-    case missingChainId
     /// The pre-sign approval policy rejected the charge.
     case approvalDenied
     /// The EIP-712 proof could not be signed.

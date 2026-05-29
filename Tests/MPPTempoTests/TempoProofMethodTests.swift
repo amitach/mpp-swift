@@ -28,7 +28,7 @@ struct TempoProofMethodTests {
     }
 
     private func method(
-        defaultChainId: UInt64? = nil,
+        defaultChainId: UInt64 = TempoChain.mainnet,
         variant: ProofVariant = .v2Realm,
         approval: TempoApprovalPolicy = .allowAll
     ) throws -> TempoProofMethod {
@@ -187,12 +187,13 @@ struct TempoProofMethodTests {
         #expect(try subject.supports(chargeChallenge(method: "stripe")) == false)
     }
 
-    @Test("does not support when the chain is unresolvable")
-    func rejectsUnresolvableChain() throws {
-        // No challenge chainId and no configured default.
-        #expect(try method().supports(chargeChallenge(chainId: nil)) == false)
-        // With a default it becomes supported.
-        #expect(try method(defaultChainId: 1).supports(chargeChallenge(chainId: nil)))
+    @Test("falls back to Tempo mainnet when the challenge omits chainId")
+    func defaultsToMainnet() async throws {
+        // Matches the reference SDKs' unwrap_or(mainnet) fallback.
+        let subject = try method()
+        #expect(try subject.supports(chargeChallenge(chainId: nil)))
+        let credential = try await subject.buildCredential(for: chargeChallenge(chainId: nil))
+        #expect(credential.source == "did:pkh:eip155:4217:\(Self.address)")
     }
 
     @Test("does not support a malformed request")
@@ -244,14 +245,6 @@ struct TempoProofMethodTests {
         let subject = try method()
         await #expect(throws: TempoMethodError.notAZeroAmountCharge) {
             _ = try await subject.buildCredential(for: chargeChallenge(amount: "1000"))
-        }
-    }
-
-    @Test("an unresolvable chain throws missingChainId")
-    func buildMissingChain() async throws {
-        let subject = try method()
-        await #expect(throws: TempoMethodError.missingChainId) {
-            _ = try await subject.buildCredential(for: chargeChallenge(chainId: nil))
         }
     }
 
