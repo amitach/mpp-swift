@@ -38,10 +38,14 @@ fi
 # non-zero on ANY query failure (curl error after retries, or a non-JSON body),
 # so the caller fails closed instead of treating an unreachable OSV as "safe".
 query_osv() {
-  local name="$1" ver="$2" resp
+  local name="$1" ver="$2" resp body
+  # Build the JSON body with jq (not string interpolation), so a name/version is
+  # always correctly escaped and cannot inject into the request body.
+  body="$(jq -nc --arg v "$ver" --arg n "$name" \
+    '{version: $v, package: {ecosystem: "SwiftURL", name: $n}}')"
   if ! resp="$(curl -fsS --retry 3 --retry-delay 2 --max-time 30 \
-      -X POST "https://api.osv.dev/v1/query" \
-      -d "{\"version\":\"$ver\",\"package\":{\"ecosystem\":\"SwiftURL\",\"name\":\"$name\"}}")"; then
+      -H "Content-Type: application/json" \
+      -X POST "https://api.osv.dev/v1/query" --data "$body")"; then
     return 1
   fi
   # A successful OSV query returns a JSON object ({} when no vulns, or
