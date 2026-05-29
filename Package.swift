@@ -23,10 +23,16 @@ let package = Package(
         .library(name: "MPPBodyDigest", targets: ["MPPBodyDigest"]),
         .library(name: "MPPServer", targets: ["MPPServer"]),
         .library(name: "MPPClient", targets: ["MPPClient"]),
+        .library(name: "MPPKeccak", targets: ["MPPKeccak"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
         .package(url: "https://github.com/apple/swift-http-types.git", from: "1.0.0"),
+        // EVM secp256k1 signing. Pinned EXACT (not a range) so a future release cannot
+        // auto-pull; source-vetted 2026-05-28 (thin wrapper over Bitcoin Core's
+        // libsecp256k1; dev deps excluded at tagged releases; build plugin only copies
+        // in-package sources). Keccak-256 is vendored, not from a package.
+        .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1.git", exact: "0.23.2"),
     ],
     targets: [
         .target(name: "MPPCore"),
@@ -65,6 +71,16 @@ let package = Package(
         .testTarget(
             name: "MPPClientTests",
             dependencies: ["MPPClient", "MPPCore"]
+        ),
+        .target(
+            name: "MPPKeccak",
+            dependencies: [
+                .product(name: "libsecp256k1", package: "swift-secp256k1"),
+            ]
+        ),
+        .testTarget(
+            name: "MPPKeccakTests",
+            dependencies: ["MPPKeccak"]
         ),
     ],
     swiftLanguageModes: [.v6]
