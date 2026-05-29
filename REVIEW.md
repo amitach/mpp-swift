@@ -48,8 +48,16 @@ The official MPP SDKs are listed at https://mpp.dev/sdk. The TypeScript SDK
 (mppx, https://github.com/wevm/mppx) is the reference implementation; the Rust SDK
 (mpp-rs, https://github.com/tempoxyz/mpp-rs) is the other primary reference;
 Python, Go, and Ruby SDKs are also official. A change should interoperate with
-these. When an SDK and the spec disagree, the spec wins unless interoperability
-requires otherwise, and the divergence is documented in the PR.
+these.
+
+When a reference SDK and the spec disagree, do not blindly pick either side.
+First investigate **why** the SDK diverges: read that SDK's GitHub issues, commit
+history, and PR / code comments for a documented reason (a deliberate fix, a
+known spec ambiguity, an interop concession). A reasoned, intentional deviation
+may be the correct behavior to match; an accidental or stale one is not. Absent a
+good reason, the spec wins. Either way, the decision and the evidence behind it
+(the issue or commit that justifies it) are recorded in the PR. The same applies
+when two reference SDKs disagree with each other.
 
 When reviewing, cross-check interop-critical surfaces against the reference SDKs:
 header grammar and parameter ordering, the HMAC binding input, problem-type URIs,
