@@ -171,53 +171,63 @@ public struct MPPServerMiddleware: Sendable {
     /// Builds the RFC 9457 problem for a 402, using the paymentauth.org problem
     /// type registry and carrying the offered challenge id as a `challengeId`
     /// extension member.
+    /// The slug/title/detail for a 402 problem.
+    private struct Spec { let slug: String; let title: String; let detail: String }
+
     private static func problem(for cause: ProblemCause, challengeID: String) -> ProblemDetails {
-        func make(_ slug: String, _ title: String, _ detail: String) -> ProblemDetails {
-            ProblemDetails(
-                type: "https://paymentauth.org/problems/\(slug)",
-                title: title,
-                status: 402,
-                detail: detail,
-                extensions: ["challengeId": .string(challengeID)]
-            )
-        }
+        let spec = Self.spec(for: cause)
+        return ProblemDetails(
+            type: "https://paymentauth.org/problems/\(spec.slug)",
+            title: spec.title,
+            status: 402,
+            detail: spec.detail,
+            extensions: ["challengeId": .string(challengeID)]
+        )
+    }
+
+    private static func verificationFailed(_ detail: String) -> Spec {
+        Spec(slug: "verification-failed", title: "Verification Failed", detail: detail)
+    }
+
+    private static func invalidChallenge(_ detail: String) -> Spec {
+        Spec(slug: "invalid-challenge", title: "Invalid Challenge", detail: detail)
+    }
+
+    /// The problem for a 402 cause. `settlementUnverified`'s `reason` is deliberately
+    /// not echoed to the client. An already-used id maps to `invalid-challenge` per
+    /// spec (§8.2 / §4.2: "unknown, expired, or already used"), not a proof failure.
+    private static func spec(for cause: ProblemCause) -> Spec {
         switch cause {
         case .freshChallenge:
-            return make("payment-required", "Payment Required", "This resource requires payment.")
+            Spec(
+                slug: "payment-required",
+                title: "Payment Required",
+                detail: "This resource requires payment."
+            )
         case .rejection(.malformedCredential):
-            return make(
-                "malformed-credential",
-                "Malformed Credential",
-                "The Authorization header was not a parseable Payment credential."
-            )
-        case .rejection(.invalidChallenge):
-            return make(
-                "invalid-challenge",
-                "Invalid Challenge",
-                "The credential's challenge was not issued by this server."
-            )
-        case .rejection(.bindingMismatch):
-            return make(
-                "verification-failed",
-                "Verification Failed",
-                "The credential's challenge does not match this resource."
+            Spec(
+                slug: "malformed-credential",
+                title: "Malformed Credential",
+                detail: "The Authorization header was not a parseable Payment credential."
             )
         case .rejection(.expired):
-            return make("payment-expired", "Payment Expired", "The challenge had expired.")
-        case .rejection(.digestMismatch):
-            return make(
-                "verification-failed",
-                "Verification Failed",
-                "The request body did not match the challenge digest."
+            Spec(
+                slug: "payment-expired",
+                title: "Payment Expired",
+                detail: "The challenge had expired."
             )
+        case .rejection(.invalidChallenge):
+            invalidChallenge("The credential's challenge was not issued by this server.")
         case .rejection(.replayed):
-            // §8.2 / §4.2: an already-used challenge id is an `invalid-challenge`
-            // ("unknown, expired, or already used"), not a proof failure.
-            return make(
-                "invalid-challenge",
-                "Invalid Challenge",
-                "The challenge has already been used."
-            )
+            invalidChallenge("The challenge has already been used.")
+        case .rejection(.bindingMismatch):
+            verificationFailed("The credential's challenge does not match this resource.")
+        case .rejection(.digestMismatch):
+            verificationFailed("The request body did not match the challenge digest.")
+        case .rejection(.settlementUnverified):
+            verificationFailed("The payment could not be verified on its rail.")
+        case .rejection(.noSupportingMethod):
+            verificationFailed("No payment method can settle this challenge.")
         }
     }
 

@@ -136,7 +136,7 @@ let package = Package(
         // swift-secp256k1 (both arrive transitively through MPPEVM).
         .target(
             name: "MPPTempo",
-            dependencies: ["MPPCore", "MPPEVM", "MPPClient"]
+            dependencies: ["MPPCore", "MPPEVM", "MPPClient", "MPPServer"]
         ),
         .testTarget(
             name: "MPPTempoTests",
@@ -145,6 +145,7 @@ let package = Package(
                 "MPPCore",
                 "MPPEVM",
                 "MPPClient",
+                "MPPServer",
                 .product(name: "HTTPTypes", package: "swift-http-types"),
             ]
         ),
