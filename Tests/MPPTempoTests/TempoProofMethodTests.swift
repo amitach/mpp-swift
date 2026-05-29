@@ -223,6 +223,9 @@ struct TempoProofMethodTests {
         let facts = await seen.value
         #expect(facts?.realm == Self.realm)
         #expect(facts?.amount.rawValue == "0")
+        // The fields that bind into the proof are visible to the policy.
+        #expect(facts?.challengeId == Self.challengeId)
+        #expect(facts?.chainId == Self.chainId)
     }
 
     // MARK: build-time errors

@@ -3,14 +3,21 @@ import MPPCore
 /// The facts about a charge a client sees before deciding whether to pay it,
 /// surfaced to a ``TempoApprovalPolicy`` before any signature is produced.
 ///
-/// These are the spending-control fields: the protection-space `realm`, the
-/// `amount` in base units, the `currency`/token and `recipient` of a settled
-/// transfer (both absent for a bare zero-amount proof), and the `validUntil`
-/// deadline carried by the challenge. The policy reads these to approve or
-/// reject; it never sees signing material.
+/// These are the spending-control fields. For a zero-amount proof the fields that
+/// actually bind into the signature are `challengeId`, `realm`, and the resolved
+/// `chainId`, so a policy can bound which challenge it attests and which chain it
+/// proves control on. The `amount` (always `"0"` here), and the `currency`/token
+/// and `recipient` of a settled transfer (absent for a bare proof), are surfaced
+/// for display; `validUntil` is the challenge's deadline. The policy never sees
+/// signing material.
 public struct ChargeApproval: Sendable, Hashable {
-    /// The protection-space identifier the charge is scoped to.
+    /// The challenge identifier the proof attests, bound into the signature.
+    public let challengeId: String
+    /// The protection-space identifier the charge is scoped to, bound into the
+    /// signature for the v2 proof.
     public let realm: String
+    /// The resolved chain the proof is signed for, bound into the EIP-712 domain.
+    public let chainId: UInt64
     /// The charge amount in base units (`"0"` for a zero-amount proof).
     public let amount: Amount
     /// The token/currency address of a settled transfer, if any.
@@ -22,13 +29,17 @@ public struct ChargeApproval: Sendable, Hashable {
 
     /// Creates the approval facts surfaced to a policy.
     public init(
+        challengeId: String,
         realm: String,
+        chainId: UInt64,
         amount: Amount,
         currency: String?,
         recipient: String?,
         validUntil: Expires?
     ) {
+        self.challengeId = challengeId
         self.realm = realm
+        self.chainId = chainId
         self.amount = amount
         self.currency = currency
         self.recipient = recipient

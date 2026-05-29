@@ -61,14 +61,7 @@ public struct TempoProofMethod: PaymentMethodClient {
     /// of its methods' ranges (`AcceptPayment.format(...)`) rather than hardcoding
     /// the value, so advertising stays derived from the registered methods.
     public var paymentRanges: [PaymentRange] {
-        // Fixed, grammar-valid tokens, so this construction never fails.
-        guard let range = try? PaymentRange(
-            method: .value(Self.tempoMethod),
-            intent: .value(Self.chargeIntent)
-        ) else {
-            return []
-        }
-        return [range]
+        [Self.chargeRange]
     }
 
     /// Whether this is a `tempo` / `charge` challenge with a decodable
@@ -79,7 +72,7 @@ public struct TempoProofMethod: PaymentMethodClient {
     /// ``buildCredential(for:)``, which surfaces the specific reason). A non-zero
     /// amount is a settled transfer this PR does not handle.
     public func supports(_ challenge: Challenge) -> Bool {
-        guard challenge.method == Self.tempoMethod, challenge.intent == Self.chargeIntent,
+        guard challenge.method == Self.tempoMethod, challenge.intent == .charge,
               let request = try? TempoChargeRequest(challenge: challenge),
               request.isZeroAmount
         else { return false }
@@ -100,7 +93,7 @@ public struct TempoProofMethod: PaymentMethodClient {
         // method is public): the proof binds only (challengeId, realm), not the
         // method/intent, so never sign one for a challenge that is not a Tempo
         // charge, even if called directly.
-        guard challenge.method == Self.tempoMethod, challenge.intent == Self.chargeIntent else {
+        guard challenge.method == Self.tempoMethod, challenge.intent == .charge else {
             throw TempoMethodError.wrongMethodOrIntent
         }
         let request: TempoChargeRequest
@@ -114,8 +107,15 @@ public struct TempoProofMethod: PaymentMethodClient {
             throw TempoMethodError.missingChainId
         }
 
+        // The approval policy sees the resolved chainId and the challengeId: for a
+        // zero-amount proof these (with realm) are the fields that actually bind
+        // into the signature, so a policy can bound which chain it proves control
+        // on and which challenge it attests, not only the display-only transfer
+        // fields.
         let facts = ChargeApproval(
+            challengeId: challenge.id,
             realm: challenge.realm,
+            chainId: chainId,
             amount: request.amount,
             currency: request.currency,
             recipient: request.recipient,
@@ -150,7 +150,9 @@ public struct TempoProofMethod: PaymentMethodClient {
         "0x" + data.map { String(format: "%02x", $0) }.joined()
     }
 
-    /// The canonical `tempo` method name. Fixed and grammar-valid by construction.
+    /// The canonical `tempo` method name. `MethodName` ships no predefined
+    /// constant (and its unchecked initializer is package-internal), so this fixed
+    /// grammar-valid token is built once here; the intent uses `IntentName.charge`.
     private static let tempoMethod: MethodName = {
         guard let name = try? MethodName("tempo") else {
             preconditionFailure("tempo is a valid method name")
@@ -158,12 +160,16 @@ public struct TempoProofMethod: PaymentMethodClient {
         return name
     }()
 
-    /// The canonical `charge` intent. Fixed and grammar-valid by construction.
-    private static let chargeIntent: IntentName = {
-        guard let intent = try? IntentName("charge") else {
-            preconditionFailure("charge is a valid intent name")
+    /// The `tempo` / `charge` advertisement range, built once. `PaymentRange` only
+    /// throws on an out-of-range quality, and the default quality is in range, so
+    /// this construction cannot fail.
+    private static let chargeRange: PaymentRange = {
+        guard let range = try? PaymentRange(
+            method: .value(tempoMethod), intent: .value(.charge)
+        ) else {
+            preconditionFailure("tempo/charge with default quality is a valid range")
         }
-        return intent
+        return range
     }()
 }
 
