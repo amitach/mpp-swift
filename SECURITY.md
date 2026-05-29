@@ -52,23 +52,23 @@ The shipped artifact is built only from this repository's source plus a small se
 
 - **Minimal dependencies.** Each is added only when no vetted in-ecosystem option exists.
 - **Source-vetted before adding.** Before a dependency lands, its source is read for build/install scripts, transitive dependencies, and dangerous APIs, and the result is recorded.
-- **Pinned exact.** Every dependency is pinned to an exact version in `Package.swift` (not an open `from:` range), so a future release cannot be pulled silently. Bumps are manual and security-reviewed.
+- **Pinned, with a library-appropriate split.** The niche, security-critical crypto dependencies are pinned **exact** (low conflict risk). The widely-shared Apple packages use a **floor range** (`>=` a reviewed-safe version, `<` next major): exact-pinning them in a library would force unresolvable diamond conflicts on any consumer that also depends on them, while a floor still blocks a silent downgrade to an older vulnerable release, and the OSV gate (below) flags any advisory. Bumps are security-reviewed.
 - **No arbitrary install/build scripts.** Unlike npm, SwiftPM does not execute dependency-defined install hooks; build plugins, if any, are reviewed during vetting.
 
-Inventory (all pinned exact):
+Inventory:
 
-| Dependency | Version | Purpose | Notes |
+| Dependency | Pin | Purpose | Notes |
 |---|---|---|---|
-| `apple/swift-crypto` | 3.15.1 | SHA-256, HMAC | BoringSSL-backed. The 4.x X-Wing HPKE advisory (CVE-2026-28815) does not affect the 3.x line we pin |
-| `apple/swift-http-types` | 1.5.1 | HTTP currency types | no published advisories |
-| `21-DOT-DEV/swift-secp256k1` | 0.21.1 | ECDSA over `libsecp256k1` | last release on swift-tools 6.0; vendors Bitcoin Core C |
-| `krzyzanowskim/CryptoSwift` | 1.10.0 | Keccak-256 only | zero external package dependencies; used only for `SHA3(.keccak256)` |
+| `apple/swift-crypto` | floor `3.15.1 ..< 4.0.0` | SHA-256, HMAC | BoringSSL-backed. The 4.x X-Wing HPKE advisory (CVE-2026-28815) does not affect the 3.x line |
+| `apple/swift-http-types` | floor `from: 1.5.1` | HTTP currency types | no published advisories |
+| `21-DOT-DEV/swift-secp256k1` | exact `0.21.1` | ECDSA over `libsecp256k1` | last release on swift-tools 6.0; vendors Bitcoin Core C |
+| `krzyzanowskim/CryptoSwift` | exact `1.10.0` | Keccak-256 only | zero external package dependencies; used only for `SHA3(.keccak256)` |
 
 `swift-asn1` (1.7.0) is a transitive dependency of `swift-crypto`; its DoS advisory CVE-2025-0343 is fixed in 1.3.1, below our resolved version.
 
 ### Integrity and pinning
 
-Git tags are mutable: a maintainer, or an attacker with write access, can move a tag to a different commit (as in the `tj-actions` and `xz` cases). Our anchors against this are exact version pins in the manifest plus the resolved commit revision recorded at resolution time. Dependency bumps are reviewed as security-relevant diffs.
+Git tags are mutable: a maintainer, or an attacker with write access, can move a tag to a different commit (as in the `tj-actions` and `xz` cases). Our anchors against this are the version pins (exact, or a reviewed floor) in the manifest plus the resolved commit revision recorded at resolution time. Dependency bumps are reviewed as security-relevant diffs.
 
 ### Dependency monitoring
 
@@ -82,7 +82,7 @@ Cryptographic test vectors are generated with npm packages (`viem`, `@noble/curv
 
 - **Actions pinned to full commit SHAs**, not mutable tags (the `tj-actions/changed-files` compromise re-pointed version tags to a malicious commit; SHA-pinned references were unaffected). Dependabot bumps the SHAs.
 - **Least-privilege token:** workflows default to `permissions: contents: read`; any extra scope is granted per job.
-- **Base image pinned by digest** (`swift@sha256:...`), not the mutable `swift:6.0` tag (the `aquasec/trivy` Docker Hub compromise overwrote mutable tags, including `latest`).
+- **Base image pinned by digest** (`swift@sha256:...`), not the mutable `swift:6.0` tag (the `aquasec/trivy` Docker Hub compromise overwrote mutable tags, including `latest`). Dependabot does not manage workflow `container:` digests, so the base image is **rotated manually** on a roughly monthly cadence and whenever a Swift or Ubuntu base advisory lands (the OSV gate covers SwiftPM dependencies, not the OS image, so this cadence is the control for the base layer).
 - **No secrets in untrusted contexts:** secrets are never exposed to fork-triggered runs; `pull_request_target` against fork code is avoided.
 - **Source-scan gates:** CI fails on a literal U+2014 em dash anywhere tracked, on swiftlint/swiftformat violations, and on credential/secret patterns in source.
 - **Branch protection:** required status checks and required conversation resolution on `main`. *(Targets: required signed commits and required review.)*

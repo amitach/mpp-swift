@@ -33,13 +33,16 @@ let package = Package(
         // for Keccak-256, the Ethereum hash, which swift-crypto does not provide (it
         // ships only NIST SHA-3, a different padding and a different digest). Each
         // library is used where it is strongest.
-        // All dependencies are pinned EXACT (not open `from:` ranges) per SECURITY.md:
-        // a future release cannot be pulled silently, and bumps are manual + reviewed.
-        // swift-crypto is pinned in the 3.x line (the 4.x X-Wing HPKE advisory
-        // CVE-2026-28815 does not affect 3.x). Dependency bumps are evaluated against
-        // GHSA/NVD advisories.
-        .package(url: "https://github.com/apple/swift-crypto.git", exact: "3.15.1"),
-        .package(url: "https://github.com/apple/swift-http-types.git", exact: "1.5.1"),
+        // Pinning policy (see SECURITY.md). The widely-shared Apple packages use a
+        // FLOOR range (>= a reviewed-safe version, < next major): exact-pinning them
+        // in a library would cause unresolvable diamond conflicts for any consumer
+        // that also depends on swift-crypto / swift-http-types, while a floor still
+        // prevents a silent DOWNGRADE to an older vulnerable release and the OSV CI
+        // gate flags any advisory. The 3.15.1 ..< 4.0.0 cap keeps us on the 3.x line
+        // (the 4.x X-Wing HPKE advisory CVE-2026-28815 does not affect 3.x). The
+        // niche, security-critical crypto deps below stay EXACT (low conflict risk).
+        .package(url: "https://github.com/apple/swift-crypto.git", "3.15.1" ..< "4.0.0"),
+        .package(url: "https://github.com/apple/swift-http-types.git", from: "1.5.1"),
         // EVM secp256k1 signing. Pinned EXACT (not a range) so a future release cannot
         // auto-pull; source-vetted 2026-05-29 (thin wrapper over Bitcoin Core's
         // libsecp256k1; the package's dev deps are reachable only from its own
