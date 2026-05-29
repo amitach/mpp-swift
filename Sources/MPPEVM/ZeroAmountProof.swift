@@ -10,9 +10,11 @@ import Foundation
 /// `keccak256(0x1901 ‖ domainSeparator ‖ hashStruct(Proof))`, signed directly by
 /// ``Secp256k1Signer``.
 public enum ZeroAmountProof: Sendable, Hashable {
-    /// Domain version `"1"`, `Proof(string challengeId, address wallet)` (mpp-rs).
+    /// Domain version `"1"`, `Proof(string challengeId,address wallet)` (mpp-rs).
+    /// The type string has no spaces after commas: it is the canonical EIP-712
+    /// `encodeType`, and its exact bytes determine the type hash.
     case v1Wallet(challengeId: String, wallet: EthereumAddress)
-    /// Domain version `"2"`, `Proof(string challengeId, string realm)` (mppx).
+    /// Domain version `"2"`, `Proof(string challengeId,string realm)` (mppx).
     case v2Realm(challengeId: String, realm: String)
 
     /// The EIP-712 domain version for this variant (`"1"` or `"2"`).
