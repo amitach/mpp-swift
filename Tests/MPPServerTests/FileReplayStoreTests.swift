@@ -176,4 +176,14 @@ struct FileReplayStoreTests {
             _ = try FileReplayStore(directoryURL: nested, retention: .seconds(60))
         }
     }
+
+    @Test("init rejects a non-positive retention window", arguments: [Duration.zero, .seconds(-1)])
+    func initRejectsNonPositiveRetention(retention: Duration) {
+        // A zero or negative window expires every record immediately, which
+        // would let prune delete it and the same id be consumed again. The store
+        // must refuse to open rather than silently void replay protection.
+        #expect(throws: FileReplayStore.StoreError.nonPositiveRetention) {
+            _ = try FileReplayStore(directoryURL: makeDirectoryURL(), retention: retention)
+        }
+    }
 }

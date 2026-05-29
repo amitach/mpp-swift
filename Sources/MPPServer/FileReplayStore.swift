@@ -46,6 +46,10 @@ public actor FileReplayStore: ReplayStore {
     public enum StoreError: Error, Equatable {
         /// The backing directory could not be created or is not usable.
         case directoryUnavailable(path: String)
+        /// `retention` was not strictly positive. A zero or negative window
+        /// expires every record immediately, so prune would delete it and the
+        /// same id would be consumable again: replay protection would be void.
+        case nonPositiveRetention
     }
 
     private let directoryURL: URL
@@ -64,14 +68,16 @@ public actor FileReplayStore: ReplayStore {
     ///     longest challenge lifetime the server issues (see the type doc).
     ///   - now: The clock, injected for deterministic tests. Defaults to the
     ///     system clock.
-    /// - Throws: ``StoreError/directoryUnavailable(path:)`` if the directory
-    ///   cannot be created.
+    /// - Throws: ``StoreError/nonPositiveRetention`` if `retention <= 0`;
+    ///   ``StoreError/directoryUnavailable(path:)`` if the directory cannot be
+    ///   created.
     public init(
         directoryURL: URL,
         retention: Duration,
         pruneInterval: Int = 256,
         now: @escaping @Sendable () -> Date = Date.init
     ) throws(StoreError) {
+        guard retention > .zero else { throw StoreError.nonPositiveRetention }
         self.directoryURL = directoryURL
         retentionSeconds = Self.seconds(of: retention)
         self.pruneInterval = max(1, pruneInterval)
@@ -111,15 +117,16 @@ public actor FileReplayStore: ReplayStore {
             return false
         }
         let stamp = "\(now().timeIntervalSince1970)\n"
-        let durable = writeAndSync(stamp, to: descriptor)
+        let durable = writeAndSync(stamp, to: descriptor) && syncDirectory()
         close(descriptor)
         guard durable else {
-            // Could not durably record the consume: fail closed and remove the
-            // partial marker so a fresh challenge for this id is not blocked.
+            // Could not durably record the consume (write, file fsync, or the
+            // directory-entry fsync failed): fail closed and remove the marker so
+            // a fresh challenge for this id is not blocked. Returning true here
+            // would risk a crash dropping a record we already accepted.
             _ = path.withCString { unlink($0) }
             return false
         }
-        syncDirectory()
         return true
     }
 
@@ -134,11 +141,14 @@ public actor FileReplayStore: ReplayStore {
     }
 
     /// Flushes the directory entry so a newly created record survives a crash.
-    private func syncDirectory() {
+    /// Returns whether the flush succeeded; a failure must fail the consume
+    /// closed, since the file could otherwise vanish on a crash.
+    private func syncDirectory() -> Bool {
         let descriptor = directoryURL.path.withCString { open($0, O_RDONLY) }
-        guard descriptor >= 0 else { return }
-        _ = fsync(descriptor)
+        guard descriptor >= 0 else { return false }
+        let synced = fsync(descriptor) == 0
         close(descriptor)
+        return synced
     }
 
     // MARK: - Pruning
