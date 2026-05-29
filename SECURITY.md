@@ -25,7 +25,7 @@ Assets protected: payment credentials, signing private keys, the server challeng
 
 Each requirement maps to a type, a default, a runtime guard, or a CI gate:
 
-- **Transport (§11.2):** TLS required; non-`https` rejected at runtime (minimum TLS 1.2, default 1.3). A scoped `allowInsecureLocal` opt-in permits loopback only, for tests and the conformance harness. CI fails if a non-loopback test server is reachable over plain HTTP.
+- **Transport (§11.2):** TLS required; non-`https` rejected at runtime (minimum TLS 1.2, default 1.3). A scoped `allowInsecureLocal` opt-in permits loopback only, for tests and the conformance harness; the test suite rejects a non-loopback server over plain HTTP.
 - **Credentials (§11.2.1):** redacted in `description`/`debugDescription`, excluded from errors, held only for one request. Swift value-type copies make hard memory zeroization impossible, so the SDK promises redaction and minimal lifetime, and zeroizes only raw key buffers it fully controls.
 - **Secret management (§11.2.2):** the server challenge secret lives only in server-side stores (file / environment / KMS), never in a client Keychain; rotation with historical-key verification; a minimum key length is validated on load.
 - **Replay (§11.3) and idempotency (§11.4):** single-use proof semantics via an atomic replay store, consumed before any side effect; unpaid requests perform no work.

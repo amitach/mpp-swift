@@ -33,6 +33,18 @@ if [ -z "$pins" ]; then
   echo "::error::no versioned pins found in $resolved (unexpected); failing closed"
   exit 2
 fi
+# A branch/revision pin has no semantic version, so OSV cannot range-match it.
+# Fail CLOSED rather than silently skip it (an un-scanned dependency must never
+# pass the gate unnoticed).
+revpins="$(jq -r '.pins[] | select(.state.version == null) | .location' "$resolved")" || {
+  echo "::error::could not parse $resolved for revision pins; failing closed"
+  exit 2
+}
+if [ -n "$revpins" ]; then
+  echo "::error::revision/branch-pinned dependencies cannot be OSV version-scanned: $revpins"
+  echo "::error::pin them to a released version, or scan them out of band; failing closed"
+  exit 2
+fi
 
 # Query OSV for one (name, version). Prints advisory ids on stdout. Returns
 # non-zero on ANY query failure (curl error after retries, or a non-JSON body),
