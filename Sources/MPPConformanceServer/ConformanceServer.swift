@@ -7,7 +7,9 @@ import MPPTempoServer
 
 #if canImport(Glibc)
     import Glibc
-#else
+#elseif canImport(Musl)
+    import Musl
+#elseif canImport(Darwin)
     import Darwin
 #endif
 
