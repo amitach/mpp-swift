@@ -27,8 +27,9 @@ Two goals govern every change:
 Correctness is grounded in the spec and the RFCs it builds on. Judge a change
 against these (the codebase cites the spec/RFCs, never an SDK):
 
-- **The "Payment" scheme:** `draft-httpauth-payment-00` (hosted at
-  paymentauth.org; IETF datatracker `draft-ryan-httpauth-payment`). Key parts:
+- **The "Payment" scheme:** `draft-httpauth-payment-00`, hosted at
+  https://paymentauth.org/draft-httpauth-payment-00.html (IETF datatracker:
+  https://datatracker.ietf.org/doc/draft-ryan-httpauth-payment/). Key parts:
   challenge / credential / receipt grammar (section 5.1), the challenge-id HMAC
   binding input (section 5.1.2.1.1), the content-digest check (section 5.1.3),
   the receipt (section 5.3), problem types (section 8.2), status-code table
@@ -43,11 +44,12 @@ against these (the codebase cites the spec/RFCs, never an SDK):
 
 ## Cross-check the reference SDKs
 
-The official MPP SDKs are listed at https://mpp.dev/sdk. The TypeScript SDK is the
-reference implementation; the Rust SDK is the other primary reference; Python, Go,
-and Ruby SDKs are also official. A change should interoperate with these. When an
-SDK and the spec disagree, the spec wins unless interoperability requires
-otherwise, and the divergence is documented in the PR.
+The official MPP SDKs are listed at https://mpp.dev/sdk. The TypeScript SDK
+(mppx, https://github.com/wevm/mppx) is the reference implementation; the Rust SDK
+(mpp-rs, https://github.com/tempoxyz/mpp-rs) is the other primary reference;
+Python, Go, and Ruby SDKs are also official. A change should interoperate with
+these. When an SDK and the spec disagree, the spec wins unless interoperability
+requires otherwise, and the divergence is documented in the PR.
 
 When reviewing, cross-check interop-critical surfaces against the reference SDKs:
 header grammar and parameter ordering, the HMAC binding input, problem-type URIs,
@@ -78,3 +80,25 @@ conformance). Lint is `swiftlint --strict` plus `swiftformat --lint` plus a
 repo-wide no-em-dash gate, at zero warnings. A thorough review looks for what
 those passes might still have missed: hostile inputs, temporal sequences, parallel
 code paths, and spec corners that no test yet guards.
+
+## References
+
+Spec and protocol:
+
+- MPP "Payment" scheme: https://paymentauth.org/draft-httpauth-payment-00.html
+- IETF datatracker: https://datatracker.ietf.org/doc/draft-ryan-httpauth-payment/
+- Protocol home: https://mpp.dev
+
+RFCs:
+
+- RFC 9110 (HTTP semantics, authentication): https://www.rfc-editor.org/rfc/rfc9110
+- RFC 9457 (problem+json): https://www.rfc-editor.org/rfc/rfc9457
+- RFC 9530 (Content-Digest): https://www.rfc-editor.org/rfc/rfc9530
+- RFC 8785 (JSON Canonicalization Scheme): https://www.rfc-editor.org/rfc/rfc8785
+- RFC 3339 (date-time): https://www.rfc-editor.org/rfc/rfc3339
+
+Official SDKs (cross-check interop; correctness is still cited to the spec):
+
+- SDK index: https://mpp.dev/sdk
+- TypeScript (reference implementation), mppx: https://github.com/wevm/mppx
+- Rust, mpp-rs: https://github.com/tempoxyz/mpp-rs
