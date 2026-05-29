@@ -29,10 +29,13 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
         .package(url: "https://github.com/apple/swift-http-types.git", from: "1.0.0"),
         // EVM secp256k1 signing. Pinned EXACT (not a range) so a future release cannot
-        // auto-pull; source-vetted 2026-05-28 (thin wrapper over Bitcoin Core's
-        // libsecp256k1; dev deps excluded at tagged releases; build plugin only copies
-        // in-package sources). Keccak-256 is vendored, not from a package.
-        .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1.git", exact: "0.23.2"),
+        // auto-pull; source-vetted 2026-05-29 (thin wrapper over Bitcoin Core's
+        // libsecp256k1; the package's dev deps are reachable only from its own
+        // plugins/tests and are pruned for downstream consumers). 0.21.1 is the last
+        // release on swift-tools 6.0; >= 0.22.0 requires tools 6.1, which would drop our
+        // declared Swift 6.0 support (the libsecp256k1 C product and the recoverable
+        // module we use are identical). Keccak-256 is vendored, not from a package.
+        .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1.git", exact: "0.21.1"),
     ],
     targets: [
         .target(name: "MPPCore"),
