@@ -25,6 +25,7 @@ let package = Package(
         .library(name: "MPPClient", targets: ["MPPClient"]),
         .library(name: "MPPEVM", targets: ["MPPEVM"]),
         .library(name: "MPPDiscovery", targets: ["MPPDiscovery"]),
+        .library(name: "MPPTempo", targets: ["MPPTempo"]),
     ],
     dependencies: [
         // swift-crypto and CryptoSwift (below) do NOT overlap; neither replaces the
@@ -126,6 +127,26 @@ let package = Package(
         .testTarget(
             name: "MPPDiscoveryTests",
             dependencies: ["MPPDiscovery", "MPPCore"]
+        ),
+        // MPPTempo: the Tempo charge payment method on the client side. PR-A ships
+        // the zero-amount EIP-712 proof credential only (no on-chain settlement, no
+        // FFI 0x76 transaction layer). Wires MPPEVM's proof signer into MPPClient's
+        // PaymentMethodClient seam over MPPCore's Challenge/Credential types. Kept
+        // out of MPPClient so a non-Tempo consumer pulls neither CryptoSwift nor
+        // swift-secp256k1 (both arrive transitively through MPPEVM).
+        .target(
+            name: "MPPTempo",
+            dependencies: ["MPPCore", "MPPEVM", "MPPClient"]
+        ),
+        .testTarget(
+            name: "MPPTempoTests",
+            dependencies: [
+                "MPPTempo",
+                "MPPCore",
+                "MPPEVM",
+                "MPPClient",
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+            ]
         ),
     ],
     swiftLanguageModes: [.v6]
