@@ -71,12 +71,13 @@ private func withSignature(
 struct TempoProofVerifierTests {
     // MARK: accept
 
-    @Test("accepts a credential from every client proof variant")
+    @Test("accepts a credential from every client proof variant, returning the challenge id")
     func acceptsAllVariants() async throws {
         let verifier = TempoProofVerifier()
         for variant in [ProofVariant.v2Realm, .v1Wallet, .specChallengeId] {
             let credential = try await method(variant: variant).buildCredential(for: challenge())
-            await #expect(throws: Never.self) { try await verifier.verify(credential) }
+            // The proof settles no value, so its receipt reference is the challenge id.
+            #expect(try await verifier.verify(credential) == credential.challenge.id)
         }
     }
 

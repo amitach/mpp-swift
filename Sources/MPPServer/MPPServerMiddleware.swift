@@ -149,6 +149,13 @@ public struct MPPServerMiddleware: Sendable {
             if meetsFloor != true {
                 response.headerFields[.cacheControl] = "private"
             }
+            // Attach the settlement receipt (Payment-Receipt), when a method minted
+            // one. The header is optional (spec: for auditability), so an encoding
+            // failure on an otherwise-valid receipt is swallowed rather than failing
+            // the paid response the client already earned.
+            if let receipt = verified.receipt, let value = try? receipt.headerValue {
+                response.headerFields[Self.paymentReceiptField] = value
+            }
             return (response, responseBody)
         }
     }
@@ -234,6 +241,15 @@ public struct MPPServerMiddleware: Sendable {
     // MARK: - Response building
 
     private static let problemContentType = "application/problem+json"
+
+    /// The `Payment-Receipt` response header name (non-standard, so built from a
+    /// compile-time-known-valid token).
+    private static let paymentReceiptField: HTTPField.Name = {
+        guard let name = HTTPField.Name("Payment-Receipt") else {
+            preconditionFailure("Payment-Receipt is a valid HTTP field name")
+        }
+        return name
+    }()
 
     private static func paymentRequiredResponse(
         challenge: Challenge, problem: ProblemDetails

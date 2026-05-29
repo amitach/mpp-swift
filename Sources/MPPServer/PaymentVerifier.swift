@@ -92,20 +92,30 @@ public struct PaymentVerifier: Sendable {
         // registered, the matching one must accept; if none supports a challenge
         // that otherwise bound to this route, fail closed rather than grant access
         // on the protocol checks alone.
+        var receipt: Receipt?
         if !methods.isEmpty {
             guard let method = methods.first(where: { $0.supports(challenge) }) else {
                 return .rejected(.noSupportingMethod)
             }
+            let reference: String
             do {
-                try await method.verify(credential)
+                reference = try await method.verify(credential)
             } catch {
                 return .rejected(.settlementUnverified(reason: String(describing: error)))
             }
+            // Mint the receipt from the method's settlement reference. status is
+            // always success (failures rejected above), method is the challenge's,
+            // and the timestamp is the injected `now` (verification time).
+            receipt = Receipt(
+                method: challenge.method,
+                timestamp: RFC3339DateTime(date: now),
+                reference: reference
+            )
         }
 
         guard await replayStore.consume(challenge.id) else { return .rejected(.replayed) }
 
-        return .verified(MPPVerified(credential: credential))
+        return .verified(MPPVerified(credential: credential, receipt: receipt))
     }
 
     /// The result of verifying a credential.

@@ -7,6 +7,20 @@ import Testing
 // Spec: draft-httpauth-payment-00 §5.1.2 (id binding) + §11.3/§11.5 (single use).
 // The verifier runs parse -> HMAC-verify -> binding-pin -> expiry -> digest ->
 // consume(last).
+/// A method that accepts any challenge and reports a fixed settlement reference,
+/// to exercise receipt minting (MPPServer ships no concrete method). Internal so
+/// the middleware suite in this target can reuse it.
+struct AcceptingMethod: PaymentMethodServer {
+    let reference: String
+    func supports(_: Challenge) -> Bool {
+        true
+    }
+
+    func verify(_: Credential) async throws -> String {
+        reference
+    }
+}
+
 @Suite("PaymentVerifier")
 struct PaymentVerifierTests {
     private let secret = Data("test-secret-key-12345".utf8)
@@ -54,6 +68,27 @@ struct PaymentVerifierTests {
         )
         let token = try #require(verified(outcome))
         #expect(token.credential.challenge.method.rawValue == "tempo")
+        // Protocol-only verification (no method registered) settles nothing, so
+        // it mints no receipt.
+        #expect(token.receipt == nil)
+    }
+
+    @Test("a registered method's settlement reference is minted into the receipt")
+    func mintsReceiptFromMethod() async throws {
+        let verifier = PaymentVerifier(
+            signer: signer(),
+            replayStore: InMemoryReplayStore(),
+            methods: [AcceptingMethod(reference: "0xtxref")]
+        )
+        let header = try signedCredential(signer: signer()).headerValue
+        let outcome = try await verifier.verify(
+            authorization: header, body: Data(), now: now, expecting: expected()
+        )
+        let receipt = try #require(verified(outcome)?.receipt)
+        #expect(receipt.status == .success)
+        #expect(receipt.method.rawValue == "tempo") // the challenge's method
+        #expect(receipt.reference == "0xtxref") // the method's settlement reference
+        #expect(receipt.timestamp.date == now) // the injected verification time
     }
 
     @Test("rejects a non-Payment Authorization value")
