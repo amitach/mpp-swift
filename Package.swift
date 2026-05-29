@@ -22,6 +22,7 @@ let package = Package(
         .library(name: "MPPCore", targets: ["MPPCore"]),
         .library(name: "MPPBodyDigest", targets: ["MPPBodyDigest"]),
         .library(name: "MPPServer", targets: ["MPPServer"]),
+        .library(name: "MPPClient", targets: ["MPPClient"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
@@ -53,6 +54,17 @@ let package = Package(
         .testTarget(
             name: "MPPServerTests",
             dependencies: ["MPPServer", "MPPCore", "MPPBodyDigest"]
+        ),
+        .target(
+            name: "MPPClient",
+            dependencies: [
+                "MPPCore",
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+            ]
+        ),
+        .testTarget(
+            name: "MPPClientTests",
+            dependencies: ["MPPClient", "MPPCore"]
         ),
     ],
     swiftLanguageModes: [.v6]
