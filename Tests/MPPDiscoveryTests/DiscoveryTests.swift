@@ -161,6 +161,12 @@ struct DiscoveryTests {
         #expect(DiscoveryValidator.validate(json).isEmpty == false)
     }
 
+    @Test("PaymentInfo(offers:) enforces at-least-one on construction")
+    func paymentInfoInitEnforcesNonEmpty() {
+        #expect(PaymentInfo(offers: []) == nil)
+        #expect(PaymentInfo(offers: [PaymentOffer(amount: .dynamic)]) != nil)
+    }
+
     @Test("rejects an empty offers array")
     func rejectsEmptyOffers() {
         let json = Data(#"""

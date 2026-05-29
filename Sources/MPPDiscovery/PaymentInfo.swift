@@ -84,8 +84,11 @@ public struct PaymentInfo: Sendable, Hashable, Codable {
     /// The offers (at least one).
     public var offers: [PaymentOffer]
 
-    /// Creates payment info from one or more offers.
-    public init(offers: [PaymentOffer]) {
+    /// Creates payment info from one or more offers, or `nil` if `offers` is
+    /// empty (the "at least one offer" invariant, enforced on both construction
+    /// and decode).
+    public init?(offers: [PaymentOffer]) {
+        guard !offers.isEmpty else { return nil }
         self.offers = offers
     }
 
