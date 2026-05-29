@@ -24,11 +24,37 @@ public enum EIP712 {
         var remaining = value
         var offset = 31
         while remaining != 0 {
-            word[offset] = UInt8(remaining & 0xFF)
+            word[offset] = UInt8(truncatingIfNeeded: remaining)
             remaining >>= 8
             offset -= 1
         }
         return word
+    }
+
+    /// Encodes a base-10 unsigned integer string as a 32-byte big-endian `uint256`
+    /// word, or `nil` if `text` is empty, contains a non-ASCII-digit, or exceeds
+    /// 2^256 - 1. This is the in-house amount encoder (the voucher's cumulative
+    /// amount arrives as a decimal string); `UInt128`/`UInt256` are avoided because
+    /// stdlib `UInt128` needs macOS 15 / iOS 18, above this package's deployment
+    /// targets, and a big-integer dependency is unwarranted for plain encoding.
+    public static func uint256(decimal text: String) -> Data? {
+        guard !text.isEmpty else { return nil }
+        var word = [UInt8](repeating: 0, count: 32)
+        for character in text {
+            guard ("0" ... "9").contains(character), let digit = character.wholeNumberValue else {
+                return nil
+            }
+            var carry = digit
+            var index = 31
+            while index >= 0 {
+                let value = Int(word[index]) * 10 + carry
+                word[index] = UInt8(value & 0xFF)
+                carry = value >> 8
+                index -= 1
+            }
+            if carry != 0 { return nil } // overflowed 2^256
+        }
+        return Data(word)
     }
 
     /// `hashStruct(s) = keccak256(typeHash ‖ encodeData(s))`, where `encodeData` is
@@ -52,6 +78,23 @@ public enum EIP712 {
         hashStruct(
             typeHash: domainTypeHash,
             fields: [string(name), string(version), uint256(chainId)]
+        )
+    }
+
+    /// The type hash of the four-field `EIP712Domain` used by the session voucher,
+    /// which additionally binds the escrow `verifyingContract`.
+    public static let domainTypeHashWithVerifyingContract: Data = Keccak256.hash(Data(
+        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)".utf8
+    ))
+
+    /// The domain separator for a domain that also binds a `verifyingContract`
+    /// (the voucher's escrow contract).
+    public static func domainSeparator(
+        name: String, version: String, chainId: UInt64, verifyingContract: EthereumAddress
+    ) -> Data {
+        hashStruct(
+            typeHash: domainTypeHashWithVerifyingContract,
+            fields: [string(name), string(version), uint256(chainId), verifyingContract.word]
         )
     }
 
