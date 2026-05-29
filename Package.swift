@@ -26,6 +26,7 @@ let package = Package(
         .library(name: "MPPEVM", targets: ["MPPEVM"]),
         .library(name: "MPPDiscovery", targets: ["MPPDiscovery"]),
         .library(name: "MPPTempo", targets: ["MPPTempo"]),
+        .library(name: "MPPTempoServer", targets: ["MPPTempoServer"]),
     ],
     dependencies: [
         // swift-crypto and CryptoSwift (below) do NOT overlap; neither replaces the
@@ -128,12 +129,13 @@ let package = Package(
             name: "MPPDiscoveryTests",
             dependencies: ["MPPDiscovery", "MPPCore"]
         ),
-        // MPPTempo: the Tempo charge payment method on the client side. PR-A ships
-        // the zero-amount EIP-712 proof credential only (no on-chain settlement, no
-        // FFI 0x76 transaction layer). Wires MPPEVM's proof signer into MPPClient's
+        // MPPTempo: the Tempo charge payment method, CLIENT side. Ships the
+        // zero-amount EIP-712 proof credential (no on-chain settlement, no FFI 0x76
+        // transaction layer). Wires MPPEVM's proof signer into MPPClient's
         // PaymentMethodClient seam over MPPCore's Challenge/Credential types. Kept
-        // out of MPPClient so a non-Tempo consumer pulls neither CryptoSwift nor
-        // swift-secp256k1 (both arrive transitively through MPPEVM).
+        // off MPPServer so a client-only consumer does not pull the server stack
+        // (MPPServer / MPPBodyDigest / swift-crypto); the verifier lives in
+        // MPPTempoServer below.
         .target(
             name: "MPPTempo",
             dependencies: ["MPPCore", "MPPEVM", "MPPClient"]
@@ -147,6 +149,19 @@ let package = Package(
                 "MPPClient",
                 .product(name: "HTTPTypes", package: "swift-http-types"),
             ]
+        ),
+        // MPPTempoServer: the Tempo charge method, SERVER side (TempoProofVerifier).
+        // Split from MPPTempo so a client-only consumer is not forced to depend on
+        // MPPServer + swift-crypto. Reuses MPPTempo's shared types (TempoChargeRequest,
+        // ProofVariant, TempoChain, TempoMethod) and MPPServer's PaymentMethodServer
+        // seam; recovers the proof via MPPEVM.
+        .target(
+            name: "MPPTempoServer",
+            dependencies: ["MPPTempo", "MPPCore", "MPPEVM", "MPPServer"]
+        ),
+        .testTarget(
+            name: "MPPTempoServerTests",
+            dependencies: ["MPPTempoServer", "MPPTempo", "MPPCore", "MPPEVM", "MPPServer"]
         ),
     ],
     swiftLanguageModes: [.v6]

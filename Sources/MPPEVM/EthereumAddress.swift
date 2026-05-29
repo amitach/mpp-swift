@@ -21,17 +21,7 @@ public struct EthereumAddress: Sendable, Hashable {
     /// checksum casing is accepted but not required or verified here (the address is
     /// defined by its bytes; casing is a display concern).
     public init?(hex: String) {
-        guard hex.count == 42, hex.hasPrefix("0x") || hex.hasPrefix("0X") else { return nil }
-        var raw = Data()
-        raw.reserveCapacity(20)
-        let digits = Array(hex.dropFirst(2))
-        var index = 0
-        while index < digits.count {
-            guard let high = digits[index].hexDigitValue,
-                  let low = digits[index + 1].hexDigitValue else { return nil }
-            raw.append(UInt8(high << 4 | low))
-            index += 2
-        }
+        guard let raw = Data(hexPrefixed: hex), raw.count == 20 else { return nil }
         bytes = raw
     }
 

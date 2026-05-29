@@ -76,7 +76,7 @@ public struct TempoProofMethod: PaymentMethodClient {
     /// resolvable (challenge `chainId` or the configured default), so it is not a
     /// support condition.
     public func supports(_ challenge: Challenge) -> Bool {
-        guard challenge.method == Self.tempoMethod, challenge.intent == .charge,
+        guard challenge.method == TempoMethod.name, challenge.intent == .charge,
               let request = try? TempoChargeRequest(challenge: challenge)
         else { return false }
         return request.isZeroAmount
@@ -96,7 +96,7 @@ public struct TempoProofMethod: PaymentMethodClient {
         // method is public): the proof binds only (challengeId, realm), not the
         // method/intent, so never sign one for a challenge that is not a Tempo
         // charge, even if called directly.
-        guard challenge.method == Self.tempoMethod, challenge.intent == .charge else {
+        guard challenge.method == TempoMethod.name, challenge.intent == .charge else {
             throw TempoMethodError.wrongMethodOrIntent
         }
         let request: TempoChargeRequest
@@ -152,22 +152,12 @@ public struct TempoProofMethod: PaymentMethodClient {
         "0x" + data.map { String(format: "%02x", $0) }.joined()
     }
 
-    /// The canonical `tempo` method name. `MethodName` ships no predefined
-    /// constant (and its unchecked initializer is package-internal), so this fixed
-    /// grammar-valid token is built once here; the intent uses `IntentName.charge`.
-    private static let tempoMethod: MethodName = {
-        guard let name = try? MethodName("tempo") else {
-            preconditionFailure("tempo is a valid method name")
-        }
-        return name
-    }()
-
     /// The `tempo` / `charge` advertisement range, built once. `PaymentRange` only
     /// throws on an out-of-range quality, and the default quality is in range, so
     /// this construction cannot fail.
     private static let chargeRange: PaymentRange = {
         guard let range = try? PaymentRange(
-            method: .value(tempoMethod), intent: .value(.charge)
+            method: .value(TempoMethod.name), intent: .value(.charge)
         ) else {
             preconditionFailure("tempo/charge with default quality is a valid range")
         }

@@ -105,7 +105,7 @@ struct TempoProofMethodTests {
 
         // The recovered signer of the emitted signature equals the wallet.
         let signatureHex = try #require(credential.payload["signature"]?.stringValue)
-        let signature = try #require(Data(hexAfter0x: signatureHex))
+        let signature = try #require(Data(hexPrefixed: signatureHex))
         let proof = ZeroAmountProof.v2Realm(challengeId: Self.challengeId, realm: Self.realm)
         #expect(proof.recoverSigner(chainId: Self.chainId, signature: signature) == subject.address)
     }
@@ -327,24 +327,5 @@ private extension JSONValue {
     var stringValue: String? {
         if case let .string(value) = self { return value }
         return nil
-    }
-}
-
-private extension Data {
-    /// Parses a `0x`-prefixed hex string into bytes, or `nil` if malformed.
-    init?(hexAfter0x hex: String) {
-        guard hex.hasPrefix("0x") else { return nil }
-        let digits = Array(hex.dropFirst(2))
-        guard digits.count.isMultiple(of: 2) else { return nil }
-        var raw = Data()
-        raw.reserveCapacity(digits.count / 2)
-        var index = 0
-        while index < digits.count {
-            guard let high = digits[index].hexDigitValue,
-                  let low = digits[index + 1].hexDigitValue else { return nil }
-            raw.append(UInt8(high << 4 | low))
-            index += 2
-        }
-        self = raw
     }
 }

@@ -10,21 +10,40 @@ import MPPCore
 /// is one this server signed (HMAC, via ``ChallengeSigner``); confirm the
 /// challenge's realm/method/intent match the route's ``RouteBinding``; confirm
 /// it has not expired; confirm the request body matches the challenge digest
-/// (when the challenge carries one); and finally consume the challenge id exactly
-/// once (``ReplayStore``).
+/// (when the challenge carries one); verify the method-specific settlement (when
+/// ``PaymentMethodServer`` verifiers are registered); and finally consume the
+/// challenge id exactly once (``ReplayStore``).
 ///
-/// Consume is LAST on purpose: an invalid credential must never burn a legitimate
-/// payer's challenge id, and the consume must precede any side effect the caller
-/// performs (it returns inside `verify`, before the handler runs). Consume also
-/// fails closed: if first use cannot be confirmed, the credential is rejected.
+/// Consume is LAST on purpose: an invalid credential (including one whose
+/// settlement check fails) must never burn a legitimate payer's challenge id, and
+/// the consume must precede any side effect the caller performs (it returns inside
+/// `verify`, before the handler runs). Consume also fails closed: if first use
+/// cannot be confirmed, the credential is rejected. The settlement step runs just
+/// before consume for the same reason, and fails closed too: with verifiers
+/// registered, a challenge no verifier supports is rejected.
 public struct PaymentVerifier: Sendable {
     private let signer: ChallengeSigner
     private let replayStore: any ReplayStore
+    private let methods: [any PaymentMethodServer]
 
-    /// Creates a verifier over the server's challenge signer and replay store.
-    public init(signer: ChallengeSigner, replayStore: any ReplayStore) {
+    /// Creates a verifier over the server's challenge signer and replay store, and
+    /// an optional set of ``PaymentMethodServer`` settlement verifiers.
+    ///
+    /// With no `methods` (the default), verification is protocol-only, exactly as
+    /// before: the ``MPPVerified`` token attests the protocol checks and the caller
+    /// is responsible for any settlement check. With `methods` registered, the one
+    /// that ``PaymentMethodServer/supports(_:)`` the challenge must also verify the
+    /// settlement before the credential is accepted, and a challenge that no
+    /// registered method supports is rejected (fail closed) rather than granted on
+    /// the protocol checks alone.
+    public init(
+        signer: ChallengeSigner,
+        replayStore: any ReplayStore,
+        methods: [any PaymentMethodServer] = []
+    ) {
         self.signer = signer
         self.replayStore = replayStore
+        self.methods = methods
     }
 
     /// Verifies the `Authorization: Payment` header value against `body` as of
@@ -67,6 +86,23 @@ public struct PaymentVerifier: Sendable {
             }
         }
 
+        // Method-specific settlement verify, BEFORE consume: a credential rejected
+        // here must not burn a legitimate payer's challenge id (so a corrected
+        // credential for the same challenge can still succeed). When verifiers are
+        // registered, the matching one must accept; if none supports a challenge
+        // that otherwise bound to this route, fail closed rather than grant access
+        // on the protocol checks alone.
+        if !methods.isEmpty {
+            guard let method = methods.first(where: { $0.supports(challenge) }) else {
+                return .rejected(.noSupportingMethod)
+            }
+            do {
+                try await method.verify(credential)
+            } catch {
+                return .rejected(.settlementUnverified(reason: String(describing: error)))
+            }
+        }
+
         guard await replayStore.consume(challenge.id) else { return .rejected(.replayed) }
 
         return .verified(MPPVerified(credential: credential))
@@ -96,5 +132,12 @@ public struct PaymentVerifier: Sendable {
         case digestMismatch
         /// The challenge id had already been consumed (replay).
         case replayed
+        /// A settlement verifier is registered but none supports this challenge
+        /// (fail closed: the resource is not granted on the protocol checks alone).
+        case noSupportingMethod
+        /// The method-specific settlement check rejected the credential (for a
+        /// proof, the signature did not recover to the `source` wallet). `reason`
+        /// carries the method error's description for diagnostics.
+        case settlementUnverified(reason: String)
     }
 }
