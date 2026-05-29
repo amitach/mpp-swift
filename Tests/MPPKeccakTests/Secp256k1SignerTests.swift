@@ -90,9 +90,11 @@ struct Secp256k1SignerTests {
         let expectedS = "30104fdc36d91582b5757e1de73d982e803cc14d75e82c65daf924e38d27d834"
         #expect(hex(signature.compact) == expectedR + expectedS)
         #expect(signature.recoveryID == 1)
-        let pubkeyX = "0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f817"
-        let pubkeyY = "98483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8"
-        #expect(hex(signer.publicKey) == pubkeyX + pubkeyY)
+        // The public key for private key 1 is the secp256k1 generator G, serialized
+        // uncompressed as 0x04 || G.x || G.y (each coordinate 32 bytes).
+        let generatorX = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+        let generatorY = "483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8"
+        #expect(hex(signer.publicKey) == "04" + generatorX + generatorY)
     }
 
     // Blocker fixes: recoverPublicKey is the attacker-facing verification path.

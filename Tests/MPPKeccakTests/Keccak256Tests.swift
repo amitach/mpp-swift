@@ -2,12 +2,13 @@ import Foundation
 import Testing
 @testable import MPPKeccak
 
-// Keccak-256 known-answer vectors. The empty-string and "abc" digests are the
-// universally-published Keccak-256 values; the remaining vectors were generated
-// with js-sha3 (cross-checked against those two anchors) and deliberately span
-// the rate boundary (135 = one free pad byte, 136 = a full block forcing an
-// extra padding block, 137 = multi-block) and a larger multi-block input, since
-// those are the paths a sponge implementation gets wrong.
+// Keccak-256 known-answer vectors over the MPPKeccak wrapper. The empty-string
+// and "abc" digests are the universally-published Keccak-256 values; the rest were
+// generated with js-sha3 (cross-checked against those two anchors) and deliberately
+// span the rate boundary (135 = one free pad byte, 136 = a full block forcing an
+// extra padding block, 137 = multi-block) and a larger multi-block input. These pin
+// that the wrapper selects the Keccak variant (not NIST SHA-3) and guard against a
+// future provider swap regressing the result.
 @Suite("Keccak256")
 struct Keccak256Tests {
     private func hex(_ data: Data) -> String {
