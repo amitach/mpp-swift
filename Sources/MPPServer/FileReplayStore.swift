@@ -218,19 +218,34 @@ public actor FileReplayStore: ReplayStore {
     }
 
     /// A record is expired when the consume time it stores is older than
-    /// `retentionSeconds`. Files we cannot parse are left in place (conservative:
-    /// never drop a record we are unsure about).
+    /// `retentionSeconds`.
     private static func isExpired(
         _ entry: URL,
         retentionSeconds: Double,
         asOf instant: Date
     ) -> Bool {
-        guard
+        if
             let raw = try? String(contentsOf: entry, encoding: .utf8),
-            let seconds = Double(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+            let seconds = Double(raw.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            let consumedAt = Date(timeIntervalSince1970: seconds)
+            return instant.timeIntervalSince(consumedAt) > retentionSeconds
+        }
+        // Unparsable contents. An empty file is a record whose timestamp write
+        // never completed (a crash between the exclusive create and the write),
+        // so its id was never accepted; once it is older than the retention
+        // window its challenge has long expired and removing it cannot enable a
+        // replay, so reap it by its modification time rather than leak it
+        // forever. Any other (non-empty) unparsable file is kept, conservatively:
+        // never drop a record we cannot rule out as a real consume.
+        guard
+            let values = try? entry.resourceValues(forKeys: [
+                .fileSizeKey,
+                .contentModificationDateKey,
+            ]),
+            values.fileSize == 0,
+            let modified = values.contentModificationDate
         else { return false }
-        let consumedAt = Date(timeIntervalSince1970: seconds)
-        return instant.timeIntervalSince(consumedAt) > retentionSeconds
+        return instant.timeIntervalSince(modified) > retentionSeconds
     }
 
     private static func seconds(of duration: Duration) -> Double {

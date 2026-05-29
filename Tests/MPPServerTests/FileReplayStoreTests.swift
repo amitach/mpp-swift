@@ -151,6 +151,38 @@ final class FileReplayStoreTests: Sendable {
         #expect(await !reopened.consume("x"))
     }
 
+    @Test("an empty crashed-mid-write record is reaped once older than retention")
+    func emptyRecordPrunedWhenOld() throws {
+        // A 0-byte file models a crash between the exclusive create and the
+        // timestamp write: the id was never accepted, so once it ages past the
+        // window it should be reaped, not leaked forever.
+        let directory = makeDirectoryURL()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let dead = directory.appendingPathComponent("deadbeef", isDirectory: false)
+        FileManager.default.createFile(atPath: dead.path, contents: Data())
+        try FileManager.default.setAttributes(
+            [.modificationDate: Self.reference.addingTimeInterval(-1000)], ofItemAtPath: dead.path
+        )
+
+        // Opening with a 60s window and the reference clock prunes on load.
+        _ = try FileReplayStore(directoryURL: directory, retention: .seconds(60), now: fixedClock())
+        #expect(!FileManager.default.fileExists(atPath: dead.path))
+    }
+
+    @Test("an empty record within the retention window is kept (could be in-flight)")
+    func emptyRecordKeptWhenFresh() throws {
+        let directory = makeDirectoryURL()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fresh = directory.appendingPathComponent("deadbeef", isDirectory: false)
+        FileManager.default.createFile(atPath: fresh.path, contents: Data())
+        try FileManager.default.setAttributes(
+            [.modificationDate: Self.reference], ofItemAtPath: fresh.path
+        )
+
+        _ = try FileReplayStore(directoryURL: directory, retention: .seconds(60), now: fixedClock())
+        #expect(FileManager.default.fileExists(atPath: fresh.path))
+    }
+
     @Test("under concurrent consume of one id, exactly one caller wins")
     func concurrentSingleWinner() async throws {
         let store = try makeStore()
