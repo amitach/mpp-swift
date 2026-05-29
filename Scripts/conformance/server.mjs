@@ -32,6 +32,9 @@ const mppx = Mppx.create({
 })
 
 const PORT = Number(process.env.PORT ?? 8788)
+// The actually-bound port, resolved once the server is listening (PORT=0 asks the
+// OS for an ephemeral port). Used in the toRequest host fallback below.
+let boundPort = PORT
 const MODE = process.env.CONFORMANCE_MODE ?? 'local'
 // Moderato testnet (chainId 42431). Used only by the optional `testnet` mode's
 // startup reachability probe; the zero-amount proof itself never calls it.
@@ -56,7 +59,7 @@ async function probeModerato() {
 
 /** Adapts a Node IncomingMessage into a Fetch Request. */
 async function toRequest(req) {
-  const url = `http://${req.headers.host ?? `127.0.0.1:${PORT}`}${req.url}`
+  const url = `http://${req.headers.host ?? `127.0.0.1:${boundPort}`}${req.url}`
   const headers = new Headers()
   for (const [key, value] of Object.entries(req.headers)) {
     if (typeof value === 'string') headers.set(key, value)
@@ -114,8 +117,9 @@ if (MODE === 'testnet') {
 }
 
 server.listen(PORT, '127.0.0.1', () => {
-  // The run script waits for this line before starting the Swift test. Log the
-  // actually-bound port (not the env value) so a PORT=0 OS-assigned port is real.
-  const port = server.address()?.port ?? PORT
-  console.log(`conformance-server (${MODE}) listening http://127.0.0.1:${port}/proof`)
+  // The run script waits for this line before starting the Swift test, and parses
+  // the port from it. Log the actually-bound port (not the env value) so a PORT=0
+  // OS-assigned port is real end to end.
+  boundPort = server.address()?.port ?? PORT
+  console.log(`conformance-server (${MODE}) listening http://127.0.0.1:${boundPort}/proof`)
 })
