@@ -34,7 +34,10 @@ public enum Channel {
         /// The chain the escrow is deployed on (ABI-encoded as a `uint256`).
         public let chainId: UInt64
 
-        public init(
+        /// Creates channel parameters, or `nil` if `salt` is not exactly 32 bytes
+        /// (a `bytes32`). Validating here makes an invalid-salt value
+        /// unrepresentable, so ``Channel/id(_:)`` is total.
+        public init?(
             payer: EthereumAddress,
             payee: EthereumAddress,
             token: EthereumAddress,
@@ -43,6 +46,7 @@ public enum Channel {
             escrowContract: EthereumAddress,
             chainId: UInt64
         ) {
+            guard salt.count == 32 else { return nil }
             self.payer = payer
             self.payee = payee
             self.token = token
@@ -53,10 +57,9 @@ public enum Channel {
         }
     }
 
-    /// Computes the 32-byte channel id from `parameters`, or `nil` if its `salt`
-    /// is not exactly 32 bytes (a `bytes32`).
-    public static func id(_ parameters: Parameters) -> Data? {
-        guard parameters.salt.count == 32 else { return nil }
+    /// Computes the 32-byte channel id from `parameters`. Total: ``Parameters``
+    /// guarantees a `bytes32` salt at construction.
+    public static func id(_ parameters: Parameters) -> Data {
         let encoded = parameters.payer.word
             + parameters.payee.word
             + parameters.token.word

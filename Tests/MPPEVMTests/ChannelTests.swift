@@ -48,7 +48,7 @@ struct ChannelTests {
         escrow: EthereumAddress? = nil,
         chainId: UInt64? = nil
     ) -> Data? {
-        Channel.id(Channel.Parameters(
+        Channel.Parameters(
             payer: payer ?? self.payer,
             payee: payee ?? self.payee,
             token: token ?? self.token,
@@ -56,7 +56,7 @@ struct ChannelTests {
             authorizedSigner: authorizedSigner ?? self.authorizedSigner,
             escrowContract: escrow ?? self.escrow,
             chainId: chainId ?? self.chainId
-        ))
+        ).map(Channel.id)
     }
 
     @Test("matches keccak256 of the hand-built ABI-encode preimage")
@@ -76,6 +76,11 @@ struct ChannelTests {
         let derived = try #require(id())
         #expect(derived == Keccak256.hash(preimage))
         #expect(derived.count == 32)
+        // Self-contained pinned value for the canonical inputs (computed via this
+        // SDK's Keccak256, which is pinned to known-answer vectors in Keccak256Tests).
+        // Cross-check against viem/cast computeChannelId when network is available.
+        #expect(derived
+            == hexData("5db832ef1f06a767e0561f2fe53231240f8804895a21d5804ddb15b329c73c5e"))
     }
 
     @Test("is deterministic for the same inputs")
@@ -97,9 +102,13 @@ struct ChannelTests {
         #expect(try #require(id(chainId: 1)) != base)
     }
 
-    @Test("a salt that is not exactly 32 bytes returns nil", arguments: [0, 31, 33, 64])
+    @Test("Parameters rejects a salt that is not exactly 32 bytes", arguments: [0, 31, 33, 64])
     func rejectsNon32ByteSalt(byteCount: Int) {
-        #expect(id(salt: Data(repeating: 0, count: byteCount)) == nil)
+        #expect(Channel.Parameters(
+            payer: payer, payee: payee, token: token,
+            salt: Data(repeating: 0, count: byteCount),
+            authorizedSigner: authorizedSigner, escrowContract: escrow, chainId: chainId
+        ) == nil)
     }
 
     @Test("a derived channel id binds a valid, verifiable voucher")
