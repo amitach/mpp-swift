@@ -11,11 +11,21 @@ import { privateKeyToAccount } from 'viem/accounts'
 const account = privateKeyToAccount('0x' + '00'.repeat(31) + '03')
 const url = process.env.SERVER_URL ?? 'http://127.0.0.1:8799/proof'
 
+const verbose = process.env.CONFORMANCE_VERBOSE === '1'
+if (verbose) {
+  console.log(`[client] wallet (did:pkh source) = ${account.address}`)
+  // Show the raw 402 challenge the server issues, before mppx pays it.
+  const probe = await fetch(url)
+  console.log(`[client] GET ${url} -> ${probe.status}`)
+  console.log(`[client]   WWW-Authenticate: ${probe.headers.get('www-authenticate')}`)
+}
+
 const mppx = Mppx.create({ methods: [tempo({ account })] })
 
 // mppx.fetch transparently handles the 402: it parses the challenge, signs the
 // zero-amount proof, and retries with the Authorization: Payment credential.
 const response = await mppx.fetch(url)
+if (verbose) console.log(`[client] paid retry -> ${response.status}`)
 const body = await response.json().catch(() => ({}))
 
 if (!response.ok || body.paid !== true) {
