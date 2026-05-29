@@ -90,7 +90,6 @@ struct DiscoveryTests {
         """#.utf8)
         let errors = DiscoveryValidator.validate(json)
         #expect(errors.count == 1)
-        #expect(errors.first?.severity == .error)
         #expect(errors.first?.path.contains("amount") == true)
     }
 
@@ -140,5 +139,95 @@ struct DiscoveryTests {
         #expect(doc.serviceInfo?.categories == ["a", "b"])
         #expect(doc.serviceInfo?.docs?.apiReference == "/ref")
         #expect(doc.serviceInfo?.docs?.llms == "/llms.txt")
+    }
+
+    // Gate-pass / G7.5 parity additions.
+
+    @Test("rejects a non-numeric openapi version suffix (3.1.evil)")
+    func rejectsBadVersionSuffix() {
+        for bad in ["3.1.evil", "3.0.x", "3.10", "3.2.0", "3"] {
+            #expect(throws: (any Error).self) {
+                try decode(#"{"openapi":"\#(bad)","info":{"title":"x","version":"1"},"paths":{}}"#)
+            }
+        }
+    }
+
+    @Test("rejects offers: null (not a phantom empty offer)")
+    func rejectsNullOffers() {
+        let json = Data(#"""
+        {"openapi":"3.1.0","info":{"title":"x","version":"1"},"paths":{
+          "/p":{"get":{"x-payment-info":{"offers":null}}}}}
+        """#.utf8)
+        #expect(DiscoveryValidator.validate(json).isEmpty == false)
+    }
+
+    @Test("rejects an empty offers array")
+    func rejectsEmptyOffers() {
+        let json = Data(#"""
+        {"openapi":"3.1.0","info":{"title":"x","version":"1"},"paths":{
+          "/p":{"get":{"x-payment-info":{"offers":[]}}}}}
+        """#.utf8)
+        #expect(DiscoveryValidator.validate(json).isEmpty == false)
+    }
+
+    @Test("flags a malformed amount inside an offers array with an indexed path")
+    func flagsBadAmountInOffers() {
+        let json = Data(#"""
+        {"openapi":"3.1.0","info":{"title":"x","version":"1"},"paths":{
+          "/p":{"get":{"x-payment-info":{"offers":[{"amount":"5"},{"amount":"01"}]}}}}}
+        """#.utf8)
+        let errors = DiscoveryValidator.validate(json)
+        let path = try? #require(errors.first?.path)
+        #expect(path?.contains("[1]") == true)
+        #expect(path?.contains("amount") == true)
+    }
+
+    @Test("accepts a custom intent value")
+    func acceptsCustomIntent() throws {
+        let doc = try decode(#"""
+        {"openapi":"3.1.0","info":{"title":"x","version":"1"},"paths":{
+          "/p":{"post":{"x-payment-info":{"amount":"5","intent":"subscribe"}}}}}
+        """#)
+        #expect(doc.paths["/p"]?[.post]?.paymentInfo?.offers.first?.intent == "subscribe")
+    }
+
+    @Test("rejects a document missing info")
+    func rejectsMissingInfo() {
+        let json = Data(#"{"openapi":"3.1.0","paths":{}}"#.utf8)
+        #expect(DiscoveryValidator.validate(json).isEmpty == false)
+    }
+
+    @Test("validator passes an offers-form document")
+    func validatorPassesOffers() {
+        let json = Data(#"""
+        {"openapi":"3.1.0","info":{"title":"x","version":"1"},"paths":{
+          "/p":{"get":{"x-payment-info":{"offers":[{"amount":"5"},{"amount":null}]}}}}}
+        """#.utf8)
+        #expect(DiscoveryValidator.validate(json).isEmpty)
+    }
+
+    @Test("rejects an invalid doc link; accepts a URI and a relative path")
+    func docLinkValidation() {
+        let bad = Data(#"""
+        {"openapi":"3.1.0","info":{"title":"x","version":"1"},"paths":{},
+         "x-service-info":{"docs":{"homepage":"not a uri"}}}
+        """#.utf8)
+        #expect(DiscoveryValidator.validate(bad).isEmpty == false)
+        #expect(ServiceDocs.isURIOrPath("https://example.com/x"))
+        #expect(ServiceDocs.isURIOrPath("/llms.txt"))
+        #expect(ServiceDocs.isURIOrPath("not-a-uri") == false)
+        #expect(ServiceDocs.isURIOrPath("/has space") == false)
+    }
+
+    @Test("tolerates a non-object path item (a $ref string) by skipping it")
+    func toleratesNonObjectPathItem() throws {
+        let doc = try decode(#"""
+        {"openapi":"3.1.0","info":{"title":"x","version":"1"},"paths":{
+          "/ref":"#/components/pathItems/shared",
+          "/p":{"get":{"x-payment-info":{"amount":"5"}}}}}
+        """#)
+        #expect(doc.paths["/ref"] == nil)
+        #expect(try doc.paths["/p"]?[.get]?.paymentInfo?.offers.first?
+            .amount == .fixed(Amount("5")))
     }
 }

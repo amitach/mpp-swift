@@ -1,24 +1,18 @@
 import Foundation
 
-/// Validates a discovery document structurally and semantically. Returns the
-/// list of problems found (empty means valid). Semantic checks that the typed
-/// model already enforces on decode are surfaced here as errors with a path:
-/// a non-integer (for example floating-point) or otherwise malformed `amount`,
-/// an empty `offers` array, offers mixed with flat fields, and an unsupported
-/// `openapi` version.
-/// A single discovery-document validation problem.
+/// A single discovery-document validation problem (always an error in this
+/// release; warning-level semantic checks land with the operation-level
+/// validations).
 public struct DiscoveryValidationError: Sendable, Hashable {
+    /// A human-readable description of the problem.
     public let message: String
     /// Dotted JSON path to the problem (for example
-    /// `paths./x.get.x-payment-info.amount`), or `(root)`.
+    /// `paths./x.get.x-payment-info.offers[0].amount`), or `(root)`.
     public let path: String
-    public let severity: Severity
-    public enum Severity: String, Sendable, Hashable { case error, warning }
 
-    public init(message: String, path: String, severity: Severity) {
+    public init(message: String, path: String) {
         self.message = message
         self.path = path
-        self.severity = severity
     }
 }
 
@@ -35,13 +29,15 @@ public enum DiscoveryValidator {
             return one("\(error)", at: "openapi")
         } catch let error as PaymentInfo.DecodingFailure {
             return one("\(error)", at: "x-payment-info")
+        } catch let error as ServiceDocs.DecodingFailure {
+            return one("\(error)", at: "x-service-info.docs")
         } catch {
             return one("\(error)", at: "(root)")
         }
     }
 
     private static func one(_ message: String, at path: String) -> [DiscoveryValidationError] {
-        [DiscoveryValidationError(message: message, path: path, severity: .error)]
+        [DiscoveryValidationError(message: message, path: path)]
     }
 
     private static func describe(_ error: DecodingError) -> DiscoveryValidationError {
@@ -53,13 +49,14 @@ public enum DiscoveryValidator {
              let .valueNotFound(_, ctx):
             context = ctx
         @unknown default:
-            return DiscoveryValidationError(message: "\(error)", path: "(root)", severity: .error)
+            return DiscoveryValidationError(message: "\(error)", path: "(root)")
         }
-        let path = context.codingPath.map(\.stringValue).joined(separator: ".")
+        let path = context.codingPath.map { key in
+            if let index = key.intValue { "[\(index)]" } else { key.stringValue }
+        }.joined(separator: ".")
         return DiscoveryValidationError(
             message: context.debugDescription,
-            path: path.isEmpty ? "(root)" : path,
-            severity: .error
+            path: path.isEmpty ? "(root)" : path
         )
     }
 }

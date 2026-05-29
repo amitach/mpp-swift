@@ -93,6 +93,8 @@ public struct PaymentInfo: Sendable, Hashable, Codable {
     public enum DecodingFailure: Error, Sendable, Hashable {
         /// `offers` was present but empty.
         case emptyOffers
+        /// `offers` was present but explicitly `null`.
+        case nullOffers
         /// `offers` was mixed with flat offer fields.
         case mixedOffersAndFlatFields
     }
@@ -103,7 +105,13 @@ public struct PaymentInfo: Sendable, Hashable, Codable {
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        if let parsed = try container.decodeIfPresent([PaymentOffer].self, forKey: .offers) {
+        if container.contains(.offers) {
+            // An explicit `offers: null` is malformed (not a flat form); reject it
+            // rather than fall through to a phantom empty offer.
+            guard try !container.decodeNil(forKey: .offers) else {
+                throw DecodingFailure.nullOffers
+            }
+            let parsed = try container.decode([PaymentOffer].self, forKey: .offers)
             guard !parsed.isEmpty else {
                 throw DecodingFailure.emptyOffers
             }

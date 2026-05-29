@@ -49,7 +49,7 @@ public struct DiscoveryDocument: Sendable, Hashable {
 }
 
 /// An HTTP method that can carry an OpenAPI operation.
-public enum HTTPMethod: String, Sendable, Hashable, CaseIterable, Codable {
+public enum HTTPMethod: String, Sendable, Hashable, Codable {
     case get, put, post, delete, options, head, patch, trace
 }
 
@@ -95,12 +95,26 @@ extension DiscoveryDocument: Codable {
         case serviceInfo = "x-service-info"
     }
 
+    /// Accepts an `openapi` of major.minor `3.0` or `3.1`, with an optional
+    /// all-numeric patch (and further numeric components). Rejects a non-numeric
+    /// suffix such as `3.1.evil` and any other major.minor such as `3.10`.
+    private static func isSupportedVersion(_ version: String) -> Bool {
+        let parts = version.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count >= 2, parts[0] == "3", parts[1] == "0" || parts[1] == "1" else {
+            return false
+        }
+        for component in parts.dropFirst(2) {
+            guard !component.isEmpty, component.allSatisfy({ ("0" ... "9").contains($0) }) else {
+                return false
+            }
+        }
+        return true
+    }
+
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: FixedKey.self)
         openapi = try container.decode(String.self, forKey: .openapi)
-        guard openapi.hasPrefix("3.0.") || openapi.hasPrefix("3.1.")
-            || openapi == "3.0" || openapi == "3.1"
-        else {
+        guard Self.isSupportedVersion(openapi) else {
             throw DecodingFailure.unsupportedOpenAPIVersion(openapi)
         }
         info = try container.decode(Info.self, forKey: .info)
@@ -112,15 +126,23 @@ extension DiscoveryDocument: Codable {
                 keyedBy: DynamicKey.self, forKey: .paths
             )
             for pathKey in pathsContainer.allKeys {
-                let itemContainer = try pathsContainer.nestedContainer(
+                // A path-item value that is not an object (a `$ref` string, an array,
+                // null) carries no operations to extract; skip it rather than fail,
+                // so an arbitrary but valid OpenAPI document still parses.
+                guard let itemContainer = try? pathsContainer.nestedContainer(
                     keyedBy: DynamicKey.self, forKey: pathKey
-                )
+                ) else { continue }
                 var operations: [HTTPMethod: DiscoveryOperation] = [:]
                 // Decode only the keys that are HTTP methods; ignore the rest of the
-                // path item (parameters, $ref, summary, and anything else), so
-                // arbitrary OpenAPI content does not break parsing.
+                // path item (parameters, $ref, summary, and anything else).
                 for methodKey in itemContainer.allKeys {
                     guard let method = HTTPMethod(rawValue: methodKey.stringValue) else { continue }
+                    // Skip a method value that is not an object (for example a `$ref`
+                    // string); but a malformed operation object still surfaces its
+                    // error (so a bad `x-payment-info` is reported, not swallowed).
+                    guard (try? itemContainer.nestedContainer(
+                        keyedBy: DynamicKey.self, forKey: methodKey
+                    )) != nil else { continue }
                     operations[method] = try itemContainer.decode(
                         DiscoveryOperation.self, forKey: methodKey
                     )
