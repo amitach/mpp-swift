@@ -1,0 +1,191 @@
+import Foundation
+import MPPClient
+import MPPCore
+import MPPEVM
+
+/// The Tempo charge payment method, client side, for the zero-amount EIP-712
+/// proof path only.
+///
+/// It pays a `tempo` / `charge` challenge whose `amount` is `0` by signing an
+/// EIP-712 proof of wallet control (no on-chain settlement). A non-zero charge
+/// is a settled transfer that requires the Tempo `0x76` transaction layer and is
+/// reported unsupported here (a later PR). Signing reuses ``ZeroAmountProof`` and
+/// ``Secp256k1Signer`` from `MPPEVM`; this type only routes and assembles the
+/// ``Credential``.
+///
+/// Construction derives the wallet address from the signer's public key, so the
+/// `did:pkh` source and the v1 `wallet` field always match the signing key.
+public struct TempoProofMethod: PaymentMethodClient {
+    private let signer: Secp256k1Signer
+    private let wallet: EthereumAddress
+    private let defaultChainId: UInt64
+    private let variant: ProofVariant
+    private let approval: TempoApprovalPolicy
+
+    /// Creates the method over a signer.
+    ///
+    /// - Parameters:
+    ///   - signer: The secp256k1 signer; its public key fixes the wallet address.
+    ///   - defaultChainId: The chain to bind the proof to when the challenge's
+    ///     `methodDetails.chainId` is absent. Defaults to ``TempoChain/mainnet``,
+    ///     matching the reference SDKs' fallback; pass another ``TempoChain`` (or
+    ///     any chain id) to target a different network.
+    ///   - variant: Which proof shape to emit (defaults to ``ProofVariant/v2Realm``).
+    ///   - approval: The pre-sign spending control (defaults to
+    ///     ``TempoApprovalPolicy/allowAll``).
+    /// - Returns: `nil` only if a valid Ethereum address cannot be derived from
+    ///   the signer's public key (which does not happen for a signer built from a
+    ///   valid private key).
+    public init?(
+        signer: Secp256k1Signer,
+        defaultChainId: UInt64 = TempoChain.mainnet,
+        variant: ProofVariant = .v2Realm,
+        approval: TempoApprovalPolicy = .allowAll
+    ) {
+        guard let wallet = EthereumAddress(uncompressedPublicKey: signer.publicKey) else {
+            return nil
+        }
+        self.signer = signer
+        self.wallet = wallet
+        self.defaultChainId = defaultChainId
+        self.variant = variant
+        self.approval = approval
+    }
+
+    /// The Ethereum address derived from the signer, paid from and named in the
+    /// `did:pkh` source.
+    public var address: EthereumAddress {
+        wallet
+    }
+
+    /// The `Accept-Payment` ranges this method can satisfy: the Tempo charge
+    /// method/intent. A client builds its `Accept-Payment` header from the union
+    /// of its methods' ranges (`AcceptPayment.format(...)`) rather than hardcoding
+    /// the value, so advertising stays derived from the registered methods.
+    public var paymentRanges: [PaymentRange] {
+        [Self.chargeRange]
+    }
+
+    /// Whether this is a `tempo` / `charge` challenge with a decodable
+    /// zero-amount request.
+    ///
+    /// A decode failure means the challenge is not one this method can pay, so it
+    /// is mapped to `false` here (the throwing decode is re-run in
+    /// ``buildCredential(for:)``, which surfaces the specific reason). A non-zero
+    /// amount is a settled transfer this PR does not handle. The chain is always
+    /// resolvable (challenge `chainId` or the configured default), so it is not a
+    /// support condition.
+    public func supports(_ challenge: Challenge) -> Bool {
+        guard challenge.method == Self.tempoMethod, challenge.intent == .charge,
+              let request = try? TempoChargeRequest(challenge: challenge)
+        else { return false }
+        return request.isZeroAmount
+    }
+
+    /// Builds the zero-amount proof credential for `challenge`.
+    ///
+    /// Decodes the charge, runs the approval gate (no signature is produced if it
+    /// rejects), signs the EIP-712 proof for the selected variant, and assembles
+    /// the credential with the `did:pkh` source and the `{type, signature}`
+    /// payload.
+    ///
+    /// - Throws: ``TempoMethodError`` for a malformed request, a non-zero amount,
+    ///   an unresolvable chain, a rejected approval, or a signing failure.
+    public func buildCredential(for challenge: Challenge) async throws -> Credential {
+        // Authoritative re-check (the flow filters with supports() first, but this
+        // method is public): the proof binds only (challengeId, realm), not the
+        // method/intent, so never sign one for a challenge that is not a Tempo
+        // charge, even if called directly.
+        guard challenge.method == Self.tempoMethod, challenge.intent == .charge else {
+            throw TempoMethodError.wrongMethodOrIntent
+        }
+        let request: TempoChargeRequest
+        do {
+            request = try TempoChargeRequest(challenge: challenge)
+        } catch {
+            throw TempoMethodError.malformedRequest(error)
+        }
+        guard request.isZeroAmount else { throw TempoMethodError.notAZeroAmountCharge }
+        let chainId = request.chainId ?? defaultChainId
+
+        // The approval policy sees the resolved chainId and the challengeId: for a
+        // zero-amount proof these (with realm) are the fields that actually bind
+        // into the signature, so a policy can bound which chain it proves control
+        // on and which challenge it attests, not only the display-only transfer
+        // fields.
+        let facts = ChargeApproval(
+            challengeId: challenge.id,
+            realm: challenge.realm,
+            chainId: chainId,
+            amount: request.amount,
+            currency: request.currency,
+            recipient: request.recipient,
+            validUntil: challenge.expires
+        )
+        guard await approval.approves(facts) else { throw TempoMethodError.approvalDenied }
+
+        let proof: ZeroAmountProof = switch variant {
+        case .v2Realm: .v2Realm(challengeId: challenge.id, realm: challenge.realm)
+        case .v1Wallet: .v1Wallet(challengeId: challenge.id, wallet: wallet)
+        case .specChallengeId: .v1ChallengeId(challengeId: challenge.id)
+        }
+        let signature: Data
+        do {
+            signature = try proof.sign(chainId: chainId, with: signer)
+        } catch {
+            throw TempoMethodError.signingFailed(error)
+        }
+
+        let payload: [String: JSONValue] = [
+            "type": .string("proof"),
+            "signature": .string(Self.hexPrefixed(signature)),
+        ]
+        return Credential(
+            challenge: challenge,
+            source: ProofSource.did(address: wallet, chainId: chainId),
+            payload: payload
+        )
+    }
+
+    /// `0x`-prefixed lowercase hex, the form an Ethereum signature travels in.
+    private static func hexPrefixed(_ data: Data) -> String {
+        "0x" + data.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// The canonical `tempo` method name. `MethodName` ships no predefined
+    /// constant (and its unchecked initializer is package-internal), so this fixed
+    /// grammar-valid token is built once here; the intent uses `IntentName.charge`.
+    private static let tempoMethod: MethodName = {
+        guard let name = try? MethodName("tempo") else {
+            preconditionFailure("tempo is a valid method name")
+        }
+        return name
+    }()
+
+    /// The `tempo` / `charge` advertisement range, built once. `PaymentRange` only
+    /// throws on an out-of-range quality, and the default quality is in range, so
+    /// this construction cannot fail.
+    private static let chargeRange: PaymentRange = {
+        guard let range = try? PaymentRange(
+            method: .value(tempoMethod), intent: .value(.charge)
+        ) else {
+            preconditionFailure("tempo/charge with default quality is a valid range")
+        }
+        return range
+    }()
+}
+
+/// A reason ``TempoProofMethod`` could not build a credential.
+public enum TempoMethodError: Error, Sendable, Hashable {
+    /// The challenge is not a Tempo charge (wrong `method` or `intent`).
+    case wrongMethodOrIntent
+    /// The challenge `request` could not be decoded.
+    case malformedRequest(TempoChargeRequest.DecodingFailure)
+    /// The charge is not zero-amount; a settled transfer needs the transaction
+    /// layer, which this method does not implement.
+    case notAZeroAmountCharge
+    /// The pre-sign approval policy rejected the charge.
+    case approvalDenied
+    /// The EIP-712 proof could not be signed.
+    case signingFailed(Secp256k1Signer.SigningError)
+}
