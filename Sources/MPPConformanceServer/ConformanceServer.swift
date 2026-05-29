@@ -21,6 +21,13 @@ private let port = UInt16(ProcessInfo.processInfo.environment["PORT"].flatMap(In
 // Moderato testnet chain id, put in the challenge so a Tempo client signs for it.
 private let chainId: UInt64 = 42431
 private let secret = Data("mpp-swift-reverse-conformance-secret-key-0123456789".utf8)
+// CONFORMANCE_VERBOSE=1 logs the challenge issued and the credential verified, so a
+// run shows the real data crossing the wire (useful for debugging interop).
+private let verbose = ProcessInfo.processInfo.environment["CONFORMANCE_VERBOSE"] == "1"
+
+private func log(_ message: @autoclosure () -> String) {
+    if verbose { print(message()); fflush(stdout) }
+}
 
 private func makeMiddleware() throws -> MPPServerMiddleware {
     let signer = ChallengeSigner(secret: secret)
@@ -38,7 +45,19 @@ private func makeMiddleware() throws -> MPPServerMiddleware {
         ),
         binding: binding,
         request: request
-    )
+    ) { event in
+        switch event {
+        case let .challengeIssued(challenge):
+            log("[server] issued 402  id=\(challenge.id)")
+            log("[server]              realm=\(challenge.realm) method=\(challenge.method.rawValue)"
+                + " intent=\(challenge.intent.rawValue)")
+            log("[server]              request(b64url)=\(challenge.request.rawValue)")
+        case let .paymentVerified(verified):
+            log("[server] VERIFIED     source=\(verified.credential.source ?? "nil")")
+        case let .paymentRejected(rejection):
+            log("[server] rejected     \(rejection)")
+        }
+    }
 }
 
 /// Reads `count` more bytes from `descriptor` into `buffer` (one syscall), or
@@ -127,6 +146,26 @@ private func writeResponse(_ response: HTTPResponse, _ body: Data, to descriptor
     }
 }
 
+/// Logs what the server received on a request: the method/path, and (when a
+/// credential is present) the decoded challenge id, source DID, and proof payload.
+private func logIncoming(_ request: HTTPRequest) {
+    guard verbose else { return }
+    guard let auth = request.headerFields[.authorization] else {
+        log("[server] <- \(request.method.rawValue) \(request.path ?? "") (no credential)")
+        return
+    }
+    log("[server] <- \(request.method.rawValue) \(request.path ?? "") (Authorization: Payment)")
+    guard let credential = try? Credential(headerValue: auth) else { return }
+    log("[server]    credential.challenge.id = \(credential.challenge.id)")
+    log("[server]    credential.source       = \(credential.source ?? "nil")")
+    if case let .string(type)? = credential.payload["type"] {
+        log("[server]    credential.payload.type = \(type)")
+    }
+    if case let .string(signature)? = credential.payload["signature"] {
+        log("[server]    credential.payload.signature = \(signature)")
+    }
+}
+
 @main
 enum ConformanceServer {
     static func main() async throws {
@@ -157,6 +196,7 @@ enum ConformanceServer {
             if connection < 0 { continue }
             defer { close(connection) }
             guard let (request, body) = readRequest(connection) else { continue }
+            logIncoming(request)
             let serve: @Sendable (HTTPRequest, MPPVerified) async
                 -> (HTTPResponse, Data) = { _, _ in
                     (HTTPResponse(status: .ok), Data(#"{"ok":true,"paid":true}"#.utf8))
@@ -164,6 +204,8 @@ enum ConformanceServer {
             let (response, responseBody) = await middleware.handle(
                 request, body: body, now: Date(), handler: serve
             )
+            log("[server] -> \(response.status.code) "
+                + (String(data: responseBody, encoding: .utf8) ?? ""))
             writeResponse(response, responseBody, to: connection)
         }
     }
