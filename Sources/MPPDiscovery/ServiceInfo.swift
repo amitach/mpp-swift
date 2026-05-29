@@ -23,6 +23,9 @@ public struct ServiceDocs: Sendable, Hashable, Codable {
         case invalidLink(field: String, value: String)
     }
 
+    // The wire keys are the canonical `x-service-info.docs` field names from the
+    // discovery spec: `apiReference` (camelCase), `homepage`, `llms`. The camelCase
+    // `apiReference` is intentional and matches the spec; do not snake-case it.
     private enum CodingKeys: String, CodingKey {
         case apiReference, homepage, llms
     }
