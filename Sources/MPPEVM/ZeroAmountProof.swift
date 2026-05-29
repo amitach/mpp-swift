@@ -72,15 +72,6 @@ public enum ZeroAmountProof: Sendable, Hashable {
     /// verification: compare the recovered address against the expected wallet. It
     /// does not apply any acceptance policy.
     public func recoverSigner(chainId: UInt64, signature: Data) -> EthereumAddress? {
-        guard signature.count == 65 else { return nil }
-        let compact = signature.prefix(64)
-        let recoveryByte = signature[signature.startIndex + 64]
-        guard (27 ... 30).contains(recoveryByte), let recoverable = RecoverableSignature(
-            compact: Data(compact), recoveryID: recoveryByte - 27
-        ) else { return nil }
-        guard let publicKey = Secp256k1Signer.recoverPublicKey(
-            hash: signingHash(chainId: chainId), signature: recoverable
-        ) else { return nil }
-        return EthereumAddress(uncompressedPublicKey: publicKey)
+        EthereumAddress.recover(hash: signingHash(chainId: chainId), signature: signature)
     }
 }
