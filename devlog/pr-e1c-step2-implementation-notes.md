@@ -215,8 +215,19 @@ default suite (434) green; swiftformat/em-dash/yaml clean. Local Docker Linux re
 skipped this round (daemon instability); the Linux branch change is structural only
 (statement split, logic-identical) and the CI `linux-ffi` job is the authoritative check.
 
-## Activation (the actual publish, a deliberate follow-up)
-1. Push a `tempo-tx-ffi-v<semver>` tag -> the release workflow publishes the asset.
-2. Copy the two printed constants into `Package.swift` (`tempoFFIReleaseURL` /
-   `tempoFFIReleaseChecksum`), commit.
-3. External Apple consumers then get `MPPTempoFFI` via download, no gate.
+## Activation (DONE: tempo-tx-ffi-v0.0.1)
+1. Pushed the `tempo-tx-ffi-v0.0.1` tag -> the release workflow published the asset
+   (TempoTxFFI.xcframework.zip, 67.8MB, release-profile all-Apple-slices; the heavy
+   release-LTO build took ~10-15min cold, no cargo cache).
+2. Independently verified the checksum (downloaded the asset, recomputed
+   `swift package compute-checksum` -> matched), then set the two constants in Package.swift.
+3. Verified external install end to end: with the gate OFF, `swift package resolve`
+   DOWNLOADS + checksum-verifies the xcframework and the golden tests pass against the
+   DOWNLOADED binary (not the local from-source build). The isolation guard still passes
+   (MPPTempoFFI is now always-declared but no non-FFI product reaches it).
+
+Consequence: with the constants set, the macOS required CI job (`swift build`/`swift test`,
+gate off) now downloads + links the published xcframework and runs the goldens against it
+on every run (a ~65MB GitHub-release download, ~3s; couples the required job to the asset's
+availability, acceptable for GitHub's own CDN; revisit if flaky). Linux is unaffected (the
+url path is Apple-only; Linux stays from-source).

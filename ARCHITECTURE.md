@@ -95,6 +95,12 @@ The one seam the FFI fills:
   conformer. The same builder also exposes the client-side `open` / `topUp` builders
   (each a two-call `approve` + escrow-call transaction).
 
+The write path is **proven on-chain**, not just by the byte-golden vectors: a gated test
+(`ModeratoE2ETests`, `MPP_MODERATO_E2E=1`) funds a fresh key from the live Moderato faucet
+(`tempo_fundAddress`), then builds (via the FFI), signs, broadcasts, and confirms a real
+`open` (deposit lands) and `close` (channel finalizes) against the live testnet. It is
+self-contained: the faucet means no pre-funded account or secret is needed.
+
 ### Linking the Rust shim, and keeping it opt-in
 
 `MPPTempoFFI` is the **only** target that links Rust, and it carries the committed,
