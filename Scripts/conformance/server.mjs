@@ -6,11 +6,13 @@
 // no Tempo RPC is contacted on the happy path; `testnet: true` fixes the chainId
 // to Moderato (42431) without a network call.
 //
-// Dev-only harness. Not shipped. Run via `npm run serve` (see run.sh).
+// Dev-only harness. Not shipped. Run via `npm run serve` (see run.sh). The HTTP
+// adapter + faucet helpers live in harness-http.mjs (shared with session-server.mjs).
 
-import { createServer } from 'node:http'
 import { Mppx, tempo } from 'mppx/server'
 import { privateKeyToAccount } from 'viem/accounts'
+
+import { rpc, serve } from './harness-http.mjs'
 
 // Fixed key for determinism (the server's recipient identity; not a real fund).
 const account = privateKeyToAccount('0x' + '00'.repeat(31) + '02')
@@ -32,9 +34,6 @@ const mppx = Mppx.create({
 })
 
 const PORT = Number(process.env.PORT ?? 8788)
-// The actually-bound port, resolved once the server is listening (PORT=0 asks the
-// OS for an ephemeral port). Used in the toRequest host fallback below.
-let boundPort = PORT
 const MODE = process.env.CONFORMANCE_MODE ?? 'local'
 // Moderato testnet (chainId 42431). Used only by the optional `testnet` mode's
 // startup reachability probe; the zero-amount proof itself never calls it.
@@ -46,80 +45,27 @@ const MODERATO_RPC = 'https://rpc.moderato.tempo.xyz'
  * probe is the live-chain touch and the seam for the future settled-transfer test.
  */
 async function probeModerato() {
-  const response = await fetch(MODERATO_RPC, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
-  })
-  const json = await response.json()
-  const chainId = Number(json.result)
+  const result = await rpc(MODERATO_RPC, 'eth_chainId', [])
+  const chainId = Number(result)
   if (chainId !== 42431) throw new Error(`unexpected chainId ${chainId} (expected 42431)`)
-  console.log(`moderato reachable: eth_chainId=${json.result} (${chainId})`)
+  console.log(`moderato reachable: eth_chainId=${result} (${chainId})`)
 }
 
-/** Adapts a Node IncomingMessage into a Fetch Request. */
-async function toRequest(req) {
-  const url = `http://${req.headers.host ?? `127.0.0.1:${boundPort}`}${req.url}`
-  const headers = new Headers()
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (typeof value === 'string') headers.set(key, value)
-    else if (Array.isArray(value)) for (const v of value) headers.append(key, v)
+async function handle(request, url) {
+  if (url.pathname === '/proof') {
+    const result = await mppx.charge({
+      amount: '0',
+      description: 'Conformance: zero-amount proof of wallet control',
+    })(request)
+    if (result.status === 402) return result.challenge
+    return result.withReceipt(
+      Response.json({ ok: true, paid: true, message: 'proof verified' }),
+    )
   }
-  const hasBody = req.method !== 'GET' && req.method !== 'HEAD'
-  let body
-  if (hasBody) {
-    const chunks = []
-    for await (const chunk of req) chunks.push(chunk)
-    body = Buffer.concat(chunks)
-  }
-  return new Request(url, { method: req.method, headers, body })
+  if (url.pathname === '/health') return Response.json({ status: 'ok' })
+  return new Response('not found', { status: 404 })
 }
 
-/** Writes a Fetch Response back to a Node ServerResponse. */
-async function writeResponse(response, res) {
-  res.statusCode = response.status
-  response.headers.forEach((value, key) => res.setHeader(key, value))
-  const text = await response.text()
-  res.end(text)
-}
+if (MODE === 'testnet') await probeModerato()
 
-const server = createServer(async (req, res) => {
-  try {
-    const request = await toRequest(req)
-    const url = new URL(request.url)
-
-    if (url.pathname === '/proof') {
-      const result = await mppx.charge({
-        amount: '0',
-        description: 'Conformance: zero-amount proof of wallet control',
-      })(request)
-      if (result.status === 402) return await writeResponse(result.challenge, res)
-      const ok = result.withReceipt(
-        Response.json({ ok: true, paid: true, message: 'proof verified' }),
-      )
-      return await writeResponse(ok, res)
-    }
-
-    if (url.pathname === '/health') {
-      return await writeResponse(Response.json({ status: 'ok' }), res)
-    }
-
-    res.statusCode = 404
-    res.end('not found')
-  } catch (error) {
-    res.statusCode = 500
-    res.end(`server error: ${error?.message ?? error}`)
-  }
-})
-
-if (MODE === 'testnet') {
-  await probeModerato()
-}
-
-server.listen(PORT, '127.0.0.1', () => {
-  // The run script waits for this line before starting the Swift test, and parses
-  // the port from it. Log the actually-bound port (not the env value) so a PORT=0
-  // OS-assigned port is real end to end.
-  boundPort = server.address()?.port ?? PORT
-  console.log(`conformance-server (${MODE}) listening http://127.0.0.1:${boundPort}/proof`)
-})
+await serve({ name: `conformance-server (${MODE})`, port: PORT, path: '/proof', handle })

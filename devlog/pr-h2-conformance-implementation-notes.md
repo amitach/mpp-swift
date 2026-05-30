@@ -84,6 +84,30 @@ P4 - **Docs:** extend `CONFORMANCE.md` "Not yet covered" -> the session flow is 
 - The reverse server's `RPCChannelStateProvider` needs a funded operator key in-process; pass
   it via env (never commit a key).
 
+## Decisions made during implementation
+
+- **No-dup HTTP glue:** extracted `harness-http.mjs` (Node<->Fetch adapter + `serve()` +
+  faucet `fundAddress`/`waitForReceipt`/`rpc`); refactored `server.mjs` (proof) to use it, so
+  the session server reuses it rather than copying the glue. Confirmed `Scripts/conformance/`
+  is THE harness folder (not a new one) and `Sources/MPPConformanceServer/` is the Swift server.
+- **`testnet: true` is enough** for the mppx session server: `defaults.rpcUrl[42431]` = Moderato
+  RPC, escrow `0xe1c4..a336`, currency pathUSD - no custom viem chain/client needed, just a
+  faucet-funded operator `account`.
+- **Forward close path:** mppx's server settles on a client `close` action (`handleClose`,
+  operator account). Our `TempoChannelMethod` has no client close yet (FU-2), so the forward
+  test builds the close credential by hand from the latest voucher (reusing `Voucher.sign` +
+  `Credential`) and lets the mppx operator settle it on-chain; then asserts `finalized` via
+  `TempoEscrow.readChannel`. No new client API, no premature FU-2.
+- Captured the emitted credentials via `PaymentClient`'s `onEvent` sink to get the channel id +
+  cumulative for the close (no need to expose method internals).
+
 ## Status
 
-P0: TODO. (Branch: feat/ws10-402-conformance, off c52a34e.)
+- **P0 DONE** (committed af58933): `ModeratoKit` shared helpers.
+- **P1 DONE (built + compiles + lint-clean; live-pending)**: `harness-http.mjs`,
+  `session-server.mjs`, `run-session.sh`, `ConformanceSessionTests` (forward: open -> voucher
+  -> close against the mppx session server, asserts finalized on-chain). Verified: FFI test
+  target compiles under `MPP_TEMPO_FFI`, swiftlint --strict clean, no em dashes. LIVE run
+  (`Scripts/conformance/run-session.sh`, needs Node + Moderato + faucet) not yet executed here;
+  to be run locally / by the P3 CI job.
+- P2 (reverse), P3 (CI), P4 (docs): TODO. (Branch: feat/ws10-402-conformance, off c52a34e.)
