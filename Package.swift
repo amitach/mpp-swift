@@ -198,9 +198,10 @@ let package = Package(
 // on it, so a consumer of those pulls ZERO Rust (the isolation invariant, enforced by
 // Scripts/assert-ffi-isolation.sh). It is wired one of two ways:
 //
-//   - PUBLISHED (Apple, external consumers): when rust/tempo-tx-ffi/release.json carries
-//     a URL + checksum, an always-declared `binaryTarget(url:checksum:)` downloads the
-//     released xcframework. No env gate, no Rust toolchain on the consumer.
+//   - PUBLISHED (Apple, external consumers): when the tempoFFIReleaseURL +
+//     tempoFFIReleaseChecksum constants below are set, an always-declared
+//     `binaryTarget(url:checksum:)` downloads the released xcframework. No env gate, no
+//     Rust toolchain on the consumer.
 //   - FROM SOURCE (dev / CI, and Linux): when the `MPP_TEMPO_FFI` env var is set, the
 //     xcframework (Apple) or the static archive (Linux, via CTempoTxFFI + linkerSettings)
 //     is built locally by the rust/tempo-tx-ffi scripts. This is how CI exercises the
