@@ -1,3 +1,4 @@
+import Foundation
 import MPPCore
 
 /// A server-side payment method: it recognises the challenges it can settle and
@@ -16,13 +17,18 @@ public protocol PaymentMethodServer: Sendable {
     /// plus any method-specific applicability the method enforces).
     func supports(_ challenge: Challenge) -> Bool
 
-    /// Verifies the method-specific settlement carried by `credential` and returns
-    /// the settlement reference for the `Payment-Receipt` the verifier mints.
+    /// Verifies the method-specific settlement carried by `credential` and mints
+    /// the ``Receipt`` for the `Payment-Receipt` the server returns.
     ///
-    /// - Returns: The method-specific settlement `reference`: a transaction hash
-    ///   for a settled transfer, or the challenge id for a zero-amount proof
-    ///   (which references no on-chain settlement of its own). Its format is
-    ///   defined by the method.
+    /// - Parameters:
+    ///   - credential: The presented credential (its echoed challenge, payer
+    ///     `source`, and method payload).
+    ///   - now: The settlement time, injected, for the receipt's `timestamp`.
+    /// - Returns: The method's receipt. Its `reference` is method-specific (a
+    ///   transaction hash for a settled transfer, the challenge id for a
+    ///   zero-amount proof). The method owns the whole receipt, so a richer method
+    ///   (a future session method) can shape it rather than being constrained to a
+    ///   bare reference.
     /// - Throws: to reject. The credential parsed and bound to a server-issued
     ///   challenge, but its method payload did not prove settlement (for a proof,
     ///   the signature did not recover to the credential's `source` wallet, or the
@@ -32,7 +38,6 @@ public protocol PaymentMethodServer: Sendable {
     ///
     /// `async` because a settlement check may consult an external service: a
     /// zero-amount proof is pure local recovery, but a settled transfer confirms
-    /// the transaction on-chain over an RPC. Defining the seam as `async` now keeps
-    /// that later method from forcing a source-breaking protocol change.
-    func verify(_ credential: Credential) async throws -> String
+    /// the transaction on-chain over an RPC.
+    func verify(_ credential: Credential, now: Date) async throws -> Receipt
 }

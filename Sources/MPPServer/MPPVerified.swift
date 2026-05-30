@@ -15,9 +15,8 @@ import MPPCore
 /// fabricate one and bypass verification.
 ///
 /// This attests the protocol-level checks. When a payment method settled the
-/// credential, ``receipt`` carries the `Payment-Receipt` the verifier minted from
-/// the method's settlement reference; in protocol-only mode (no method registered)
-/// it is `nil`.
+/// credential, ``receipt`` carries the `Payment-Receipt` the method minted; in
+/// protocol-only mode (no method registered) it is `nil`.
 public struct MPPVerified: Sendable {
     /// The verified credential: its echoed challenge, the payer `source`, and the
     /// method-specific `payload`.

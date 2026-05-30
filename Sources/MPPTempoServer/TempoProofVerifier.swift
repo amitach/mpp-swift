@@ -57,16 +57,16 @@ public struct TempoProofVerifier: PaymentMethodServer {
         return request.isZeroAmount
     }
 
-    /// Verifies the zero-amount proof carried by `credential`.
+    /// Verifies the zero-amount proof carried by `credential` and mints its receipt.
     ///
-    /// - Returns: The challenge id, as the receipt settlement `reference`: a
-    ///   zero-amount proof settles no value on-chain, so it references the
-    ///   challenge it satisfied rather than a transaction hash.
+    /// - Returns: A ``Receipt`` whose `reference` is the challenge id: a zero-amount
+    ///   proof settles no value on-chain, so it references the challenge it
+    ///   satisfied rather than a transaction hash, with no method-specific extras.
     /// - Throws: ``VerifyError`` if the request is malformed or not zero-amount,
     ///   the payload is not a `proof`, the `source` is missing or its chain does
     ///   not match, the signature is malformed, or the signature does not recover
     ///   to the source wallet under any accepted variant.
-    public func verify(_ credential: Credential) async throws(VerifyError) -> String {
+    public func verify(_ credential: Credential, now: Date) async throws(VerifyError) -> Receipt {
         let challenge = credential.challenge
         let request: TempoChargeRequest
         do {
@@ -93,7 +93,9 @@ public struct TempoProofVerifier: PaymentMethodServer {
         ) else {
             throw .signatureMismatch
         }
-        return challenge.id
+        return Receipt(
+            method: challenge.method, timestamp: RFC3339DateTime(date: now), reference: challenge.id
+        )
     }
 
     /// Whether `signature` recovers to `wallet` under any accepted proof variant.

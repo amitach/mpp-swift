@@ -97,20 +97,13 @@ public struct PaymentVerifier: Sendable {
             guard let method = methods.first(where: { $0.supports(challenge) }) else {
                 return .rejected(.noSupportingMethod)
             }
-            let reference: String
+            // The method mints its own receipt (base fields plus any method extras),
+            // stamped with the injected `now`. The verifier only carries it.
             do {
-                reference = try await method.verify(credential)
+                receipt = try await method.verify(credential, now: now)
             } catch {
                 return .rejected(.settlementUnverified(reason: String(describing: error)))
             }
-            // Mint the receipt from the method's settlement reference. status is
-            // always success (failures rejected above), method is the challenge's,
-            // and the timestamp is the injected `now` (verification time).
-            receipt = Receipt(
-                method: challenge.method,
-                timestamp: RFC3339DateTime(date: now),
-                reference: reference
-            )
         }
 
         guard await replayStore.consume(challenge.id) else { return .rejected(.replayed) }

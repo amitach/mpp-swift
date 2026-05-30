@@ -13,7 +13,7 @@ private struct StubMethod: PaymentMethodServer {
         supportsChallenge
     }
 
-    func verify(_: Credential) async throws -> String {
+    func verify(_: Credential, now _: Date) async throws -> Receipt {
         throw Rejected()
     }
 }
