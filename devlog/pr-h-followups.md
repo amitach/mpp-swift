@@ -75,6 +75,25 @@ so payer != authorizedSigner != voucher-signing key. PR-H assumes all three are 
     vouchers recover to the access key, not the payer; `Channel.id` reflects it.
 - Scope: small-medium. Risk: low.
 
+## FU-4: production session replay policy (discovered in PR-H.2) - TODO
+
+A session reuses ONE challenge across open/voucher/close (the reference `sessionManager`
+does this); anti-replay is the monotonic cumulative the channel store enforces, NOT one-time
+challenge use. But `MPPServer.PaymentVerifier` consumes the challenge id exactly once via
+`ReplayStore` (correct for one-shot proof/charge). So any production deployment wiring
+`SessionMethod` behind `MPPServerMiddleware` with the default `InMemoryReplayStore` would
+reject every voucher after the open (caught live in PR-H.2 reverse; the conformance server
+works around it with a reuse-permitting `ReusableReplayStore`).
+
+- Decide the SDK answer:
+  - (a) ship a session-aware `ReplayStore` (or a `PaymentVerifier` mode) that does not consume
+    for repeated-payment intents, OR
+  - (b) document that a session verifier must be constructed with a reuse-permitting replay
+    policy and that the channel-store cumulative is the anti-replay.
+- Add a hermetic `MPPServerTests`/`MPPTempoServerTests` case that runs `SessionMethod` behind
+  the full `PaymentVerifier` with repeated vouchers (the gap that let this reach a live run).
+- Scope: small. Risk: low. But it is a real production-wiring gap, not just a harness detail.
+
 ---
 
 ## Sequencing
