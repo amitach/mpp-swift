@@ -23,9 +23,16 @@ cargo run --quiet --bin uniffi-bindgen -- generate \
 
 echo "==> compile + run the Swift FFI smoke test"
 out=$(mktemp -d)
+# Link the STATIC archive by full path (not -l, which would prefer the .dylib and
+# leave the binary needing it on the loader path at runtime). A self-contained,
+# dylib-free binary that runs anywhere.
+case "$(uname -s)" in
+  Darwin) STATIC=target/debug/libtempo_tx_ffi.a; SYS=(-framework Security -framework CoreFoundation -framework SystemConfiguration) ;;
+  *)      STATIC=target/debug/libtempo_tx_ffi.a; SYS=() ;;
+esac
 swiftc -I target/bindings \
   -Xcc -fmodule-map-file=target/bindings/tempo_tx_ffiFFI.modulemap \
   target/bindings/tempo_tx_ffi.swift swift-smoke/main.swift \
-  -L target/debug -ltempo_tx_ffi \
+  "$STATIC" "${SYS[@]}" \
   -o "$out/ffi_smoketest"
 "$out/ffi_smoketest"
