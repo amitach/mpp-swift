@@ -168,6 +168,32 @@ struct EVMRPCTests {
         _ = try EVMRPC(transport: StubHTTP(json: ""), url: url, allowInsecureLocal: true)
     }
 
+    @Test("the insecure-transport error redacts the URL query (no API key leak)")
+    func insecureErrorRedacts() {
+        let result = Result {
+            try EVMRPC(
+                transport: StubHTTP(json: ""),
+                url: makeURL("http://rpc.example.com/v2?key=supersecret")
+            )
+        }
+        guard case let .failure(error) = result,
+              case let .insecureTransport(url)? = error as? EVMRPCError
+        else {
+            Issue.record("expected an insecureTransport error")
+            return
+        }
+        #expect(url == "http://rpc.example.com")
+        #expect(!url.contains("supersecret"))
+    }
+
+    @Test("an IPv6 literal host is bracketed in the request authority")
+    func ipv6AuthorityBracketed() async throws {
+        let stub = StubHTTP(json: #"{"jsonrpc":"2.0","id":1,"result":"0x"}"#)
+        let rpc = try EVMRPC(transport: stub, url: makeURL("https://[2001:db8::1]:8545"))
+        _ = try await rpc.call(to: addr, data: Data())
+        #expect(stub.lastRequest?.authority == "[2001:db8::1]:8545")
+    }
+
     @Test("live Moderato eth_chainId returns 42431", .enabled(if: liveEnabled))
     func liveModeratoChainID() async throws {
         let rpc = try EVMRPC(

@@ -27,9 +27,13 @@ public struct EVMRPC: Sendable {
         transport: any MPPHTTPTransport, url: URL, allowInsecureLocal: Bool = false
     ) throws(EVMRPCError) {
         guard TransportSecurity.isAllowed(
-            scheme: url.scheme, host: url.host, allowInsecureLocal: allowInsecureLocal
+            scheme: url.scheme, host: url.host(percentEncoded: false),
+            allowInsecureLocal: allowInsecureLocal
         ) else {
-            throw .insecureTransport(url: url.absoluteString)
+            // Redact path/query: the URL may carry an API key, which must not reach
+            // an error value. Identify the endpoint by scheme + host only.
+            let endpoint = "\(url.scheme ?? "")://\(url.host(percentEncoded: false) ?? "")"
+            throw .insecureTransport(url: endpoint)
         }
         self.transport = transport
         self.url = url
@@ -79,10 +83,12 @@ public struct EVMRPC: Sendable {
         if case let .string(blockHex)? = fields["blockNumber"] {
             blockNumber = UInt64(hexQuantity: blockHex)
         }
+        guard let status = UInt64(hexQuantity: statusHex) else {
+            throw .malformedResponse("receipt status is not a hex quantity")
+        }
         return TransactionReceipt(
             transactionHash: hash,
-            // EVM status is `0x1` (success) or `0x0` (reverted).
-            succeeded: UInt64(hexQuantity: statusHex) == 1,
+            succeeded: status == 1, // EVM status: 0x1 success, 0x0 reverted
             blockNumber: blockNumber
         )
     }
@@ -147,7 +153,11 @@ public struct EVMRPC: Sendable {
     private func httpRequest() -> HTTPRequest {
         var fields = HTTPFields()
         fields[.contentType] = "application/json"
-        let authority = url.port.map { "\(url.host ?? ""):\($0)" } ?? url.host
+        // Bracket an IPv6 literal host (`[::1]`); percentEncoded:false matches the
+        // 402 flow's host handling.
+        let host = url.host(percentEncoded: false) ?? ""
+        let bracketedHost = host.contains(":") ? "[\(host)]" : host
+        let authority = url.port.map { "\(bracketedHost):\($0)" } ?? bracketedHost
         // Preserve the query (some RPC endpoints carry an API key there); default an
         // empty path to "/".
         let basePath = url.path.isEmpty ? "/" : url.path
