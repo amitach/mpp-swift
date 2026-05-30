@@ -117,11 +117,17 @@ jobs:
 
   rust-ffi:
     name: Rust FFI (tempo-tx-ffi build + test)
-    runs-on: macos-15
     # NON-REQUIRED (kept out of branch protection): builds the tempo-tx-ffi crate,
     # which git-clones the tempo monorepo and compiles a large Rust tree (revm etc.).
     # It is the 0x76 transaction builder; the cargo test runs the byte-exact golden
-    # vector for the close tx. Pinned tag tempo-primitives@1.8.0 needs rustc >= 1.93.
+    # vector for the close tx. Built on BOTH macOS and Linux: the eventual artifact is
+    # an Apple xcframework + a Linux .so, and the golden bytes must match on both.
+    # Pinned tag tempo-primitives@1.8.0 needs rustc >= 1.93.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Ensure rustc >= 1.93 (tempo-primitives MSRV)
@@ -135,9 +141,10 @@ jobs:
         working-directory: rust/tempo-tx-ffi
         run: cargo test
       - name: Audit Rust dependencies (RustSec advisory DB)
+        # Closes the supply-chain gap (the Swift OSV gate does not cover Cargo deps).
+        # OS-independent, so run once (Linux leg). Fails on a known advisory.
+        if: matrix.os == 'ubuntu-latest'
         working-directory: rust/tempo-tx-ffi
-        # Closes the supply-chain gap: the Swift OSV gate does not cover Cargo deps.
-        # Fails on a known advisory in the (large) Rust tree we pull for the 0x76 tx.
         run: |
           cargo install cargo-audit --locked
           cargo audit
