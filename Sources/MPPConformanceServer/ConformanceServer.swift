@@ -1,13 +1,15 @@
 import Foundation
 import HTTPTypes
-import MPPClient
 import MPPCore
-import MPPEVM
 import MPPServer
 import MPPTempo
 import MPPTempoServer
 
+// MPPClient/MPPEVM/MPPTempoFFI are used only by the FFI-gated session route, so they (and
+// their imports) ride the gate; the default proof-only server depends on neither.
 #if MPP_TEMPO_FFI_ENABLED
+    import MPPClient
+    import MPPEVM
     import MPPTempoFFI
 #endif
 

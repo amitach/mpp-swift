@@ -24,9 +24,9 @@ public struct TempoChargeRequest: Sendable, Hashable {
     /// The escrow contract holding the channel, from `methodDetails.escrowContract`
     /// (present for a session challenge; absent for a plain charge).
     public let escrowContract: String?
-    /// The deposit the server suggests for a newly opened channel, from
-    /// `methodDetails.suggestedDeposit` (a decimal base-units string), if present. A
-    /// client's deposit policy may use it as one input; it is never the charge amount.
+    /// The deposit the server suggests for a newly opened channel, from the top-level
+    /// `suggestedDeposit` request field (a sibling of `amount`, a decimal base-units string),
+    /// if present. A client's deposit policy may use it as one input; never the charge amount.
     public let suggestedDeposit: String?
 
     /// Whether this is a zero-amount charge (the EIP-712 proof path).

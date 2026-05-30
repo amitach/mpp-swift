@@ -7,7 +7,11 @@ import PackageDescription
 // session-conformance route needs the FFI close builder (RPCChannelStateProvider settles
 // on-chain). The default (proof-only) reverse server stays Rust-free.
 let ffiFromSource = ProcessInfo.processInfo.environment["MPP_TEMPO_FFI"] != nil
-let conformanceServerFFIDeps: [Target.Dependency] = ffiFromSource ? ["MPPTempoFFI"] : []
+// MPPClient (URLSessionTransport) + MPPEVM (EthereumAddress / Secp256k1Signer) are used only
+// by the FFI-gated session route, so they ride the same gate: the default proof-only server
+// pulls neither.
+let conformanceServerFFIDeps: [Target.Dependency] =
+    ffiFromSource ? ["MPPTempoFFI", "MPPClient", "MPPEVM"] : []
 let conformanceServerFFISettings: [SwiftSetting] =
     ffiFromSource ? [.define("MPP_TEMPO_FFI_ENABLED")] : []
 
@@ -195,11 +199,10 @@ let package = Package(
                 "MPPServer",
                 "MPPTempo",
                 "MPPTempoServer",
-                // MPPClient (URLSessionTransport) + MPPEVM (EthereumAddress / Secp256k1Signer)
-                // for the reverse session route's live RPC + operator key; MPPTempoFFI (the
-                // close builder) is added only under the FFI gate via conformanceServerFFIDeps.
-                "MPPClient",
-                "MPPEVM",
+                // The reverse session route's deps (MPPClient/MPPEVM for live RPC + the
+                // operator key, MPPTempoFFI for the close builder) are added only under the
+                // FFI gate via conformanceServerFFIDeps, so the default proof-only server
+                // pulls none of them.
                 .product(name: "HTTPTypes", package: "swift-http-types"),
             ] + conformanceServerFFIDeps,
             swiftSettings: conformanceServerFFISettings
