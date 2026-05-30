@@ -24,6 +24,13 @@ public struct SecretStore: Sendable {
     /// The minimum accepted secret length in bytes (the HMAC-SHA256 output size).
     public static let minimumSecretBytes = 32
 
+    /// The maximum accepted secret length in bytes. Not a security requirement
+    /// (HMAC hashes a key longer than its 64-byte block size down, so extra length
+    /// adds no strength); a sanity and resource bound, so an absurdly long value
+    /// (a misconfigured path pointed at the wrong file, say) is rejected rather
+    /// than held as a key. Generous for any real key, including a long passphrase.
+    public static let maximumSecretBytes = 1024
+
     /// The most `previous` keys allowed. Verifying a credential tries the current
     /// key then each previous one, so an unbounded set would let an attacker
     /// spraying invalid ids force arbitrarily many HMACs per request; this caps
@@ -47,7 +54,8 @@ public struct SecretStore: Sendable {
     /// their rotation overlap window (most-recent first).
     ///
     /// - Throws: ``ValidationError/tooShort(byteCount:)`` if any secret is shorter
-    ///   than ``minimumSecretBytes``, or ``ValidationError/tooManyPreviousKeys(count:)``
+    ///   than ``minimumSecretBytes`` or ``ValidationError/tooLong(byteCount:)`` if
+    ///   longer than ``maximumSecretBytes``, or ``ValidationError/tooManyPreviousKeys(count:)``
     ///   if more than ``maximumPreviousKeys`` previous keys are given.
     public init(current: Data, previous: [Data] = []) throws(ValidationError) {
         guard previous.count <= Self.maximumPreviousKeys else {
@@ -65,12 +73,17 @@ public struct SecretStore: Sendable {
         guard secret.count >= minimumSecretBytes else {
             throw .tooShort(byteCount: secret.count)
         }
+        guard secret.count <= maximumSecretBytes else {
+            throw .tooLong(byteCount: secret.count)
+        }
     }
 
     /// A reason a secret was rejected.
     public enum ValidationError: Error, Sendable, Hashable {
         /// The secret was shorter than ``SecretStore/minimumSecretBytes``.
         case tooShort(byteCount: Int)
+        /// The secret was longer than ``SecretStore/maximumSecretBytes``.
+        case tooLong(byteCount: Int)
         /// More than ``SecretStore/maximumPreviousKeys`` previous keys were given
         /// (an unbounded verify-key set is a denial-of-service lever).
         case tooManyPreviousKeys(count: Int)

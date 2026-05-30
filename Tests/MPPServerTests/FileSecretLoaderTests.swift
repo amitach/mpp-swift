@@ -122,4 +122,25 @@ final class FileSecretLoaderTests: Sendable {
             try FileSecretLoader.load(currentPath: writeFile(currentBytes), previousPaths: nine)
         }
     }
+
+    @Test("a file at the maximum length loads; one over it is rejected (capped read)")
+    func enforcesMaximumLength() {
+        let max = SecretStore.maximumSecretBytes
+        #expect(throws: Never.self) {
+            try FileSecretLoader.load(currentPath: writeFile(Data(repeating: 0x61, count: max)))
+        }
+        // The bounded read stops at max+1 bytes, so the file is never fully read.
+        #expect(throws: FileSecretLoader.LoadError.invalid(.tooLong(byteCount: max + 1))) {
+            try FileSecretLoader.load(currentPath: writeFile(Data(repeating: 0x61, count: max + 1)))
+        }
+    }
+
+    @Test("a directory path is unreadable, not mis-reported as too-long")
+    func directoryPathIsUnreadable() {
+        // The path opens but cannot be read as a file: it must surface as
+        // unreadable rather than any length verdict.
+        #expect(throws: FileSecretLoader.LoadError.unreadable(path: root.path)) {
+            try FileSecretLoader.load(currentPath: root.path)
+        }
+    }
 }

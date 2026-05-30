@@ -46,8 +46,23 @@ public enum FileSecretLoader {
     }
 
     private static func readSecret(atPath path: String) throws(LoadError) -> Data {
-        guard let data = FileManager.default.contents(atPath: path) else {
+        // Read at most one byte past the maximum, so a path mistakenly pointed at a
+        // large file is never pulled into memory: the cap is a hard guarantee, not
+        // a stat-based estimate. Reading more than the maximum is rejected as
+        // too-long; SecretStore validates the bytes again (it is authoritative).
+        guard let handle = FileHandle(forReadingAtPath: path) else {
             throw .unreadable(path: path)
+        }
+        defer { try? handle.close() }
+        let data: Data
+        do {
+            data = try handle.read(upToCount: SecretStore.maximumSecretBytes + 1) ?? Data()
+        } catch {
+            // A path that opens but cannot be read (a directory, say) is unreadable.
+            throw .unreadable(path: path)
+        }
+        if data.count > SecretStore.maximumSecretBytes {
+            throw .invalid(.tooLong(byteCount: data.count))
         }
         return data
     }
