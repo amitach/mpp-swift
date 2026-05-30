@@ -39,7 +39,7 @@ Rust toolchain). Every other product links zero Rust.
 | `MPPServer` | available | Framework-agnostic middleware over `swift-http-types`: challenge mint, replay, verify pipeline |
 | `MPPClient` | available | The 402 client flow (send → parse → select → build → retry); concrete transports in progress |
 | `MPPEVM` | available | EVM message-signing + JSON-RPC: Keccak-256, secp256k1 recoverable signer, EIP-712 zero-amount proof + `did:pkh` source, session voucher, channel id, `0x`-hex codec |
-| `MPPTempo` | in progress | Tempo rail: zero-amount proof charge, the `EVMRPC` JSON-RPC client, the escrow `getChannel` read (`TempoEscrow` → `OnChainChannel`), `ChannelAmount`, and the `TempoCloseTxBuilder` seam. Channel open/topUp/close transaction building is the `rust/tempo-tx-ffi` FFI (below), proven by a live Moderato on-chain e2e. The one-call client session API is next |
+| `MPPTempo` | in progress | Tempo rail: zero-amount proof charge, the `EVMRPC` JSON-RPC client, the escrow `getChannel` read (`TempoEscrow` → `OnChainChannel`), `ChannelAmount`, and the `TempoCloseTxBuilder` seam. Channel open/topUp/close transaction building is the `rust/tempo-tx-ffi` FFI (below), proven by a live Moderato on-chain e2e. The `TempoChannelSession` actor (in `MPPTempoFFI`) drives the full open/voucher/topUp/close lifecycle; the 402-server payment integration is next |
 | `MPPTempoServer` | in progress | Tempo SERVER side: zero-amount proof verify, the 4-action `SessionMethod` (open/topUp/voucher/close), `ChannelStore`, and `RPCChannelStateProvider` (reads + relays signed txs + settle via the seam) |
 | `MPPDiscovery` | in progress | OpenAPI `x-payment-info` discovery (parser + emitter done) |
 | `MPPMCP` | planned | JSON-RPC / Model Context Protocol binding |

@@ -1,0 +1,283 @@
+import Foundation
+import MPPEVM
+import MPPTempo
+
+/// A signed session voucher: the channel id, the cumulative authorized amount, and the
+/// 65-byte secp256k1 signature (`r ‖ s ‖ v`) the escrow recovers to the authorized
+/// signer. This is the credential a payer hands a payee for an off-chain payment, and
+/// the input the channel `close` settles.
+public struct SignedVoucher: Sendable, Hashable {
+    /// The 32-byte channel id.
+    public let channelID: Data
+    /// The cumulative authorized amount, as a base-10 `uint128` string.
+    public let cumulativeAmount: String
+    /// The 65-byte `r ‖ s ‖ v` voucher signature.
+    public let signature: Data
+}
+
+/// A snapshot of a channel session's state.
+public struct ChannelSessionState: Sendable, Hashable {
+    /// The 32-byte channel id (deterministic from the channel parameters).
+    public let channelID: Data
+    /// The channel deposit (tracked from the confirmed open + topUp amounts).
+    public let deposit: ChannelAmount
+    /// The cumulative amount of the latest issued voucher (0 if none issued).
+    public let cumulativeAmount: ChannelAmount
+    /// Whether `open` has confirmed on-chain.
+    public let isOpen: Bool
+    /// Whether `close` has finalized the channel on-chain.
+    public let isFinalized: Bool
+}
+
+/// A reason a channel session operation failed.
+public enum TempoChannelSessionError: Error, Sendable, Equatable {
+    /// The signing key was not a valid secp256k1 private key.
+    case invalidSigningKey
+    /// The operation requires an open channel, but it is not open.
+    case notOpen
+    /// `open` was called on an already-open channel.
+    case alreadyOpen
+    /// The channel is finalized; no further operations are allowed.
+    case alreadyFinalized
+    /// A voucher's cumulative amount did not strictly increase.
+    case nonMonotonicVoucher
+    /// A voucher's cumulative amount exceeded the deposit.
+    case voucherExceedsDeposit
+    /// An amount was not a base-10 integer in range (names the field).
+    case invalidAmount(String)
+    /// A broadcast transaction was mined but reverted (the carried hash). The nonce is
+    /// consumed; the session stays usable (the next op reads the advanced nonce).
+    case transactionReverted(String)
+    /// Signing a voucher failed.
+    case signingFailed
+    /// Another lifecycle operation (open/topUp/close) is already in flight. The session is
+    /// driven sequentially; await one operation before starting the next.
+    case operationInProgress
+}
+
+/// Drives the on-chain lifecycle of a single Tempo payment channel for one account:
+/// `open`, `topUp`, `voucher` (off-chain), and `close`. It builds the `0x76` transactions
+/// via the Rust FFI (``FFITempoTxBuilder``), broadcasts them with `eth_sendRawTransactionSync`
+/// (Tempo's submit-and-wait, which returns the receipt in one round trip, so there is no
+/// client poll loop or receipt timeout to manage), and signs vouchers with the account key.
+/// Deposit and cumulative amounts are tracked from the confirmed transaction amounts, the
+/// same way the reference mppx client tracks them, so no per-op chain read-back is needed.
+///
+/// It is an `actor`, so synchronous access to its state is race-free. But actor reentrancy
+/// means another method can run at an `await`, which would break nonce sequencing if two
+/// writes interleaved (both reading the same nonce). So the session is **driven
+/// sequentially**: an in-flight guard rejects a concurrent `open`/`topUp`/`close` with
+/// ``TempoChannelSessionError/operationInProgress``. Driven that way (await one op before
+/// the next), the writes are nonce-sequenced correctly (the builder reads the pending nonce
+/// per op, so a fresh account's `open` is nonce 0, the next write nonce 1, ...).
+///
+/// This is the self-managing-wallet (direct on-chain) path. The 402-server path (emitting
+/// the session payloads a server relays/settles) builds on these same primitives.
+public actor TempoChannelSession {
+    private let escrow: EthereumAddress
+    private let token: EthereumAddress
+    private let payee: EthereumAddress
+    private let authorizedSigner: EthereumAddress
+    private let salt: Data
+    private let chainID: UInt64
+    private let signer: Secp256k1Signer
+    private let builder: FFITempoTxBuilder
+    private let rpc: EVMRPC
+
+    /// The 32-byte channel id, derived deterministically from the channel parameters at
+    /// init (the same id the escrow computes from `open`). Readable without `await`.
+    public nonisolated let channelID: Data
+
+    private var deposit: ChannelAmount = .zero
+    private var cumulative: ChannelAmount = .zero
+    private var lastVoucher: SignedVoucher?
+    private var opened = false
+    private var finalized = false
+    // Set/checked synchronously (no await between), so it serializes the async lifecycle
+    // ops despite actor reentrancy.
+    private var inFlight = false
+
+    /// Creates a session for the channel funded and signed by `privateKey` (the payer,
+    /// which is also the voucher-authorized signer). `payee` is the channel recipient,
+    /// `salt` (32 bytes) distinguishes channels that share every other parameter, and
+    /// `fee` is the gas/fee parameters the transactions carry.
+    public init(
+        privateKey: Data,
+        escrow: EthereumAddress,
+        token: EthereumAddress,
+        payee: EthereumAddress,
+        salt: Data,
+        fee: TempoFeeParameters,
+        chainID: UInt64,
+        rpc: EVMRPC
+    ) throws(TempoChannelSessionError) {
+        let signer: Secp256k1Signer
+        do {
+            signer = try Secp256k1Signer(privateKey: privateKey)
+        } catch {
+            throw .invalidSigningKey
+        }
+        guard let sender = EthereumAddress(uncompressedPublicKey: signer.publicKey) else {
+            throw .invalidSigningKey
+        }
+        guard let parameters = Channel.Parameters(
+            payer: sender, payee: payee, token: token, salt: salt,
+            authorizedSigner: sender, escrowContract: escrow, chainId: chainID
+        ) else {
+            throw .invalidAmount("salt: must be 32 bytes")
+        }
+        self.escrow = escrow
+        self.token = token
+        self.payee = payee
+        authorizedSigner = sender
+        self.salt = salt
+        self.chainID = chainID
+        self.signer = signer
+        self.rpc = rpc
+        channelID = Channel.id(parameters)
+        builder = FFITempoTxBuilder(
+            signingKey: privateKey,
+            fee: fee,
+            nonceProvider: { address in try await rpc.transactionCount(address) }
+        )
+    }
+
+    /// The current state snapshot.
+    public func state() -> ChannelSessionState {
+        ChannelSessionState(
+            channelID: channelID, deposit: deposit, cumulativeAmount: cumulative,
+            isOpen: opened, isFinalized: finalized
+        )
+    }
+
+    /// Opens the channel with `deposit` (a base-10 `uint128` string): builds + broadcasts
+    /// the `open` transaction and, once it confirms, records the channel as open with that
+    /// deposit. Returns the new state.
+    public func open(deposit: String) async throws -> ChannelSessionState {
+        try beginOperation()
+        defer { inFlight = false }
+        guard !finalized else { throw TempoChannelSessionError.alreadyFinalized }
+        guard !opened else { throw TempoChannelSessionError.alreadyOpen }
+        guard let amount = ChannelAmount(decimal: deposit) else {
+            throw TempoChannelSessionError.invalidAmount("deposit")
+        }
+        let parameters = TempoOpenParameters(
+            escrow: escrow, token: token, payee: payee,
+            deposit: deposit, salt: salt, authorizedSigner: authorizedSigner
+        )
+        let transaction = try await builder.buildOpenTransaction(parameters, chainID: chainID)
+        try await broadcast(transaction)
+        opened = true
+        self.deposit = amount
+        return state()
+    }
+
+    /// Tops the channel up by `additionalDeposit` (a base-10 string): builds + broadcasts
+    /// the `topUp` transaction and, once it confirms, adds it to the tracked deposit.
+    public func topUp(additionalDeposit: String) async throws -> ChannelSessionState {
+        try beginOperation()
+        defer { inFlight = false }
+        try requireOpen()
+        guard let amount = ChannelAmount(decimal: additionalDeposit) else {
+            throw TempoChannelSessionError.invalidAmount("additionalDeposit")
+        }
+        // Validate the new total BEFORE the on-chain side effect: if it would overflow the
+        // tracked deposit, do not broadcast (and the escrow's uint128 deposit would revert
+        // anyway). So local state never desyncs from a confirmed-but-unrecorded top-up.
+        guard let total = deposit.adding(amount) else {
+            throw TempoChannelSessionError.invalidAmount("additionalDeposit: deposit overflow")
+        }
+        let transaction = try await builder.buildTopUpTransaction(
+            escrow: escrow, token: token, channelID: channelID,
+            additionalDeposit: additionalDeposit, chainID: chainID
+        )
+        try await broadcast(transaction)
+        deposit = total
+        return state()
+    }
+
+    /// Signs a voucher for `cumulativeAmount` (a base-10 `uint128` string) and records it
+    /// as the latest. Off-chain: no transaction. The amount must strictly increase over
+    /// the previous voucher and not exceed the deposit. Returns the credential.
+    public func voucher(cumulativeAmount: String) throws -> SignedVoucher {
+        // Synchronous (no await), so it runs atomically on the actor and cannot itself
+        // interleave; but reject it while an async write is mid-flight, so a voucher is
+        // never issued against state a topUp/open/close is concurrently changing.
+        guard !inFlight else { throw TempoChannelSessionError.operationInProgress }
+        try requireOpen()
+        guard let amount = ChannelAmount(decimal: cumulativeAmount) else {
+            throw TempoChannelSessionError.invalidAmount("cumulativeAmount")
+        }
+        guard amount > cumulative else { throw TempoChannelSessionError.nonMonotonicVoucher }
+        guard amount <= deposit else { throw TempoChannelSessionError.voucherExceedsDeposit }
+        let signed = try sign(cumulativeAmount: cumulativeAmount)
+        cumulative = amount
+        lastVoucher = signed
+        return signed
+    }
+
+    /// Closes (settles + finalizes) the channel on-chain using the latest issued voucher
+    /// (or a zero-amount voucher if none was issued): builds + broadcasts the `close`
+    /// transaction. A confirmed close finalizes the channel.
+    public func close() async throws -> ChannelSessionState {
+        try beginOperation()
+        defer { inFlight = false }
+        try requireOpen()
+        let voucher = try lastVoucher ?? sign(cumulativeAmount: "0")
+        guard let parsed = Voucher(
+            channelID: channelID,
+            cumulativeAmount: voucher.cumulativeAmount
+        ) else {
+            throw TempoChannelSessionError.invalidAmount("cumulativeAmount")
+        }
+        let transaction = try await builder.buildCloseTransaction(
+            voucher: parsed, signature: voucher.signature, escrow: escrow, chainID: chainID
+        )
+        try await broadcast(transaction)
+        finalized = true
+        return state()
+    }
+
+    // MARK: - Internals
+
+    /// The shared prelude for the async lifecycle ops: rejects a concurrent op, then takes
+    /// the in-flight lock. The check-then-set is synchronous (no await between), so it is
+    /// atomic on the actor despite reentrancy. The caller pairs it with `defer { inFlight = false
+    /// }`.
+    private func beginOperation() throws(TempoChannelSessionError) {
+        guard !inFlight else { throw .operationInProgress }
+        inFlight = true
+    }
+
+    private func requireOpen() throws(TempoChannelSessionError) {
+        guard !finalized else { throw .alreadyFinalized }
+        guard opened else { throw .notOpen }
+    }
+
+    private func sign(cumulativeAmount: String) throws(TempoChannelSessionError) -> SignedVoucher {
+        guard let voucher = Voucher(channelID: channelID, cumulativeAmount: cumulativeAmount) else {
+            throw .invalidAmount("cumulativeAmount")
+        }
+        let signature: Data
+        do {
+            signature = try voucher.sign(escrowContract: escrow, chainId: chainID, with: signer)
+        } catch {
+            throw .signingFailed
+        }
+        return SignedVoucher(
+            channelID: channelID, cumulativeAmount: cumulativeAmount, signature: signature
+        )
+    }
+
+    /// Submits a raw transaction with `eth_sendRawTransactionSync` (submit + wait for the
+    /// receipt in one round trip) and throws ``TempoChannelSessionError/transactionReverted``
+    /// if it reverted. A thrown RPC error from the send means the transaction was rejected
+    /// (or, on a transport timeout, may be in the mempool); either way the next op reads the
+    /// pending nonce afresh, so no nonce collision results.
+    private func broadcast(_ raw: Data) async throws {
+        let receipt = try await rpc.sendRawTransactionSync(raw)
+        guard receipt.succeeded else {
+            throw TempoChannelSessionError.transactionReverted(receipt.transactionHash)
+        }
+    }
+}
