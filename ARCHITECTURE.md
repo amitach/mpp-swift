@@ -128,13 +128,15 @@ Rust.
 - **Packaging (in progress):** the crate is wrapped with UniFFI and built into an
   Apple xcframework + a Linux `.so`. The artifact is built in CI from pinned source
   (provenance), not committed as an opaque blob.
-- **Isolation - only linked when you build transactions.** The `TempoCloseTxBuilder`
-  conformer that calls the FFI lives in its **own opt-in product**, the only target
-  depending on the FFI binary. `MPPTempo` defines just the seam; everything else
-  references the protocol, not the crate. So a non-Tempo consumer, or a Tempo server
-  that only verifies and reads, links **no Rust**: the dependency graph and the
-  injected seam enforce it, and a guard keeps the core/server products from
-  transitively pulling the binary.
+- **Isolation - only linked when you build transactions (planned).** *Current state:*
+  the crate is standalone and **not yet wired into the Swift package** (`Package.swift`
+  references no Rust; `swift build` runs no `cargo`), so no Swift target links any Rust
+  today. *Design for the wiring slice:* the `TempoCloseTxBuilder` conformer that calls
+  the FFI will live in its **own opt-in product**, the only target depending on the FFI
+  binary; `MPPTempo` defines just the seam and everything else references the protocol
+  (injected), so a non-Tempo consumer or a verify/read-only Tempo server links no Rust.
+  A dependency-graph guard (a check that the core/server products do not transitively
+  pull the binary) lands with that wiring, so the isolation is enforced, not assumed.
 
 See [SECURITY.md](SECURITY.md) for the supply-chain controls around the Rust surface,
 and [REVIEW.md](REVIEW.md) for how to review changes.

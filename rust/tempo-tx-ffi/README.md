@@ -28,20 +28,26 @@ in Swift (see ARCHITECTURE.md).
 
 This crate is needed **only by a consumer that builds Tempo channel transactions** -
 a wallet. A non-Tempo consumer, or a Tempo *server* that only verifies vouchers and
-reads channel state, must not link the Rust binary at all. That is enforced
-structurally, not by convention:
+reads channel state, must not link the Rust binary at all.
+
+**Current state:** the crate is standalone and **not yet wired into the Swift
+package** - `Package.swift` references no Rust and `swift build` runs no `cargo`, so
+no Swift target links any Rust today. The isolation below is the design enforced when
+the FFI is wired (the next slice), not an existing guarantee:
 
 1. **Module graph.** The Swift wrapper that calls this crate (the
-   `TempoCloseTxBuilder` conformer) lives in its **own opt-in SwiftPM product**,
-   which is the only target that depends on the FFI binary. `MPPCore` / `MPPClient` /
-   `MPPServer` / `MPPTempo` / `MPPTempoServer` do not depend on it, so a consumer
+   `TempoCloseTxBuilder` conformer) will live in its **own opt-in SwiftPM product**,
+   the only target that depends on the FFI binary. `MPPCore` / `MPPClient` /
+   `MPPServer` / `MPPTempo` / `MPPTempoServer` will not depend on it, so a consumer
    that does not explicitly add the FFI product links zero Rust.
 2. **The seam.** `MPPTempo` defines only the `TempoCloseTxBuilder` protocol;
    `RPCChannelStateProvider` takes a conformer **injected**. It references the
    protocol, never this crate - so the FFI is opt-in at construction time too. A
-   server that never settles on-chain simply passes no builder.
-3. **A guard.** A check keeps the core/server products from transitively pulling the
-   FFI binary, so a future refactor cannot silently wire it into everyone.
+   server that never settles on-chain simply passes no builder. (This part is already
+   true today.)
+3. **A guard.** A check (landing with the wiring) keeps the core/server products from
+   transitively pulling the FFI binary, so a future refactor cannot silently wire it
+   into everyone.
 
 ## Build and test
 
