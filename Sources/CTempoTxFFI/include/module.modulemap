@@ -1,0 +1,9 @@
+// Exposes the UniFFI C scaffolding header as the `tempo_tx_ffiFFI` clang module that
+// the generated Swift bindings (Sources/MPPTempoFFI/Generated) import. On Apple the
+// same module comes from the TempoTxFFI xcframework's bundled header; this C target is
+// the Linux path, where SwiftPM has no library binaryTarget. The symbols are provided
+// at link time by libtempo_tx_ffi.a (see MPPTempoFFI's linkerSettings on Linux).
+module tempo_tx_ffiFFI {
+    header "tempo_tx_ffiFFI.h"
+    export *
+}

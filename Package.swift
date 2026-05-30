@@ -203,22 +203,54 @@ let package = Package(
 // never depend on this target, so depending on them pulls no Rust even when the gate is
 // on. (The eventual published form is a release-asset url+checksum binaryTarget that is
 // always declared; this env gate is the pre-release stand-in.)
+// On Apple, the Rust shim is linked via the TempoTxFFI xcframework binaryTarget. On
+// Linux, SwiftPM has no library binaryTarget (only .xcframework / .artifactbundle), so
+// MPPTempoFFI instead links the static archive directly (linkerSettings) and gets the
+// `tempo_tx_ffiFFI` clang module from the CTempoTxFFI C target. The unsafeFlags make the
+// package non-consumable as a remote dependency on Linux, which is fine while the gate is
+// the pre-release stand-in; the future release-asset stage replaces both paths.
 if ProcessInfo.processInfo.environment["MPP_TEMPO_FFI"] != nil {
     package.products.append(
         .library(name: "MPPTempoFFI", targets: ["MPPTempoFFI"])
     )
-    package.targets.append(contentsOf: [
-        .binaryTarget(
-            name: "TempoTxFFIBinary",
-            path: "artifacts/TempoTxFFI.xcframework"
-        ),
-        .target(
-            name: "MPPTempoFFI",
-            dependencies: ["MPPTempo", "MPPEVM", "TempoTxFFIBinary"]
-        ),
-        .testTarget(
-            name: "MPPTempoFFITests",
-            dependencies: ["MPPTempoFFI", "MPPTempo", "MPPEVM"]
-        ),
-    ])
+    #if os(Linux)
+        package.targets.append(contentsOf: [
+            .target(name: "CTempoTxFFI"),
+            .target(
+                name: "MPPTempoFFI",
+                dependencies: ["MPPTempo", "MPPEVM", "CTempoTxFFI"],
+                linkerSettings: [
+                    // The static archive built by rust/tempo-tx-ffi/build-linux-lib.sh, plus
+                    // the system libraries a Rust staticlib pulls in on linux-gnu (from
+                    // `rustc --print native-static-libs`).
+                    .unsafeFlags([
+                        "-L", "artifacts/linux",
+                        "-ltempo_tx_ffi",
+                        // From `rustc --print native-static-libs` (libc is already on the
+                        // Swift link line; gcc_s is the unwinder).
+                        "-lm", "-ldl", "-lpthread", "-lrt", "-lutil", "-lgcc_s",
+                    ]),
+                ]
+            ),
+            .testTarget(
+                name: "MPPTempoFFITests",
+                dependencies: ["MPPTempoFFI", "MPPTempo", "MPPEVM"]
+            ),
+        ])
+    #else
+        package.targets.append(contentsOf: [
+            .binaryTarget(
+                name: "TempoTxFFIBinary",
+                path: "artifacts/TempoTxFFI.xcframework"
+            ),
+            .target(
+                name: "MPPTempoFFI",
+                dependencies: ["MPPTempo", "MPPEVM", "TempoTxFFIBinary"]
+            ),
+            .testTarget(
+                name: "MPPTempoFFITests",
+                dependencies: ["MPPTempoFFI", "MPPTempo", "MPPEVM"]
+            ),
+        ])
+    #endif
 }
