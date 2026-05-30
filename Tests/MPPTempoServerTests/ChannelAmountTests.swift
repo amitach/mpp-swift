@@ -17,11 +17,16 @@ struct ChannelAmountTests {
             == ChannelAmount(high: .max, low: .max))
     }
 
-    @Test("rejects empty, non-digit, and values >= 2^128")
+    @Test("rejects empty, non-ASCII-digit, leading-zero, and values >= 2^128")
     func rejectsInvalid() {
         #expect(ChannelAmount(decimal: "") == nil)
         #expect(ChannelAmount(decimal: "12a") == nil)
         #expect(ChannelAmount(decimal: "-1") == nil)
+        // Non-ASCII numerals (Arabic-Indic "12") a reference SDK would reject.
+        #expect(ChannelAmount(decimal: "\u{0661}\u{0662}") == nil)
+        // No leading zeros (canonical grammar 0 / [1-9][0-9]*); bare "0" is fine.
+        #expect(ChannelAmount(decimal: "007") == nil)
+        #expect(ChannelAmount(decimal: "0") == .zero)
         // 2^128 overflows.
         #expect(ChannelAmount(decimal: "340282366920938463463374607431768211456") == nil)
     }

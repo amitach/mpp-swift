@@ -10,7 +10,7 @@ import Foundation
 /// pair, with checked arithmetic (overflow and underflow surface as `nil` rather
 /// than trapping or wrapping, since an amount that does not fit or would go
 /// negative is a verification failure, not a crash).
-public struct ChannelAmount: Sendable, Hashable, Comparable, Codable {
+public struct ChannelAmount: Sendable, Hashable, Comparable {
     /// The high 64 bits.
     public let high: UInt64
     /// The low 64 bits.
@@ -30,13 +30,18 @@ public struct ChannelAmount: Sendable, Hashable, Comparable, Codable {
         low = value
     }
 
-    /// Parses a base-10 unsigned integer string, or `nil` if it is empty, holds a
-    /// non-digit, or exceeds `2^128 - 1` (the wire form of a `uint128` amount).
+    /// Parses a canonical base-10 unsigned integer string, or `nil` if it is
+    /// empty, holds a non-ASCII-digit, has a leading zero, or exceeds `2^128 - 1`.
+    ///
+    /// Canonical means the grammar `0 / [1-9][0-9]*` (matching `Amount`): only
+    /// ASCII `0`...`9` (never a Unicode numeral like `١`, which a reference SDK
+    /// would reject), and no leading zeros, so a value has one wire spelling.
     public init?(decimal text: String) {
         guard !text.isEmpty else { return nil }
+        if text.count > 1, text.first == "0" { return nil } // no leading zeros
         var result = ChannelAmount.zero
         for character in text {
-            guard let digit = character.wholeNumberValue, (0 ... 9).contains(digit) else {
+            guard ("0" ... "9").contains(character), let digit = character.wholeNumberValue else {
                 return nil
             }
             guard
