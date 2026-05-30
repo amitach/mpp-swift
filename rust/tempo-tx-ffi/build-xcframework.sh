@@ -29,12 +29,16 @@ CARGO_PROFILE_FLAG=""
 [ "$PROFILE" = "release" ] && CARGO_PROFILE_FLAG="--release"
 LIBNAME=libtempo_tx_ffi
 
-# Build the staticlib for one target triple; echo the path to the produced .a.
+# Build ONLY the staticlib for one target triple; echo the path to the produced .a.
+# `cargo rustc --lib --crate-type staticlib` skips the crate's cdylib/rlib, so a cross
+# target never links a `cdylib` against its SDK (the xcframework consumes only the .a);
+# faster, and no iOS-dylib SDK-link fragility. The host build (for bindgen) still needs
+# the cdylib, so it stays a plain `cargo build`.
 build_target() {
   local target="$1"
   rustup target add "$target" >/dev/null
   # shellcheck disable=SC2086
-  cargo build --target "$target" $CARGO_PROFILE_FLAG >&2
+  cargo rustc --lib --target "$target" --crate-type staticlib $CARGO_PROFILE_FLAG >&2
   echo "target/$target/$PROFILE/$LIBNAME.a"
 }
 
@@ -83,15 +87,9 @@ echo "==> build macOS slice (universal: arm64 + x86_64)"
 case "$HOST_TRIPLE" in
   aarch64-apple-darwin) MACOS_OTHER=$(build_target x86_64-apple-darwin) ;;
   x86_64-apple-darwin) MACOS_OTHER=$(build_target aarch64-apple-darwin) ;;
-  *) MACOS_OTHER="" ;;
+  *) echo "unexpected host $HOST_TRIPLE: the xcframework build is macOS-only" >&2; exit 1 ;;
 esac
-if [ -n "$MACOS_OTHER" ]; then
-  MACOS_FAT=$(make_fat "target/universal/macos/$PROFILE/$LIBNAME.a" "$HOST_STATIC" "$MACOS_OTHER")
-else
-  MACOS_ARM=$(build_target aarch64-apple-darwin)
-  MACOS_X64=$(build_target x86_64-apple-darwin)
-  MACOS_FAT=$(make_fat "target/universal/macos/$PROFILE/$LIBNAME.a" "$MACOS_ARM" "$MACOS_X64")
-fi
+MACOS_FAT=$(make_fat "target/universal/macos/$PROFILE/$LIBNAME.a" "$HOST_STATIC" "$MACOS_OTHER")
 
 XCF_ARGS=(-library "$MACOS_FAT" -headers "$HDRS")
 
