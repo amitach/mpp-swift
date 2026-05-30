@@ -26,10 +26,9 @@ public protocol PaymentMethodServer: Sendable {
     ///   - now: The settlement time, injected, for the receipt's `timestamp`.
     /// - Returns: The method's receipt. Its `reference` is method-specific (a
     ///   transaction hash for a settled transfer, the challenge id for a
-    ///   zero-amount proof); a method may add its own fields via `Receipt.extras`
-    ///   (a Tempo session receipt's `channelId`/`acceptedCumulative`/...). The
-    ///   method owns the receipt so a richer method (session) is not constrained to
-    ///   the base shape.
+    ///   zero-amount proof). The method owns the whole receipt, so a richer method
+    ///   (a future session method) can shape it rather than being constrained to a
+    ///   bare reference.
     /// - Throws: to reject. The credential parsed and bound to a server-issued
     ///   challenge, but its method payload did not prove settlement (for a proof,
     ///   the signature did not recover to the credential's `source` wallet, or the
