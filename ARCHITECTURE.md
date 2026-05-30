@@ -90,9 +90,10 @@ The blob-free Swift plumbing, all merged:
 The one seam the FFI fills:
 
 - **`TempoCloseTxBuilder`**: a one-method protocol (`buildCloseTransaction`). The
-  **`MPPTempoFFI`** product's `FFITempoCloseTxBuilder` conforms to it, calling the
-  UniFFI bindings to the Rust shim; a server that never settles on-chain itself needs
-  no conformer.
+  **`MPPTempoFFI`** product's `FFITempoTxBuilder` conforms to it, calling the UniFFI
+  bindings to the Rust shim; a server that never settles on-chain itself needs no
+  conformer. The same builder also exposes the client-side `open` / `topUp` builders
+  (each a two-call `approve` + escrow-call transaction).
 
 ### Linking the Rust shim, and keeping it opt-in
 
@@ -140,7 +141,9 @@ Rust.
 
 ## The FFI boundary (`rust/tempo-tx-ffi`)
 
-- **What it does:** `build_close_tx(...) -> raw 2718 bytes` (open/topUp to follow).
+- **What it does:** `build_open_tx` / `build_top_up_tx` / `build_close_tx` `-> raw 2718
+  bytes` (open/topUp are two-call `approve` + escrow-call transactions, matching the
+  reference mppx client; the escrow ABI is verified against mppx in the golden tests).
   It builds a `TempoTransaction` directly via `tempo-primitives` (not `tempo-alloy`,
   which would pull a reqwest/tokio RPC stack), signs the hash with `k256`, and RLP-
   encodes. The escrow call data is ABI-encoded in-crate via `alloy-sol-types`.

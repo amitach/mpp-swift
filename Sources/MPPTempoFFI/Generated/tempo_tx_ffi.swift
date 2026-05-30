@@ -635,6 +635,52 @@ public func buildCloseTransaction(chainId: UInt64, nonce: UInt64, maxFeePerGas: 
     )
 })
 }
+/**
+ * UniFFI entry point: build + sign + RLP-encode the escrow `open` `0x76` tx (a two-call
+ * approve + open). `deposit` is a decimal `u128` string; `escrow` / `token` / `payee` /
+ * `authorized_signer` are 20-byte addresses; `private_key` and `salt` are 32 bytes.
+ */
+public func buildOpenTransaction(chainId: UInt64, nonce: UInt64, maxFeePerGas: String, maxPriorityFeePerGas: String, gasLimit: UInt64, feeToken: Data?, privateKey: Data, escrow: Data, token: Data, payee: Data, deposit: String, salt: Data, authorizedSigner: Data)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_tempo_tx_ffi_fn_func_build_open_transaction(
+        FfiConverterUInt64.lower(chainId),
+        FfiConverterUInt64.lower(nonce),
+        FfiConverterString.lower(maxFeePerGas),
+        FfiConverterString.lower(maxPriorityFeePerGas),
+        FfiConverterUInt64.lower(gasLimit),
+        FfiConverterOptionData.lower(feeToken),
+        FfiConverterData.lower(privateKey),
+        FfiConverterData.lower(escrow),
+        FfiConverterData.lower(token),
+        FfiConverterData.lower(payee),
+        FfiConverterString.lower(deposit),
+        FfiConverterData.lower(salt),
+        FfiConverterData.lower(authorizedSigner),$0
+    )
+})
+}
+/**
+ * UniFFI entry point: build + sign + RLP-encode the escrow `topUp` `0x76` tx (a two-call
+ * approve + topUp). `additional_deposit` is a decimal `u256` string; `escrow` / `token`
+ * are 20-byte addresses; `private_key` and `channel_id` are 32 bytes.
+ */
+public func buildTopUpTransaction(chainId: UInt64, nonce: UInt64, maxFeePerGas: String, maxPriorityFeePerGas: String, gasLimit: UInt64, feeToken: Data?, privateKey: Data, escrow: Data, token: Data, channelId: Data, additionalDeposit: String)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_tempo_tx_ffi_fn_func_build_top_up_transaction(
+        FfiConverterUInt64.lower(chainId),
+        FfiConverterUInt64.lower(nonce),
+        FfiConverterString.lower(maxFeePerGas),
+        FfiConverterString.lower(maxPriorityFeePerGas),
+        FfiConverterUInt64.lower(gasLimit),
+        FfiConverterOptionData.lower(feeToken),
+        FfiConverterData.lower(privateKey),
+        FfiConverterData.lower(escrow),
+        FfiConverterData.lower(token),
+        FfiConverterData.lower(channelId),
+        FfiConverterString.lower(additionalDeposit),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -652,6 +698,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.contractVersionMismatch
     }
     if (uniffi_tempo_tx_ffi_checksum_func_build_close_transaction() != 54373) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tempo_tx_ffi_checksum_func_build_open_transaction() != 13165) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tempo_tx_ffi_checksum_func_build_top_up_transaction() != 53419) {
         return InitializationResult.apiChecksumMismatch
     }
 
