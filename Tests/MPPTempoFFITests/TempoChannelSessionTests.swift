@@ -109,6 +109,29 @@ struct TempoChannelSessionTests {
         }
     }
 
+    @Test("a concurrent operation is rejected while one is in flight")
+    func reentrancyGuard() async throws {
+        let gate = SendGate()
+        let stub = StubRPC(channelDeposit: 1000, channelFinalized: false, gate: gate)
+        let rpc = try EVMRPC(transport: stub, url: #require(URL(string: "https://rpc.example.com")))
+        let session = try TempoChannelSession(
+            privateKey: privateKey, escrow: address(0x55), token: address(0x22),
+            payee: address(0x33), salt: salt, fee: fee, chainID: chainID, rpc: rpc,
+            pollInterval: .zero, maxPollAttempts: 1
+        )
+        // op1 enters open() (sets the in-flight guard) and parks at its first RPC send.
+        let op1 = Task { try await session.open(deposit: "1000") }
+        await gate.awaitParked()
+        // op2 starts while op1 holds the session: the guard rejects it (actor reentrancy
+        // would otherwise let it interleave at op1's await and collide on the nonce).
+        await #expect(throws: TempoChannelSessionError.operationInProgress) {
+            _ = try await session.open(deposit: "1000")
+        }
+        await gate.release()
+        let state = try await op1.value
+        #expect(state.isOpen)
+    }
+
     @Test("an invalid signing key is rejected at init")
     func invalidKeyRejected() throws {
         let stub = StubRPC(channelDeposit: 0, channelFinalized: false)
@@ -128,14 +151,17 @@ struct TempoChannelSessionTests {
 private final class StubRPC: MPPHTTPTransport, @unchecked Sendable {
     private let channelDeposit: UInt64
     private let channelFinalized: Bool
+    private let gate: SendGate?
     private let fakeHash = "0x" + String(repeating: "a", count: 64)
 
-    init(channelDeposit: UInt64, channelFinalized: Bool) {
+    init(channelDeposit: UInt64, channelFinalized: Bool, gate: SendGate? = nil) {
         self.channelDeposit = channelDeposit
         self.channelFinalized = channelFinalized
+        self.gate = gate
     }
 
     func send(_: HTTPRequest, body: Data) async throws -> (HTTPResponse, Data) {
+        if let gate { await gate.gate() } // parks the first send (for the reentrancy test)
         let method = (try? JSONDecoder().decode(JSONValue.self, from: body))
             .flatMap { value -> String? in
                 guard case let .object(fields) = value, case let .string(method)? = fields["method"]
@@ -174,5 +200,40 @@ private final class StubRPC: MPPHTTPTransport, @unchecked Sendable {
         let zero = word(0)
         let deposit = word(channelDeposit)
         return "0x" + finalized + zero + zero + zero + zero + zero + deposit + zero
+    }
+}
+
+/// A one-shot gate used by the reentrancy test: the stub `await`s `gate()` on its first
+/// send, which signals `awaitParked` and then suspends until `release()`. Lets the test
+/// hold one session operation mid-flight while it starts a second.
+private actor SendGate {
+    private var armed = true
+    private var parked = false
+    private var released = false
+    private var parkedContinuation: CheckedContinuation<Void, Never>?
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    /// Called by the stub. Parks only the first time; later calls pass through.
+    func gate() async {
+        guard armed else { return }
+        armed = false
+        parked = true
+        parkedContinuation?.resume()
+        parkedContinuation = nil
+        if released { return }
+        await withCheckedContinuation { releaseContinuation = $0 }
+    }
+
+    /// Resumes once the gated send has parked.
+    func awaitParked() async {
+        if parked { return }
+        await withCheckedContinuation { parkedContinuation = $0 }
+    }
+
+    /// Releases the parked send.
+    func release() {
+        released = true
+        releaseContinuation?.resume()
+        releaseContinuation = nil
     }
 }

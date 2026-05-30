@@ -47,10 +47,15 @@ public enum TempoChannelSessionError: Error, Sendable, Equatable {
     case invalidAmount(String)
     /// A broadcast transaction reverted on-chain.
     case transactionReverted(String)
-    /// A transaction did not mine within the polling budget.
+    /// A transaction was submitted (the carried hash) but did not mine within the polling
+    /// budget. The on-chain outcome is UNKNOWN: do not blindly retry (it may yet land);
+    /// read the channel state to reconcile.
     case receiptTimeout(String)
     /// Signing a voucher failed.
     case signingFailed
+    /// Another lifecycle operation (open/topUp/close) is already in flight. The session is
+    /// driven sequentially; await one operation before starting the next.
+    case operationInProgress
 }
 
 /// Drives the on-chain lifecycle of a single Tempo payment channel for one account:
@@ -59,10 +64,13 @@ public enum TempoChannelSessionError: Error, Sendable, Equatable {
 /// over ``EVMRPC``, reads channel state from the escrow (``TempoEscrow``), and signs
 /// vouchers with the account key.
 ///
-/// It is an `actor`: every operation is serialized, so the channel state (deposit,
-/// cumulative amount, open/finalized) is mutated race-free and the transactions are
-/// nonce-sequenced correctly (each waits for its receipt before the next, so a fresh
-/// account's `open` is nonce 0, the next write nonce 1, and so on).
+/// It is an `actor`, so synchronous access to its state is race-free. But actor
+/// reentrancy means another method can run at an `await` suspension point, which would
+/// break nonce sequencing if two writes interleaved (both reading the same nonce). So the
+/// session is **driven sequentially**: an explicit in-flight guard rejects a concurrent
+/// `open`/`topUp`/`close` with ``TempoChannelSessionError/operationInProgress``. Driven
+/// that way (await one op before the next), the writes are nonce-sequenced correctly (a
+/// fresh account's `open` is nonce 0, the next write nonce 1, and so on).
 ///
 /// This is the self-managing-wallet (direct on-chain) path: it builds, broadcasts, and
 /// confirms its own transactions. The 402-server path (emitting the session payloads a
@@ -89,6 +97,9 @@ public actor TempoChannelSession {
     private var lastVoucher: SignedVoucher?
     private var opened = false
     private var finalized = false
+    // True while an async lifecycle op holds the session. Set/checked synchronously (no
+    // await between check and set), so it serializes ops despite actor reentrancy.
+    private var inFlight = false
 
     /// Creates a session for the channel funded and signed by `privateKey` (the payer,
     /// which is also the voucher-authorized signer). `payee` is the channel recipient,
@@ -150,6 +161,9 @@ public actor TempoChannelSession {
     /// Opens the channel with `deposit` (a base-10 `uint128` string): builds + broadcasts
     /// the `open` transaction, then reads back the on-chain deposit. Returns the new state.
     public func open(deposit: String) async throws -> ChannelSessionState {
+        guard !inFlight else { throw TempoChannelSessionError.operationInProgress }
+        inFlight = true
+        defer { inFlight = false }
         guard !finalized else { throw TempoChannelSessionError.alreadyFinalized }
         guard !opened else { throw TempoChannelSessionError.alreadyOpen }
         guard ChannelAmount(decimal: deposit) != nil else {
@@ -170,6 +184,9 @@ public actor TempoChannelSession {
     /// Tops the channel up by `additionalDeposit` (a base-10 string): builds + broadcasts
     /// the `topUp` transaction, then re-reads the on-chain deposit.
     public func topUp(additionalDeposit: String) async throws -> ChannelSessionState {
+        guard !inFlight else { throw TempoChannelSessionError.operationInProgress }
+        inFlight = true
+        defer { inFlight = false }
         try requireOpen()
         guard ChannelAmount(decimal: additionalDeposit) != nil else {
             throw TempoChannelSessionError.invalidAmount("additionalDeposit")
@@ -187,6 +204,10 @@ public actor TempoChannelSession {
     /// as the latest. Off-chain: no transaction. The amount must strictly increase over
     /// the previous voucher and not exceed the on-chain deposit. Returns the credential.
     public func voucher(cumulativeAmount: String) throws -> SignedVoucher {
+        // Synchronous (no await), so it runs atomically on the actor and cannot itself
+        // interleave; but reject it while an async write is mid-flight, so a voucher is
+        // never issued against state a topUp/open/close is concurrently changing.
+        guard !inFlight else { throw TempoChannelSessionError.operationInProgress }
         try requireOpen()
         guard let amount = ChannelAmount(decimal: cumulativeAmount) else {
             throw TempoChannelSessionError.invalidAmount("cumulativeAmount")
@@ -203,6 +224,9 @@ public actor TempoChannelSession {
     /// (or a zero-amount voucher if none was issued): builds + broadcasts the `close`
     /// transaction and confirms the channel is finalized.
     public func close() async throws -> ChannelSessionState {
+        guard !inFlight else { throw TempoChannelSessionError.operationInProgress }
+        inFlight = true
+        defer { inFlight = false }
         try requireOpen()
         let voucher = try lastVoucher ?? sign(cumulativeAmount: "0")
         guard let parsed = Voucher(
@@ -245,8 +269,11 @@ public actor TempoChannelSession {
         try await TempoEscrow.readChannel(channelID, escrow: escrow, via: rpc)
     }
 
-    /// Broadcasts a raw transaction and polls for its receipt; throws on a revert or if it
-    /// does not mine within the budget.
+    /// Broadcasts a raw transaction and polls for its receipt. The three failure outcomes
+    /// are distinguishable so the caller knows whether the transaction reached the chain:
+    /// a thrown `EVMRPCError` (from `sendRawTransaction`) means it was NOT submitted (safe
+    /// to retry); `transactionReverted` means it was submitted and failed; `receiptTimeout`
+    /// means it WAS submitted but is unconfirmed (outcome unknown, do not blindly retry).
     private func broadcast(_ raw: Data) async throws {
         let hash = try await rpc.sendRawTransaction(raw)
         for _ in 0 ..< maxPollAttempts {

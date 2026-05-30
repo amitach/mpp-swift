@@ -5,15 +5,21 @@ stateful, concurrency-safe API a self-managing wallet calls: open a channel, acc
 vouchers, top up, close. This is the **direct on-chain** client mode; the 402-server
 payment integration (emitting the payloads a server relays/settles) is PR-H, built on this.
 
-## Why an actor (axiom-concurrency consulted)
-The session holds mutable channel state (deposit, cumulative amount, open/finalized) across
-async operations. Per the Swift-concurrency discipline, an `actor` is the right primitive
-for a non-UI subsystem with independent mutable state: it serializes every operation, so
-(a) the state mutates race-free, and (b) the transactions are **nonce-sequenced** correctly
-(each op waits for its receipt before the next returns, so a fresh account's open is nonce
-0, the next write nonce 1, ...). This is exactly the nonce-sequencing concern the #68 Devin
-note said belongs to "the client session layer" - here it is, enforced by actor isolation +
-receipt-waiting, not by the stateless builder.
+## Why an actor + an in-flight guard (axiom-concurrency consulted; Devin 🔴 corrected)
+The session holds mutable channel state across async ops. An `actor` is the right primitive
+(non-UI subsystem, independent mutable state) and makes synchronous state access race-free.
+
+**Correction (Devin 🔴 on the first cut):** the actor ALONE does not serialize end to end.
+Actor reentrancy means another method can run at an `await` suspension point, so two
+concurrent `open`/`topUp`/`close` calls would interleave at the broadcast `await` and both
+read the same nonce, colliding. So the nonce-sequencing guarantee is NOT free from the actor
+(my first version wrongly claimed it was). The fix: an explicit in-flight guard - a `private
+var inFlight` set/checked synchronously (no await between check and set, so it is atomic on
+the actor) that rejects a concurrent lifecycle op with `operationInProgress`. Driven
+sequentially (await one op before the next), the writes are then nonce-sequenced correctly.
+A deterministic unit test (`reentrancyGuard`, a gated stub that parks op1 mid-flight) proves
+the rejection. Also (Devin 🚩) `broadcast` now documents its three outcomes so a caller can
+tell "not submitted" (retry-safe) from "submitted but unconfirmed" (do not blindly retry).
 
 `channelID` is a `nonisolated let` (Sendable, immutable) so it reads without `await`.
 
