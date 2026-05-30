@@ -166,7 +166,12 @@ let package = Package(
         ),
         .testTarget(
             name: "MPPTempoServerTests",
-            dependencies: ["MPPTempoServer", "MPPTempo", "MPPCore", "MPPEVM", "MPPServer"]
+            dependencies: [
+                "MPPTempoServer", "MPPTempo", "MPPCore", "MPPEVM", "MPPServer",
+                // Construct EVMRPC + a stub MPPHTTPTransport for the RPC provider tests.
+                "MPPClient",
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+            ]
         ),
         // MPPConformanceServer: a dev-only HTTP listener (raw sockets, no new dep)
         // that exposes MPPTempoServer's verifier so the mppx reference CLIENT can pay
