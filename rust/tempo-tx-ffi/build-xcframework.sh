@@ -46,13 +46,17 @@ make_fat() {
   echo "$out"
 }
 
-echo "==> generate UniFFI Swift bindings (from a HOST-native dylib)"
-# bindgen must INTROSPECT a host-runnable library, so build the host dylib with no
-# --target (independent of which arches we package). Using a cross-compiled slice here
-# only works when the host triple happens to match it, which is not true once we add
-# x86_64 / iOS arches.
+echo "==> host build (drives bindgen AND is reused as the macOS host-arch slice)"
+# bindgen must INTROSPECT a host-runnable library, so build with no --target (a
+# cross-compiled slice only works when its triple happens to match the host, which
+# breaks once we add x86_64 / iOS arches). This same build IS the macOS host-arch
+# staticlib, so the macOS universal slice reuses it rather than compiling the host arch
+# twice; bindgen and that slice then can never come from divergent builds.
+# shellcheck disable=SC2086
 cargo build $CARGO_PROFILE_FLAG >&2
+HOST_TRIPLE=$(rustc -vV | sed -n 's/^host: //p')
 HOST_DYLIB="target/$PROFILE/$LIBNAME.dylib"
+HOST_STATIC="target/$PROFILE/$LIBNAME.a"
 rm -rf target/bindings
 cargo run --quiet --bin uniffi-bindgen -- generate \
   --library "$HOST_DYLIB" --language swift --out-dir target/bindings
@@ -73,9 +77,21 @@ module tempo_tx_ffiFFI {
 EOF
 
 echo "==> build macOS slice (universal: arm64 + x86_64)"
-MACOS_ARM=$(build_target aarch64-apple-darwin)
-MACOS_X64=$(build_target x86_64-apple-darwin)
-MACOS_FAT=$(make_fat "target/universal/macos/$PROFILE/$LIBNAME.a" "$MACOS_ARM" "$MACOS_X64")
+# Reuse the host build for its arch; build only the other macOS arch. (xcodebuild is
+# macOS-only, so the host is always *-apple-darwin; the fallback builds both explicitly
+# for any unexpected host.)
+case "$HOST_TRIPLE" in
+  aarch64-apple-darwin) MACOS_OTHER=$(build_target x86_64-apple-darwin) ;;
+  x86_64-apple-darwin) MACOS_OTHER=$(build_target aarch64-apple-darwin) ;;
+  *) MACOS_OTHER="" ;;
+esac
+if [ -n "$MACOS_OTHER" ]; then
+  MACOS_FAT=$(make_fat "target/universal/macos/$PROFILE/$LIBNAME.a" "$HOST_STATIC" "$MACOS_OTHER")
+else
+  MACOS_ARM=$(build_target aarch64-apple-darwin)
+  MACOS_X64=$(build_target x86_64-apple-darwin)
+  MACOS_FAT=$(make_fat "target/universal/macos/$PROFILE/$LIBNAME.a" "$MACOS_ARM" "$MACOS_X64")
+fi
 
 XCF_ARGS=(-library "$MACOS_FAT" -headers "$HDRS")
 
