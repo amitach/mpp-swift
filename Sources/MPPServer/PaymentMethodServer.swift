@@ -16,18 +16,23 @@ public protocol PaymentMethodServer: Sendable {
     /// plus any method-specific applicability the method enforces).
     func supports(_ challenge: Challenge) -> Bool
 
-    /// Verifies the method-specific settlement carried by `credential`.
+    /// Verifies the method-specific settlement carried by `credential` and returns
+    /// the settlement reference for the `Payment-Receipt` the verifier mints.
     ///
-    /// Throws to reject: the credential parsed and bound to a server-issued
-    /// challenge, but its method payload did not prove settlement (for a proof, the
-    /// signature did not recover to the credential's `source` wallet, or the
-    /// payload was the wrong shape). The verifier runs this BEFORE consuming the
-    /// challenge id, so a credential rejected here does not burn a legitimate
-    /// payer's challenge.
+    /// - Returns: The method-specific settlement `reference`: a transaction hash
+    ///   for a settled transfer, or the challenge id for a zero-amount proof
+    ///   (which references no on-chain settlement of its own). Its format is
+    ///   defined by the method.
+    /// - Throws: to reject. The credential parsed and bound to a server-issued
+    ///   challenge, but its method payload did not prove settlement (for a proof,
+    ///   the signature did not recover to the credential's `source` wallet, or the
+    ///   payload was the wrong shape). The verifier runs this BEFORE consuming the
+    ///   challenge id, so a credential rejected here does not burn a legitimate
+    ///   payer's challenge.
     ///
     /// `async` because a settlement check may consult an external service: a
     /// zero-amount proof is pure local recovery, but a settled transfer confirms
     /// the transaction on-chain over an RPC. Defining the seam as `async` now keeps
     /// that later method from forcing a source-breaking protocol change.
-    func verify(_ credential: Credential) async throws
+    func verify(_ credential: Credential) async throws -> String
 }

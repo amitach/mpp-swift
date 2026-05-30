@@ -17,11 +17,13 @@ import MPPCore
 /// `HTTPResponse`), the framework-neutral representation that server frameworks
 /// (Hummingbird, Vapor) interoperate with.
 ///
-/// This layer attests protocol-level validity only and does **not** mint a
-/// `Payment-Receipt`: a receipt carries a settlement `reference` that exists
-/// only once a payment method has settled (`draft-httpauth-payment-00` §5.3),
-/// which is the method layer's job. The middleware sets `Cache-Control: private`
-/// on the paid response and `no-store` on every `402` / `413` (§11.10).
+/// The receipt is minted by the layers below, not here: a payment method reports
+/// the settlement `reference` and ``PaymentVerifier`` mints the ``Receipt`` (the
+/// method layer owns settlement). When verification produced one (``MPPVerified``
+/// carries it), this layer attaches it as the optional `Payment-Receipt` response
+/// header (`draft-httpauth-payment-00` §5.3); in protocol-only mode there is no
+/// receipt to attach. The middleware also sets `Cache-Control: private` on the
+/// paid response and `no-store` on every `402` / `413` (§11.10).
 public struct MPPServerMiddleware: Sendable {
     private let minter: ChallengeMinter
     private let verifier: PaymentVerifier
@@ -149,6 +151,13 @@ public struct MPPServerMiddleware: Sendable {
             if meetsFloor != true {
                 response.headerFields[.cacheControl] = "private"
             }
+            // Attach the settlement receipt (Payment-Receipt), when a method minted
+            // one. The header is optional (spec: for auditability), so an encoding
+            // failure on an otherwise-valid receipt is swallowed rather than failing
+            // the paid response the client already earned.
+            if let receipt = verified.receipt, let value = try? receipt.headerValue {
+                response.headerFields[Self.paymentReceiptField] = value
+            }
             return (response, responseBody)
         }
     }
@@ -234,6 +243,15 @@ public struct MPPServerMiddleware: Sendable {
     // MARK: - Response building
 
     private static let problemContentType = "application/problem+json"
+
+    /// The `Payment-Receipt` response header name (non-standard, so built from a
+    /// compile-time-known-valid token).
+    private static let paymentReceiptField: HTTPField.Name = {
+        guard let name = HTTPField.Name("Payment-Receipt") else {
+            preconditionFailure("Payment-Receipt is a valid HTTP field name")
+        }
+        return name
+    }()
 
     private static func paymentRequiredResponse(
         challenge: Challenge, problem: ProblemDetails

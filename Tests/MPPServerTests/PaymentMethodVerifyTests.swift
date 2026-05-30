@@ -16,7 +16,7 @@ private struct StubMethod: PaymentMethodServer {
         supportsChallenge
     }
 
-    func verify(_: Credential) async throws {
+    func verify(_: Credential) async throws -> String {
         throw Rejected()
     }
 }
