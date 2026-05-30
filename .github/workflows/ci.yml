@@ -140,6 +140,12 @@ jobs:
       - name: Build + test the FFI crate
         working-directory: rust/tempo-tx-ffi
         run: cargo test
+      - name: Swift FFI integration smoke test
+        # macOS has both cargo + swiftc: build the crate, generate the UniFFI Swift
+        # bindings, and run a Swift program that calls the FFI and asserts the same
+        # byte-exact golden 0x76 tx. Proves Swift -> UniFFI -> Rust end to end.
+        if: matrix.os == 'macos-15'
+        run: rust/tempo-tx-ffi/build-ffi.sh
       - name: Audit Rust dependencies (RustSec advisory DB)
         # Closes the supply-chain gap (the Swift OSV gate does not cover Cargo deps).
         # OS-independent, so run once (Linux leg). Fails on a known advisory.
