@@ -16,6 +16,7 @@ tempo-primitives = { git = "https://github.com/tempoxyz/tempo", tag = "tempo-pri
 alloy-primitives = "1.6.0"
 alloy-sol-types = "1.6.0"
 k256 = { version = "0.13.4", features = ["ecdsa"] }
+zeroize = "1"
 
 [lib]
 crate-type = ["staticlib", "rlib"]

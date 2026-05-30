@@ -124,11 +124,23 @@ jobs:
     # vector for the close tx. Pinned tag tempo-primitives@1.8.0 needs rustc >= 1.93.
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Ensure rustc >= 1.93
-        run: rustup update stable && rustup default stable && rustc --version
+      - name: Ensure rustc >= 1.93 (tempo-primitives MSRV)
+        run: |
+          rustup update stable && rustup default stable
+          ver=$(rustc --version | awk '{print $2}')
+          printf '1.93.0\n%s\n' "$ver" | sort -V -C || {
+            echo "::error::rustc $ver is below the 1.93 floor"; exit 1; }
+          echo "rustc $ver OK"
       - name: Build + test the FFI crate
         working-directory: rust/tempo-tx-ffi
         run: cargo test
+      - name: Audit Rust dependencies (RustSec advisory DB)
+        working-directory: rust/tempo-tx-ffi
+        # Closes the supply-chain gap: the Swift OSV gate does not cover Cargo deps.
+        # Fails on a known advisory in the (large) Rust tree we pull for the 0x76 tx.
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
 
   conformance-reverse:
     name: Conformance (reverse)

@@ -13,6 +13,7 @@ use alloy_sol_types::{sol, SolCall};
 use k256::ecdsa::SigningKey;
 use tempo_primitives::transaction::Call;
 use tempo_primitives::{TempoSignature, TempoTransaction};
+use zeroize::Zeroize;
 
 sol! {
     function close(bytes32 channelId, uint128 cumulativeAmount, bytes signature);
@@ -41,7 +42,7 @@ pub fn build_close_tx(
     max_priority_fee_per_gas: u128,
     gas_limit: u64,
     fee_token: Option<Address>,
-    private_key: [u8; 32],
+    mut private_key: [u8; 32],
     escrow: Address,
     channel_id: [u8; 32],
     cumulative_amount: u128,
@@ -71,8 +72,11 @@ pub fn build_close_tx(
     };
 
     let hash = tx.signature_hash();
-    let signing_key =
-        SigningKey::from_bytes((&private_key).into()).map_err(|_| BuildError::InvalidKey)?;
+    // Build the key, then zeroize our copy of the raw bytes immediately (on both the
+    // ok and error paths). The k256 SigningKey itself is zeroize-on-drop.
+    let signing_key_result = SigningKey::from_bytes((&private_key).into());
+    private_key.zeroize();
+    let signing_key = signing_key_result.map_err(|_| BuildError::InvalidKey)?;
     let (sig, recid) = signing_key
         .sign_prehash_recoverable(hash.as_slice())
         .map_err(|_| BuildError::SigningFailed)?;
