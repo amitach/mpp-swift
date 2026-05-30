@@ -17,11 +17,13 @@ import MPPCore
 /// `HTTPResponse`), the framework-neutral representation that server frameworks
 /// (Hummingbird, Vapor) interoperate with.
 ///
-/// This layer attests protocol-level validity only and does **not** mint a
-/// `Payment-Receipt`: a receipt carries a settlement `reference` that exists
-/// only once a payment method has settled (`draft-httpauth-payment-00` §5.3),
-/// which is the method layer's job. The middleware sets `Cache-Control: private`
-/// on the paid response and `no-store` on every `402` / `413` (§11.10).
+/// The receipt is minted by the layers below, not here: a payment method reports
+/// the settlement `reference` and ``PaymentVerifier`` mints the ``Receipt`` (the
+/// method layer owns settlement). When verification produced one (``MPPVerified``
+/// carries it), this layer attaches it as the optional `Payment-Receipt` response
+/// header (`draft-httpauth-payment-00` §5.3); in protocol-only mode there is no
+/// receipt to attach. The middleware also sets `Cache-Control: private` on the
+/// paid response and `no-store` on every `402` / `413` (§11.10).
 public struct MPPServerMiddleware: Sendable {
     private let minter: ChallengeMinter
     private let verifier: PaymentVerifier
