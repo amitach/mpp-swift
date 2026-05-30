@@ -156,10 +156,11 @@ struct ModeratoE2ETests {
         )
     }
 
-    /// Broadcasts a raw transaction and waits for its receipt to confirm success.
+    /// Broadcasts a raw transaction with the submit-and-wait sync send and asserts success.
     private func broadcast(_ raw: Data, rpc: EVMRPC) async throws {
-        let hash = try await rpc.sendRawTransaction(raw)
-        try await waitForSuccess(hash, rpc: rpc)
+        let receipt = try await rpc.sendRawTransactionSync(raw)
+        guard receipt.succeeded
+        else { throw E2EError.unexpected("tx \(receipt.transactionHash) reverted") }
     }
 
     // MARK: - Helpers

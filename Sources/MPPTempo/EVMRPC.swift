@@ -66,9 +66,30 @@ public struct EVMRPC: Sendable {
     public func transactionReceipt(
         _ txHash: String
     ) async throws(EVMRPCError) -> TransactionReceipt? {
-        let result = try await request("eth_getTransactionReceipt", params: .array([
+        try await decodeReceipt(request("eth_getTransactionReceipt", params: .array([
             .string(txHash),
+        ])))
+    }
+
+    /// `eth_sendRawTransactionSync`: Tempo's submit-and-wait. It broadcasts `raw` and
+    /// blocks server-side until the transaction is mined, returning the receipt in one
+    /// round trip (so there is no client-side poll loop or receipt timeout to manage). The
+    /// caller checks ``TransactionReceipt/succeeded`` for a revert.
+    public func sendRawTransactionSync(
+        _ raw: Data
+    ) async throws(EVMRPCError) -> TransactionReceipt {
+        let result = try await request("eth_sendRawTransactionSync", params: .array([
+            .string(raw.hexPrefixed),
         ]))
+        guard let receipt = try decodeReceipt(result) else {
+            throw .malformedResponse("eth_sendRawTransactionSync returned a null receipt")
+        }
+        return receipt
+    }
+
+    /// Decodes a transaction-receipt JSON object, or `nil` for JSON `null` (a still-pending
+    /// receipt). Shared by `transactionReceipt` and `sendRawTransactionSync`.
+    private func decodeReceipt(_ result: JSONValue) throws(EVMRPCError) -> TransactionReceipt? {
         if case .null = result { return nil }
         guard case let .object(fields) = result else {
             throw .malformedResponse("receipt is not an object")
