@@ -121,7 +121,7 @@ public struct TempoChannelMethod: PaymentMethodClient {
         }
         let chainId = request.chainId ?? defaultChainId
         try await runApproval(challenge, request, chainId)
-        let outcome = try await registry.charge(session.key, amount: amount) {
+        let outcome = try await registry.charge(session.key(chainId: chainId), amount: amount) {
             try await openChannel(session, chainId: chainId, request: request)
         }
         return try assembleCredential(
@@ -140,8 +140,14 @@ public struct TempoChannelMethod: PaymentMethodClient {
         let escrow: EthereumAddress
         let payee: EthereumAddress
         let token: EthereumAddress
-        var key: ChannelKey {
-            ChannelKey(payee: payee, token: token, escrow: escrow)
+        /// The registry key for this channel on `chainId`. `chainId` is part of the key
+        /// (unlike the reference client) because it binds the voucher's EIP-712 domain and
+        /// the on-chain channel id: without it, the same `(payee, token, escrow)` on two
+        /// chains would share one entry, and the second charge would voucher against the
+        /// first chain's channel with the wrong domain. The key is internal client state
+        /// (never on the wire), so this is a correctness fix with no protocol impact.
+        func key(chainId: UInt64) -> ChannelKey {
+            ChannelKey(payee: payee, token: token, escrow: escrow, chainId: chainId)
         }
     }
 

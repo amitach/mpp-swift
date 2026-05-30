@@ -1,14 +1,18 @@
 import Foundation
 import MPPEVM
 
-/// The registry key for a payment channel: the `(payee, token, escrow)` triple a
-/// channel is reused for. Every charge to the same triple vouchers against one open
-/// channel; only the first charge opens it (the reference mppx client keys channels
-/// the same way).
+/// The registry key for a payment channel: the `(payee, token, escrow, chainId)` a channel
+/// is reused for. Every charge to the same key vouchers against one open channel; only the
+/// first charge opens it. `chainId` is included (the reference client keys only by the
+/// triple) because it binds the voucher's EIP-712 domain and the on-chain channel id: the
+/// same `(payee, token, escrow)` on two chains is two distinct channels, and the key is
+/// internal client state (never on the wire), so adding it is a correctness fix with no
+/// protocol impact.
 struct ChannelKey: Hashable {
     let payee: EthereumAddress
     let token: EthereumAddress
     let escrow: EthereumAddress
+    let chainId: UInt64
 }
 
 /// A freshly opened channel: the deterministic 32-byte channel id and the signed

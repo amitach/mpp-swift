@@ -154,6 +154,21 @@ struct TempoChannelMethodTests {
         #expect(await builder.parameters.count == 2)
     }
 
+    @Test("the same payee/token/escrow on a different chain opens a separate channel")
+    func differentChainOpensSeparateChannel() async throws {
+        let builder = StubOpenTxBuilder()
+        let method = try makeMethod(builder: builder)
+        let first = try await method.buildCredential(for: sessionChallenge(chainId: 1))
+        let second = try await method.buildCredential(for: sessionChallenge(chainId: 2))
+
+        // chainId is part of the registry key, so the second charge opens its own channel
+        // rather than vouchering against chain 1's channel with chain 2's EIP-712 domain.
+        #expect(first.payload["action"] == .string("open"))
+        #expect(second.payload["action"] == .string("open"))
+        #expect(first.payload["channelId"] != second.payload["channelId"])
+        #expect(await builder.parameters.count == 2)
+    }
+
     // MARK: amount + cumulative edges
 
     @Test("an amount that does not fit uint128 throws amountExceedsChannelRange")
