@@ -7,8 +7,9 @@
 //! Only the escrow `close` (settlement) tx is built for now; `open` / `topUp` follow.
 //! Two surfaces: the typed Rust `build_close_tx` (used by the in-crate tests), and
 //! the UniFFI-exported `build_close_transaction` (FFI-friendly types: scalars,
-//! `Vec<u8>`, and decimal `String`s for `u128`) that the Swift wrapper calls. The
-//! xcframework / Linux `.so` packaging + the SwiftPM wiring follow in the next slice.
+//! `Vec<u8>`, and decimal `String`s for `u128`) that the Swift wrapper calls. It is
+//! packaged into the `TempoTxFFI` xcframework (`build-xcframework.sh`) and linked by
+//! the opt-in `MPPTempoFFI` SwiftPM product; the Linux `.so` + remaining arches follow.
 
 use alloy_primitives::{Address, Bytes, FixedBytes, Signature, TxKind, U256};
 use alloy_sol_types::{sol, SolCall};

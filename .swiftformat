@@ -13,3 +13,6 @@
 --disable redundantReturn,trailingCommas,docComments,wrapMultilineStatementBraces
 # The Rust FFI crate's Swift smoke harness is not SDK source.
 --exclude rust
+# UniFFI-generated bindings (committed + drift-checked in CI against the pinned
+# crate); not our style domain and regenerated verbatim, so never reformat them.
+--exclude Sources/MPPTempoFFI/Generated

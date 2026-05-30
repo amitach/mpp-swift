@@ -26,9 +26,10 @@ dependencies); `MPPEVM` in particular is standalone EVM crypto and does not depe
 `MPPCore`. The rails compose them: `MPPTempo` = Core + EVM + Client, and
 `MPPTempoServer` adds Server.
 
-Separately, **`rust/tempo-tx-ffi`** is a Rust crate (NOT a SwiftPM product) that
-builds + signs + RLP-encodes the bespoke Tempo `0x76` transaction by binding Tempo's
-own `tempo-primitives`. It is reached from Swift over an FFI boundary (see below).
+Separately, **`rust/tempo-tx-ffi`** is a Rust crate that builds + signs + RLP-encodes
+the bespoke Tempo `0x76` transaction by binding Tempo's own `tempo-primitives`. It is
+packaged into a `TempoTxFFI` xcframework and reached from Swift over a UniFFI boundary
+by the **opt-in `MPPTempoFFI`** product (see below).
 
 A non-EVM consumer (e.g. a future Stripe rail, or pure client/server/MCP) pulls
 **none** of `MPPEVM`/`MPPTempo` and **no Rust**.
@@ -89,8 +90,23 @@ The blob-free Swift plumbing, all merged:
 The one seam the FFI fills:
 
 - **`TempoCloseTxBuilder`**: a one-method protocol (`buildCloseTransaction`). The
-  Swift wrapper around `rust/tempo-tx-ffi` conforms to it; a server that never settles
-  on-chain itself needs no conformer.
+  **`MPPTempoFFI`** product's `FFITempoCloseTxBuilder` conforms to it, calling the
+  UniFFI bindings to the Rust shim; a server that never settles on-chain itself needs
+  no conformer.
+
+### Linking the Rust shim, and keeping it opt-in
+
+`MPPTempoFFI` is the **only** target that links Rust. It depends on a `binaryTarget`
+(the `TempoTxFFI` xcframework: the `tempo-tx-ffi` staticlib + its C header) and carries
+the committed, drift-checked UniFFI-generated Swift bindings. Both the product and the
+binaryTarget are declared only when the **`MPP_TEMPO_FFI`** environment variable is set,
+so the default package graph (every other product, and the non-FFI CI jobs) references
+no xcframework and pulls **zero Rust**. `Scripts/assert-ffi-isolation.sh` asserts this
+invariant in CI: the default graph must contain no `MPPTempoFFI` / `TempoTxFFIBinary`.
+The xcframework is built in CI from the pinned `tempo-primitives` source
+(`rust/tempo-tx-ffi/build-xcframework.sh`), never committed as a binary. (Current spike:
+macOS arm64 + the `close` op; x86_64 / iOS arches, the Linux `.so`, and open/topUp
+follow.)
 
 ## A session, end to end
 

@@ -13,3 +13,9 @@ Scripts/conformance/node_modules/
 
 # Rust FFI build artifacts (Cargo.lock IS committed for a reproducible, auditable build)
 rust/*/target/
+
+# The TempoTxFFI xcframework is BUILT IN CI from pinned tempo-primitives source
+# (provenance, no committed binary blob); build-xcframework.sh produces it locally.
+# The generated Swift bindings under Sources/MPPTempoFFI/Generated ARE committed and
+# drift-checked in CI, so they are deliberately not ignored.
+artifacts/
