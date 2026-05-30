@@ -10,48 +10,7 @@ import Testing
 // reference SDK's session-server cases: voucher accept / idempotent-still-charges /
 // strictly-increasing / below-settled / exceeds-deposit / bad-signature / closed /
 // insufficient-balance, plus open (validate + create), topUp, and close (settle).
-/// A configurable stub provider: returns a fixed on-chain snapshot and records the
-/// settle / broadcast calls. File-scope so the suite body stays under the cap.
-private final class StubProvider: ChannelStateProvider, @unchecked Sendable {
-    var onChain: OnChainChannel
-    private(set) var settleCalls = 0
-    private(set) var openCalls = 0
-    /// The cumulative amount of the voucher the last `settle` was called with.
-    private(set) var settledCumulative: String?
-    init(_ onChain: OnChainChannel) {
-        self.onChain = onChain
-    }
-
-    func channelState(
-        channelID _: Data, escrow _: EthereumAddress, chainID _: UInt64
-    ) async -> OnChainChannel {
-        onChain
-    }
-
-    func broadcastOpen(
-        serializedTransaction _: Data, channelID _: Data, escrow _: EthereumAddress,
-        chainID _: UInt64
-    ) async -> (state: OnChainChannel, txHash: String) {
-        openCalls += 1
-        return (onChain, "0xopen")
-    }
-
-    func broadcastTopUp(
-        serializedTransaction _: Data, channelID _: Data, escrow _: EthereumAddress,
-        chainID _: UInt64
-    ) async -> (state: OnChainChannel, txHash: String) {
-        (onChain, "0xtopup")
-    }
-
-    func settle(
-        channelID _: Data, voucher: Voucher, signature _: Data, escrow _: EthereumAddress,
-        chainID _: UInt64
-    ) async -> String {
-        settleCalls += 1
-        settledCumulative = voucher.cumulativeAmount
-        return "0xsettle"
-    }
-}
+// The `StubProvider` double and the `Flag` helper live in TempoServerTestSupport.swift.
 
 // Shared session-test fixtures at file scope, so both the core suite and the
 // close-action suite below reuse one set of builders (no per-suite copies).
@@ -343,6 +302,31 @@ struct SessionMethodCloseTests {
         #expect(channel?.finalized == true)
         #expect(channel?.settledOnChain == ChannelAmount(100))
         #expect(receipt.extras["txHash"] == "0xsettle")
+    }
+
+    @Test("close sets closing before settling, so a concurrent draw is rejected mid-settle")
+    func closeBlocksConcurrentDrawDuringSettle() async throws {
+        let store = try await seedStore(highest: 100, spent: 0)
+        let provider = StubProvider(onChainChannel(deposit: 1000))
+        // During the on-chain settle window, a concurrent charge must be rejected
+        // because close has already marked the channel closing.
+        let drawDuringSettleClosed = Flag(false)
+        provider.onSettle = { @Sendable in
+            do {
+                _ = try await deductFromChannel(
+                    store,
+                    channelID: channelID,
+                    amount: ChannelAmount(10)
+                )
+            } catch let error as ChannelError {
+                if case .closed = error { drawDuringSettleClosed.set(true) }
+            } catch {}
+        }
+        let session = method(store, provider)
+        _ = try await session.verify(
+            voucherCredential(cumulative: "100", action: "close"), now: now
+        )
+        #expect(drawDuringSettleClosed.get() == true)
     }
 
     @Test("close on an already-finalized channel is rejected")

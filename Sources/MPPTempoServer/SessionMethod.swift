@@ -61,7 +61,7 @@ public struct SessionMethod: PaymentMethodServer {
     }
 
     public func supports(_ challenge: Challenge) -> Bool {
-        challenge.method.rawValue == "tempo" && challenge.intent == .session
+        challenge.method == TempoMethod.name && challenge.intent == .session
     }
 
     public func verify(_ credential: Credential, now: Date) async throws -> Receipt {
@@ -148,7 +148,7 @@ public struct SessionMethod: PaymentMethodServer {
     // MARK: - open
 
     private func openChannel(_ fields: OpenFields, _ context: Context) async throws -> Receipt {
-        let (onChain, _) = try await provider.broadcastOpen(
+        let (onChain, openTxHash) = try await provider.broadcastOpen(
             serializedTransaction: fields.transaction, channelID: fields.channelID,
             escrow: context.escrow, chainID: context.chainID
         )
@@ -181,7 +181,10 @@ public struct SessionMethod: PaymentMethodServer {
             )
         }
         let charged = try await chargeRequest(fields.channelID, context)
-        return receipt(charged, context)
+        return SessionReceipt.make(
+            method: context.method, now: context.now, challengeID: context.challengeID,
+            channel: charged, txHash: openTxHash
+        )
     }
 
     // MARK: - topUp
@@ -209,26 +212,25 @@ public struct SessionMethod: PaymentMethodServer {
             throw SessionError.channelNotFound
         }
         if channel.finalized { throw SessionError.channelClosed(reason: "finalized") }
+        // Verify the close voucher before mutating any state, so only the authorized
+        // signer (not an attacker with a bogus signature) can freeze the channel.
         try verifySignature(fields, expectedSigner: channel.authorizedSigner, context)
         let clientCumulative = try amount(fields.cumulativeAmount)
 
-        // Settle the higher of the client's final voucher and the server's stored
-        // highest accepted voucher: a lower (validly self-signed) client voucher must
-        // never reduce the payee's settlement below what the channel already drew.
-        let settleAmount: ChannelAmount
-        let settleSignature: Data
-        if clientCumulative >= channel.highestVoucherAmount {
-            settleAmount = clientCumulative
-            settleSignature = fields.signature
-        } else if let storedSignature = channel.highestVoucherSignature {
-            settleAmount = channel.highestVoucherAmount
-            settleSignature = storedSignature
-        } else {
-            // Unreachable: a stored highest above the client's amount always carries
-            // its signature. Fall back to the (verified) client voucher defensively.
-            settleAmount = clientCumulative
-            settleSignature = fields.signature
-        }
+        // Atomically claim the close: re-check finalized and set `closing` so concurrent
+        // vouchers stop drawing (deductFromChannel rejects a closing channel) during the
+        // async on-chain settlement window. Use this claimed snapshot for the settle
+        // selection so the stored highest/signature are read under serialization.
+        guard let claimed = try await store.update(fields.channelID, { current in
+            guard var channel = current else { throw SessionError.channelNotFound }
+            if channel.finalized { throw SessionError.channelClosed(reason: "finalized") }
+            channel.closing = true
+            return channel
+        }) else { throw SessionError.channelNotFound }
+
+        let (settleAmount, settleSignature) = settleSelection(
+            clientCumulative: clientCumulative, clientSignature: fields.signature, claimed: claimed
+        )
         guard let voucher = Voucher(
             channelID: fields.channelID, cumulativeAmount: settleAmount.decimalString
         ) else { throw SessionError.malformedPayload }
@@ -244,7 +246,7 @@ public struct SessionMethod: PaymentMethodServer {
         }
         return SessionReceipt.make(
             method: context.method, now: context.now, challengeID: context.challengeID,
-            channel: updated ?? channel, txHash: txHash
+            channel: updated ?? claimed, txHash: txHash
         )
     }
 
@@ -316,6 +318,23 @@ public struct SessionMethod: PaymentMethodServer {
             channel: channel
         )
     }
+}
+
+/// Picks the voucher a `close` settles: the higher of the client's final voucher
+/// and the server's stored highest accepted voucher (with its stored signature), so
+/// a close can never settle below what the channel already drew. The final `else` is
+/// unreachable (a stored highest above the client's amount always carries its
+/// signature) and falls back to the already-verified client voucher defensively.
+private func settleSelection(
+    clientCumulative: ChannelAmount, clientSignature: Data, claimed: ChannelState
+) -> (amount: ChannelAmount, signature: Data) {
+    if clientCumulative >= claimed.highestVoucherAmount {
+        return (clientCumulative, clientSignature)
+    }
+    if let storedSignature = claimed.highestVoucherSignature {
+        return (claimed.highestVoucherAmount, storedSignature)
+    }
+    return (clientCumulative, clientSignature)
 }
 
 private extension OpenFields {
