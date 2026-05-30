@@ -32,42 +32,6 @@ public struct TempoFeeParameters: Sendable, Hashable {
     }
 }
 
-/// The escrow `open` inputs (besides the held key/fee/nonce and the chain id): the
-/// escrow and TIP-20 token addresses, the channel payee, the initial `deposit` (decimal
-/// `u128` string), the channel `salt` (32 bytes), and the `authorizedSigner` that will
-/// sign vouchers. Grouped into a value so the builder method stays legible.
-public struct TempoOpenParameters: Sendable, Hashable {
-    /// The escrow contract address.
-    public let escrow: EthereumAddress
-    /// The TIP-20 token the channel is denominated in (also `approve`d to the escrow).
-    public let token: EthereumAddress
-    /// The channel payee.
-    public let payee: EthereumAddress
-    /// The initial deposit, as a base-10 `u128` string.
-    public let deposit: String
-    /// The 32-byte channel salt.
-    public let salt: Data
-    /// The address authorized to sign vouchers for the channel.
-    public let authorizedSigner: EthereumAddress
-
-    /// Creates the open inputs.
-    public init(
-        escrow: EthereumAddress,
-        token: EthereumAddress,
-        payee: EthereumAddress,
-        deposit: String,
-        salt: Data,
-        authorizedSigner: EthereumAddress
-    ) {
-        self.escrow = escrow
-        self.token = token
-        self.payee = payee
-        self.deposit = deposit
-        self.salt = salt
-        self.authorizedSigner = authorizedSigner
-    }
-}
-
 /// A reason the FFI transaction build failed.
 public enum FFITempoTxError: Error, Sendable, Equatable {
     /// The configured signing key was not a valid secp256k1 private key.
@@ -84,16 +48,17 @@ public enum FFITempoTxError: Error, Sendable, Equatable {
 /// Rust `tempo-tx-ffi` shim (which binds Tempo's own `tempo-primitives` so the output
 /// is byte-identical to the chain). Covers the channel bookends a wallet performs:
 /// `open` and `topUp` (each a two-call `approve` + escrow-call transaction) and
-/// `close` (settlement). It conforms to ``TempoCloseTxBuilder`` so the server's
-/// ``RPCChannelStateProvider`` can inject it for settle without taking on the FFI
-/// dependency directly.
+/// `close` (settlement). It conforms to ``TempoCloseTxBuilder`` (so the server's
+/// ``RPCChannelStateProvider`` can inject it for settle) and to ``TempoOpenTxBuilder``
+/// (so a client such as ``TempoChannelMethod`` can inject it for auto-open) without
+/// either taking on the FFI dependency directly.
 ///
 /// It holds the account's signing key (which pays the gas) and the fee parameters, and
 /// is injected with a `nonceProvider` returning the account's next nonce (the Swift
 /// side reads it over JSON-RPC; tests inject a stub). The signing key is held only for
 /// the lifetime of this value; the FFI zeroizes its own copy of the key bytes on every
 /// path (see the Rust crate).
-public struct FFITempoTxBuilder: TempoCloseTxBuilder {
+public struct FFITempoTxBuilder: TempoCloseTxBuilder, TempoOpenTxBuilder {
     private let signingKey: Data
     private let fee: TempoFeeParameters
     private let nonceProvider: @Sendable (EthereumAddress) async throws -> UInt64

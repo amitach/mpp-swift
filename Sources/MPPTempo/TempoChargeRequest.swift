@@ -24,6 +24,10 @@ public struct TempoChargeRequest: Sendable, Hashable {
     /// The escrow contract holding the channel, from `methodDetails.escrowContract`
     /// (present for a session challenge; absent for a plain charge).
     public let escrowContract: String?
+    /// The deposit the server suggests for a newly opened channel, from
+    /// `methodDetails.suggestedDeposit` (a decimal base-units string), if present. A
+    /// client's deposit policy may use it as one input; it is never the charge amount.
+    public let suggestedDeposit: String?
 
     /// Whether this is a zero-amount charge (the EIP-712 proof path).
     ///
@@ -58,6 +62,7 @@ public struct TempoChargeRequest: Sendable, Hashable {
         recipient = wire.recipient
         currency = wire.currency
         escrowContract = wire.methodDetails?.escrowContract
+        suggestedDeposit = wire.methodDetails?.suggestedDeposit
     }
 
     /// A reason a charge `request` could not be decoded.
@@ -83,9 +88,10 @@ private struct ChargeRequestWire: Decodable {
     let methodDetails: MethodDetails?
 }
 
-/// The `methodDetails` sub-object: `chainId` (proof + session) and the session's
-/// `escrowContract`.
+/// The `methodDetails` sub-object: `chainId` (proof + session), the session's
+/// `escrowContract`, and the session's optional `suggestedDeposit`.
 private struct MethodDetails: Decodable {
     let chainId: UInt64?
     let escrowContract: String?
+    let suggestedDeposit: String?
 }
