@@ -98,6 +98,49 @@ public struct EVMRPC: Sendable {
         )
     }
 
+    // MARK: - Account + gas (transaction-building inputs)
+
+    /// `eth_getTransactionCount`: the account's nonce. Uses the `pending` tag by
+    /// default so a freshly-built transaction does not collide with one already in
+    /// the mempool.
+    public func transactionCount(
+        _ address: EthereumAddress, pending: Bool = true
+    ) async throws(EVMRPCError) -> UInt64 {
+        let result = try await request("eth_getTransactionCount", params: .array([
+            .string(address.bytes.hexPrefixed), .string(pending ? "pending" : "latest"),
+        ]))
+        return try quantity(result)
+    }
+
+    /// `eth_estimateGas`: the gas limit for invoking `data` on `to` from `from`
+    /// (value 0; the escrow channel ops carry no native value).
+    public func estimateGas(
+        from: EthereumAddress, to address: EthereumAddress, data: Data
+    ) async throws(EVMRPCError) -> UInt64 {
+        let result = try await request("eth_estimateGas", params: .array([
+            .object([
+                "from": .string(from.bytes.hexPrefixed),
+                "to": .string(address.bytes.hexPrefixed),
+                "data": .string(data.hexPrefixed),
+                "value": .string("0x0"),
+            ]),
+        ]))
+        return try quantity(result)
+    }
+
+    /// `eth_gasPrice`: the current gas price (in the chain's base gas-price units).
+    public func gasPrice() async throws(EVMRPCError) -> UInt64 {
+        try await quantity(request("eth_gasPrice", params: .array([])))
+    }
+
+    /// Decodes a JSON-RPC `QUANTITY` result (a `0x`-hex integer) into a `UInt64`.
+    private func quantity(_ value: JSONValue) throws(EVMRPCError) -> UInt64 {
+        guard case let .string(hex) = value, let number = UInt64(hexQuantity: hex) else {
+            throw .malformedResponse("result is not a hex quantity")
+        }
+        return number
+    }
+
     // MARK: - Core
 
     /// A single JSON-RPC call: encodes the `2.0` envelope, posts it over the

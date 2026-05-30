@@ -99,6 +99,22 @@ jobs:
       - name: Cross-SDK conformance against live Moderato (chainId 42431)
         run: Scripts/conformance/run.sh --testnet
 
+  live-moderato:
+    name: Live Moderato (Swift e2e)
+    runs-on: macos-15
+    # NON-REQUIRED (kept out of branch protection): runs the gated live tests
+    # (MPP_MODERATO_E2E=1) directly against the live Moderato node, so it depends on
+    # a third party being up. It gives a real-chain signal for the EVM RPC + escrow
+    # read path (eth_chainId, getChannel, nonce, gasPrice). The write-path e2e
+    # (open / topUp / close / settle) lands here once the 0x76 FFI can build a signed
+    # transaction. Disable if it proves flaky.
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Live Moderato Swift tests
+        env:
+          MPP_MODERATO_E2E: "1"
+        run: swift test --filter Moderato
+
   conformance-reverse:
     name: Conformance (reverse)
     runs-on: macos-15 # has swift preinstalled; node via setup-node

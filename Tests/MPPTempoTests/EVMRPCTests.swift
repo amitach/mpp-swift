@@ -128,6 +128,59 @@ struct EVMRPCTests {
         }
     }
 
+    @Test("transactionCount decodes the nonce and uses the pending tag")
+    func transactionCount() async throws {
+        let stub = StubHTTP(json: #"{"jsonrpc":"2.0","id":1,"result":"0x5"}"#)
+        let rpc = try EVMRPC(transport: stub, url: rpcURL)
+        #expect(try await rpc.transactionCount(addr) == 5)
+        let envelope = try sentEnvelope(stub)
+        #expect(envelope["method"] == .string("eth_getTransactionCount"))
+        #expect(envelope["params"] == .array([
+            .string("0x5555555555555555555555555555555555555555"), .string("pending"),
+        ]))
+    }
+
+    @Test("estimateGas decodes the gas limit and posts a value-0 call")
+    func estimateGas() async throws {
+        let stub = StubHTTP(json: #"{"jsonrpc":"2.0","id":1,"result":"0x5208"}"#)
+        let rpc = try EVMRPC(transport: stub, url: rpcURL)
+        #expect(try await rpc.estimateGas(from: addr, to: addr, data: Data([0xAB])) == 21000)
+        let envelope = try sentEnvelope(stub)
+        #expect(envelope["method"] == .string("eth_estimateGas"))
+        guard case let .array(params)? = envelope["params"], case let .object(call) = params.first
+        else { throw EVMRPCError.malformedResponse("params") }
+        #expect(call["value"] == .string("0x0"))
+        #expect(call["data"] == .string("0xab"))
+    }
+
+    @Test("gasPrice decodes the hex quantity")
+    func gasPrice() async throws {
+        let stub = StubHTTP(json: #"{"jsonrpc":"2.0","id":1,"result":"0x3b9aca00"}"#)
+        let rpc = try EVMRPC(transport: stub, url: rpcURL)
+        #expect(try await rpc.gasPrice() == 1_000_000_000)
+    }
+
+    @Test("a non-quantity result throws .malformedResponse")
+    func badQuantity() async throws {
+        let stub = StubHTTP(json: #"{"jsonrpc":"2.0","id":1,"result":"notahex"}"#)
+        let rpc = try EVMRPC(transport: stub, url: rpcURL)
+        await #expect(throws: EVMRPCError.self) {
+            try await rpc.transactionCount(addr)
+        }
+    }
+
+    @Test("live Moderato nonce + gas reads round-trip", .enabled(if: liveEnabled))
+    func liveModeratoAccountGas() async throws {
+        let rpc = try EVMRPC(
+            transport: URLSessionTransport(),
+            url: makeURL("https://rpc.moderato.tempo.xyz")
+        )
+        let escrow = makeAddress("0xe1c4d3dce17bc111181ddf716f75bae49e61a336")
+        // The calls round-trip + decode against the real chain (values are chain state).
+        _ = try await rpc.transactionCount(escrow)
+        _ = try await rpc.gasPrice()
+    }
+
     @Test("the URL query (e.g. an API key) is preserved in the posted request path")
     func preservesQuery() async throws {
         let stub = StubHTTP(json: #"{"jsonrpc":"2.0","id":1,"result":"0x"}"#)
