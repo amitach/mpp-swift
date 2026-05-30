@@ -11,3 +11,5 @@
 # trailingCommas is owned by swiftlint (mandatory_comma); docComments is too
 # aggressive for file-header comments. Disable both here to avoid tool conflicts.
 --disable redundantReturn,trailingCommas,docComments,wrapMultilineStatementBraces
+# The Rust FFI crate's Swift smoke harness is not SDK source.
+--exclude rust
