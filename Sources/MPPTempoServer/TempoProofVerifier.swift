@@ -135,10 +135,3 @@ public struct TempoProofVerifier: PaymentMethodServer {
         case signatureMismatch
     }
 }
-
-private extension JSONValue {
-    var stringValue: String? {
-        if case let .string(value) = self { return value }
-        return nil
-    }
-}

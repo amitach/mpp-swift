@@ -44,6 +44,18 @@ struct ChannelAmountTests {
         #expect(ChannelAmount(high: .max, low: .max).adding(ChannelAmount(1)) == nil)
     }
 
+    @Test("decimalString is the inverse of decimal parsing across the range")
+    func decimalStringRoundTrips() {
+        #expect(ChannelAmount.zero.decimalString == "0")
+        for text in [
+            "0", "7", "42", "18446744073709551615", // UInt64.max
+            "18446744073709551616", // 2^64
+            "340282366920938463463374607431768211455", // 2^128 - 1
+        ] {
+            #expect(ChannelAmount(decimal: text)?.decimalString == text)
+        }
+    }
+
     @Test("subtracts with borrow and reports underflow")
     func subtracts() {
         #expect(ChannelAmount(high: 1, low: 0).subtracting(ChannelAmount(1)) == ChannelAmount(.max))

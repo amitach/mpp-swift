@@ -57,6 +57,25 @@ public struct ChannelAmount: Sendable, Hashable, Comparable {
         (lhs.high, lhs.low) < (rhs.high, rhs.low)
     }
 
+    /// The base-10 string (no leading zeros), the inverse of ``init(decimal:)``.
+    /// Long division by 10 over four 32-bit limbs: each step's `rem * 2^32 + limb`
+    /// stays below `10 * 2^32`, so it fits a `UInt64` (no 128-bit intermediate).
+    public var decimalString: String {
+        if high == 0, low == 0 { return "0" }
+        var limbs = [high >> 32, high & 0xFFFF_FFFF, low >> 32, low & 0xFFFF_FFFF]
+        var digits = ""
+        while !limbs.allSatisfy({ $0 == 0 }) {
+            var remainder: UInt64 = 0
+            for index in limbs.indices {
+                let current = (remainder << 32) | limbs[index]
+                limbs[index] = current / 10
+                remainder = current % 10
+            }
+            digits.append(Character(String(remainder)))
+        }
+        return String(digits.reversed())
+    }
+
     /// `self + other`, or `nil` on overflow past `2^128 - 1`.
     public func adding(_ other: ChannelAmount) -> ChannelAmount? {
         let (low, lowCarry) = low.addingReportingOverflow(other.low)

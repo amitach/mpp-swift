@@ -11,7 +11,14 @@ import Foundation
 /// Decoding is deliberately lenient about unknown JSON fields: a server may add
 /// method-specific or future fields to a receipt, and rejecting them would break
 /// interoperability with a newer peer. The four fields above are required.
-public struct Receipt: Sendable, Hashable, Codable {
+///
+/// A payment method may add its own top-level fields via ``extras`` (a Tempo
+/// session receipt adds `intent`, `channelId`, `acceptedCumulative`, `spent`, ...).
+/// They are emitted alongside the base fields and, on decode, any string-valued key
+/// that is not one of the four base fields is captured back into ``extras``
+/// (non-string unknown fields are still ignored, preserving the lenient decode). A
+/// receipt with no extras is byte-identical to before.
+public struct Receipt: Sendable, Hashable {
     /// The settlement status. Receipts are issued only on success.
     public let status: Status
     /// The payment method that settled the payment.
@@ -21,18 +28,46 @@ public struct Receipt: Sendable, Hashable, Codable {
     /// Method-specific settlement reference (transaction hash, invoice id, ...).
     /// Its format and whether it may be empty are defined by the payment method.
     public let reference: String
+    /// Method-specific extra top-level fields (string-valued), emitted alongside the
+    /// base fields. Empty for a plain receipt.
+    public let extras: [String: String]
 
     /// Creates a receipt.
     public init(
         status: Status = .success,
         method: MethodName,
         timestamp: RFC3339DateTime,
-        reference: String
+        reference: String,
+        extras: [String: String] = [:]
     ) {
         self.status = status
         self.method = method
         self.timestamp = timestamp
         self.reference = reference
+        // A base field can never be shadowed by an extra.
+        self.extras = extras.filter { !Self.baseKeys.contains($0.key) }
+    }
+
+    fileprivate static let baseKeys: Set<String> = ["status", "method", "timestamp", "reference"]
+
+    /// A string coding key, for the base fields plus dynamic ``extras``.
+    fileprivate struct Key: CodingKey {
+        let stringValue: String
+        init(_ string: String) {
+            stringValue = string
+        }
+
+        init?(stringValue: String) {
+            self.stringValue = stringValue
+        }
+
+        var intValue: Int? {
+            nil
+        }
+
+        init?(intValue _: Int) {
+            nil
+        }
     }
 
     /// Decodes a receipt from a `Payment-Receipt` header value.
@@ -83,5 +118,34 @@ public struct Receipt: Sendable, Hashable, Codable {
         /// The decoded bytes were not a valid receipt JSON object. `reason`
         /// carries the underlying coding error's description for diagnostics.
         case invalidJSON(reason: String)
+    }
+}
+
+extension Receipt: Codable {
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: Key.self)
+        status = try container.decode(Status.self, forKey: Key("status"))
+        method = try container.decode(MethodName.self, forKey: Key("method"))
+        timestamp = try container.decode(RFC3339DateTime.self, forKey: Key("timestamp"))
+        reference = try container.decode(String.self, forKey: Key("reference"))
+        var captured: [String: String] = [:]
+        for key in container.allKeys where !Self.baseKeys.contains(key.stringValue) {
+            // Lenient: capture string-valued unknowns, ignore the rest.
+            if let value = try? container.decode(String.self, forKey: key) {
+                captured[key.stringValue] = value
+            }
+        }
+        extras = captured
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: Key.self)
+        try container.encode(status, forKey: Key("status"))
+        try container.encode(method, forKey: Key("method"))
+        try container.encode(timestamp, forKey: Key("timestamp"))
+        try container.encode(reference, forKey: Key("reference"))
+        for (key, value) in extras {
+            try container.encode(value, forKey: Key(key))
+        }
     }
 }
