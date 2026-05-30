@@ -104,10 +104,15 @@ P4 - **Docs:** extend `CONFORMANCE.md` "Not yet covered" -> the session flow is 
 ## Status
 
 - **P0 DONE** (committed af58933): `ModeratoKit` shared helpers.
-- **P1 DONE (built + compiles + lint-clean; live-pending)**: `harness-http.mjs`,
-  `session-server.mjs`, `run-session.sh`, `ConformanceSessionTests` (forward: open -> voucher
-  -> close against the mppx session server, asserts finalized on-chain). Verified: FFI test
-  target compiles under `MPP_TEMPO_FFI`, swiftlint --strict clean, no em dashes. LIVE run
-  (`Scripts/conformance/run-session.sh`, needs Node + Moderato + faucet) not yet executed here;
-  to be run locally / by the P3 CI job.
+- **P1 DONE + LIVE-VERIFIED**: `harness-http.mjs`, `session-server.mjs`, `run-session.sh`,
+  `ConformanceSessionTests` (forward: open -> voucher -> close against the mppx session server,
+  asserts finalized on-chain). `run-session.sh` PASSED live on Moderato (4.5s): mppx relayed
+  our open, accepted our voucher, and its operator settled our voucher (channel finalized).
+  - **Bug the live test caught (the point of cross-SDK):** `suggestedDeposit` is a TOP-LEVEL
+    request field (sibling of `amount`), not a `methodDetails` member - PR-H decoded it from
+    `methodDetails` and the hermetic test fixture put it there too (self-consistent but wrong;
+    the test-fidelity trap, [[feedback_test_double_fidelity]]). Fixed `TempoChargeRequest` to
+    decode the top-level field and corrected the fixture; hermetic 21/21 still green, live now
+    PASSES. Verified vs mppx `Methods.ts:76-79` (server emits top-level) + `client/Session.ts:128`
+    (client reads top-level).
 - P2 (reverse), P3 (CI), P4 (docs): TODO. (Branch: feat/ws10-402-conformance, off c52a34e.)

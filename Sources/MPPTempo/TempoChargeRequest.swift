@@ -62,7 +62,7 @@ public struct TempoChargeRequest: Sendable, Hashable {
         recipient = wire.recipient
         currency = wire.currency
         escrowContract = wire.methodDetails?.escrowContract
-        suggestedDeposit = wire.methodDetails?.suggestedDeposit
+        suggestedDeposit = wire.suggestedDeposit
     }
 
     /// A reason a charge `request` could not be decoded.
@@ -85,13 +85,15 @@ private struct ChargeRequestWire: Decodable {
     let amount: String
     let recipient: String?
     let currency: String?
+    // `suggestedDeposit` is a top-level request field (a sibling of `amount`), not a
+    // `methodDetails` member, matching the reference session challenge wire.
+    let suggestedDeposit: String?
     let methodDetails: MethodDetails?
 }
 
-/// The `methodDetails` sub-object: `chainId` (proof + session), the session's
-/// `escrowContract`, and the session's optional `suggestedDeposit`.
+/// The `methodDetails` sub-object: `chainId` (proof + session) and the session's
+/// `escrowContract`.
 private struct MethodDetails: Decodable {
     let chainId: UInt64?
     let escrowContract: String?
-    let suggestedDeposit: String?
 }

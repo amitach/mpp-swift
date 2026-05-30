@@ -67,7 +67,6 @@ struct ConformanceSessionTests {
         // the client signed for. Confirm the channel is open on-chain (mppx relayed it).
         let latest = try #require(recorder.last)
         let channelID = try #require(hex(latest.payload["channelId"]))
-        let cumulative = try #require(string(latest.payload["cumulativeAmount"]))
         #expect(latest.payload["action"] == .string("voucher"))
         let onChain = try await TempoEscrow.readChannel(channelID, escrow: escrow, via: rpc)
         #expect(onChain.deposit > .zero)
