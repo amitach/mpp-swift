@@ -171,6 +171,17 @@ jobs:
         # conformer produces the same byte-exact golden 0x76 close tx.
         if: matrix.os == 'macos-15'
         run: MPP_TEMPO_FFI=1 swift test --filter MPPTempoFFITests
+      - name: Live Moderato FFI write-path e2e (fund/open/voucher/close on-chain)
+        # The authoritative on-chain proof the goldens defer to: against the live Moderato
+        # node, faucet-fund a fresh key, then build (via the FFI), sign, broadcast, and
+        # confirm a real open + close of a channel. Reuses this job's already-built
+        # xcframework. NON-REQUIRED and live (depends on a third party being up + opens
+        # network egress), consistent with the other Moderato jobs; disable if flaky.
+        if: matrix.os == 'macos-15'
+        env:
+          MPP_TEMPO_FFI: "1"
+          MPP_MODERATO_E2E: "1"
+        run: swift test --filter ModeratoE2ETests
       - name: Audit Rust dependencies (RustSec advisory DB)
         # Closes the supply-chain gap (the Swift OSV gate does not cover Cargo deps).
         # OS-independent, so run once (Linux leg). Fails on a known advisory.
