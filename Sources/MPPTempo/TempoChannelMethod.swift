@@ -287,6 +287,24 @@ public struct DepositContext: Sendable, Hashable {
     public let chargeAmount: Amount
     /// The server-suggested deposit (`methodDetails.suggestedDeposit`), if any.
     public let suggestedDeposit: String?
+
+    /// Creates the deposit facts. Public (like ``ChargeApproval``) so a consumer can
+    /// construct one to unit-test its deposit policy in isolation.
+    public init(
+        payee: EthereumAddress,
+        token: EthereumAddress,
+        escrow: EthereumAddress,
+        chainId: UInt64,
+        chargeAmount: Amount,
+        suggestedDeposit: String?
+    ) {
+        self.payee = payee
+        self.token = token
+        self.escrow = escrow
+        self.chainId = chainId
+        self.chargeAmount = chargeAmount
+        self.suggestedDeposit = suggestedDeposit
+    }
 }
 
 /// A reason ``TempoChannelMethod`` could not build a credential.

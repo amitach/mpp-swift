@@ -84,25 +84,27 @@ actor TempoChannelRegistry {
             }
             // No channel and none opening: this charge opens it. The two checks above and
             // this set are one synchronous segment (no `await` between), so only one charge
-            // reaches here per key. The task registers the entry and clears the slot as its
-            // final, actor-isolated step (`register`), so any charge that awaited it sees a
-            // consistent state the instant its await returns: no continuation-ordering race
-            // between the opener and the waiters.
+            // reaches here per key. The task settles the slot as its final, actor-isolated
+            // step on BOTH paths (`register` on success, `clearSlot` on failure) before it
+            // completes, so any charge that awaited it sees a consistent state the instant
+            // its await returns: an entry present (then it vouchers) or the slot clear (then
+            // it opens). No continuation-ordering race between the opener and the waiters,
+            // and no waiter busy-wait on a completed-but-failed task.
             let task = Task<OpenedChannel, Error> {
-                let opened = try await open()
-                await self.register(key, opened: opened, amount: amount)
-                return opened
+                do {
+                    let opened = try await open()
+                    await self.register(key, opened: opened, amount: amount)
+                    return opened
+                } catch {
+                    await self.clearSlot(key)
+                    throw error
+                }
             }
             opens[key] = task
-            do {
-                let opened = try await task.value
-                return .open(
-                    channelID: opened.channelID, cumulative: amount, transaction: opened.transaction
-                )
-            } catch {
-                opens[key] = nil
-                throw error
-            }
+            let opened = try await task.value
+            return .open(
+                channelID: opened.channelID, cumulative: amount, transaction: opened.transaction
+            )
         }
     }
 
@@ -111,6 +113,14 @@ actor TempoChannelRegistry {
     /// observer that sees the slot clear also sees the entry.
     private func register(_ key: ChannelKey, opened: OpenedChannel, amount: ChannelAmount) {
         entries[key] = Entry(channelID: opened.channelID, cumulative: amount)
+        opens[key] = nil
+    }
+
+    /// Clears a failed open's in-flight slot. No other charge can have replaced it: while
+    /// this task ran, `opens[key]` held it (concurrent charges awaited it rather than
+    /// opening), so clearing it cannot clobber a newer opener. A waiter that awaited this
+    /// task sees the slot clear (and no entry) when its await returns, and opens afresh.
+    private func clearSlot(_ key: ChannelKey) {
         opens[key] = nil
     }
 }
