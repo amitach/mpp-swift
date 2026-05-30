@@ -103,13 +103,13 @@ struct ReceiptTests {
         #expect(receipt.extras["futureField"] == .string("kept"))
     }
 
-    @Test("integer extras (units) encode as a JSON number and round-trip as .int")
+    @Test("integer extras (units) encode as a JSON number and round-trip as .uint")
     func integerExtraIsNumericOnTheWire() throws {
         let receipt = try Receipt(
             method: MethodName("tempo"),
             timestamp: RFC3339DateTime("2026-01-02T03:04:05Z"),
             reference: "0xabc",
-            extras: ["units": .int(5), "channelId": .string("0xfeed")]
+            extras: ["units": .uint(5), "channelId": .string("0xfeed")]
         )
         // The reference session receipt types every field as a string except `units`
         // (a JSON integer). So units must be an unquoted number on the wire, and a
@@ -123,7 +123,21 @@ struct ReceiptTests {
         #expect(json.contains("\"channelId\":\"0xfeed\""))
         // Decode preserves the string/integer distinction.
         let decoded = try Receipt(headerValue: receipt.headerValue)
-        #expect(decoded.extras["units"] == .int(5))
+        #expect(decoded.extras["units"] == .uint(5))
         #expect(decoded.extras["channelId"] == .string("0xfeed"))
+    }
+
+    @Test("an integer extra above Int64.max round-trips (full u64 fidelity)")
+    func largeUnsignedExtraRoundTrips() throws {
+        // The reference `units` is a u64; a value past Int64.max must not narrow/drop.
+        let big = UInt64(Int64.max) + 1
+        let receipt = try Receipt(
+            method: MethodName("tempo"),
+            timestamp: RFC3339DateTime("2026-01-02T03:04:05Z"),
+            reference: "0xabc",
+            extras: ["units": .uint(big)]
+        )
+        let decoded = try Receipt(headerValue: receipt.headerValue)
+        #expect(decoded.extras["units"] == .uint(big))
     }
 }

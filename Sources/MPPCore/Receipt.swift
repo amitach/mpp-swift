@@ -36,12 +36,13 @@ public struct Receipt: Sendable, Hashable {
     /// plain receipt.
     public let extras: [String: ReceiptValue]
 
-    /// A method-specific extra receipt field's value: a JSON string or integer. The
-    /// reference session receipt types every field as a string except `units` (a
-    /// `u64`), so the two cases must stay distinct on the wire.
+    /// A method-specific extra receipt field's value: a JSON string or unsigned
+    /// integer. The reference session receipt types every field as a string except
+    /// `units` (a `u64`), so the integer case is `UInt64` to round-trip the full
+    /// unsigned range without narrowing, and the two cases stay distinct on the wire.
     public enum ReceiptValue: Sendable, Hashable {
         case string(String)
-        case int(Int64)
+        case uint(UInt64)
     }
 
     /// Creates a receipt.
@@ -148,8 +149,8 @@ extension Receipt: Codable {
             // string, not an int.
             if let value = try? container.decode(String.self, forKey: key) {
                 captured[key.stringValue] = .string(value)
-            } else if let value = try? container.decode(Int64.self, forKey: key) {
-                captured[key.stringValue] = .int(value)
+            } else if let value = try? container.decode(UInt64.self, forKey: key) {
+                captured[key.stringValue] = .uint(value)
             }
         }
         extras = captured
@@ -164,7 +165,7 @@ extension Receipt: Codable {
         for (key, value) in extras {
             switch value {
             case let .string(string): try container.encode(string, forKey: Key(key))
-            case let .int(int): try container.encode(int, forKey: Key(key))
+            case let .uint(uint): try container.encode(uint, forKey: Key(key))
             }
         }
     }

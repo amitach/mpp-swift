@@ -77,12 +77,17 @@ public struct SessionMethod: PaymentMethodServer {
         else {
             throw SessionError.missingEscrow
         }
+        // Fail closed: an amount that does not parse into the channel's uint128 must
+        // reject the request, never silently charge zero (a free request).
+        guard let chargeAmount = ChannelAmount(decimal: request.amount.rawValue) else {
+            throw SessionError.malformedRequest
+        }
         let context = Context(
             method: challenge.method,
             challengeID: challenge.id,
             escrow: escrow,
             chainID: request.chainId ?? defaultChainID,
-            chargeAmount: ChannelAmount(decimal: request.amount.rawValue) ?? .zero,
+            chargeAmount: chargeAmount,
             recipient: request.recipient.flatMap(EthereumAddress.init(hex:)),
             currency: request.currency.flatMap(EthereumAddress.init(hex:)),
             now: now
@@ -93,18 +98,6 @@ public struct SessionMethod: PaymentMethodServer {
         case let .topUp(fields): return try await topUp(fields, context)
         case let .close(fields): return try await close(fields, context)
         }
-    }
-
-    /// Per-request resolved context (the challenge's route + the injected clock).
-    private struct Context {
-        let method: MethodName
-        let challengeID: String
-        let escrow: EthereumAddress
-        let chainID: UInt64
-        let chargeAmount: ChannelAmount
-        let recipient: EthereumAddress?
-        let currency: EthereumAddress?
-        let now: Date
     }
 
     // MARK: - voucher
@@ -243,6 +236,12 @@ public struct SessionMethod: PaymentMethodServer {
         guard let voucher = Voucher(
             channelID: fields.channelID, cumulativeAmount: settleAmount.decimalString
         ) else { throw SessionError.malformedPayload }
+        // If settle throws, `closing` is left set (not rolled back): the broadcast may
+        // have landed on-chain with a lost response, and re-opening the channel would
+        // risk a double settlement. A failed close therefore parks the channel closing;
+        // recovery is an explicit on-chain step (the escrow's forced-close/grace path),
+        // and the robust read-settled-before-resettle retry lands with the concrete
+        // RPC provider. Funds are never at risk (the escrow caps payout at the deposit).
         let txHash = try await provider.settle(
             channelID: fields.channelID, voucher: voucher, signature: settleSignature,
             escrow: context.escrow, chainID: context.chainID
@@ -327,6 +326,19 @@ public struct SessionMethod: PaymentMethodServer {
             channel: channel
         )
     }
+}
+
+/// Per-request resolved context for a session action (the challenge's route + the
+/// injected clock). File-scope so it does not count against the method's body length.
+private struct Context {
+    let method: MethodName
+    let challengeID: String
+    let escrow: EthereumAddress
+    let chainID: UInt64
+    let chargeAmount: ChannelAmount
+    let recipient: EthereumAddress?
+    let currency: EthereumAddress?
+    let now: Date
 }
 
 /// Picks the voucher a `close` settles: the higher of the client's final voucher

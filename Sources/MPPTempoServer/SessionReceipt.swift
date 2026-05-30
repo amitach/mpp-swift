@@ -28,7 +28,7 @@ enum SessionReceipt {
             "channelId": .string(channelID),
             "acceptedCumulative": .string(channel.highestVoucherAmount.decimalString),
             "spent": .string(channel.spent.decimalString),
-            "units": .int(Int64(clamping: channel.units)),
+            "units": .uint(channel.units),
         ]
         if let txHash { extras["txHash"] = .string(txHash) }
         return Receipt(
