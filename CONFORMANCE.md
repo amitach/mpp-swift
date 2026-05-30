@@ -29,9 +29,11 @@ middleware) and `MPPTempoServer` (the proof verifier).
 ## How to run
 
 ```sh
-Scripts/conformance/run.sh            # forward, local self-contained mppx server (no network)
-Scripts/conformance/run.sh --testnet  # forward, also probe the live Moderato node (42431)
-Scripts/conformance/run-reverse.sh     # reverse: mppx client pays our Swift server
+Scripts/conformance/run.sh            # forward proof, local self-contained mppx server (no network)
+Scripts/conformance/run.sh --testnet  # forward proof, also probe the live Moderato node (42431)
+Scripts/conformance/run-reverse.sh     # reverse proof: mppx client pays our Swift server
+Scripts/conformance/run-session.sh         # forward CHANNEL: our client open/voucher/close vs the mppx session server (live)
+Scripts/conformance/run-session-reverse.sh # reverse CHANNEL: mppx client open/voucher/close vs our SessionMethod server (live)
 ```
 
 The forward Swift test is gated on `MPP_CONFORMANCE_URL` (skipped by the default
@@ -40,8 +42,23 @@ The forward Swift test is gated on `MPP_CONFORMANCE_URL` (skipped by the default
 nor the reverse server is required to build or test the library. See
 `Scripts/conformance/README.md` for details.
 
-## Not yet covered
+## Channel sessions (settled, non-zero, live on Moderato)
 
-The **settled-transfer** path (non-zero amount) needs the Tempo transaction layer
-(`0x76`), which ships in a later workstream. The `--testnet` mode already reaches a
-live Moderato node and is the seam for that test when it lands.
+The non-zero **payment-channel** path is verified in BOTH directions against the reference
+`mppx`, live on the Moderato testnet (chainId 42431), faucet-funded and self-contained:
+
+- **Forward** (`run-session.sh`): our `TempoChannelMethod` (client) opens a channel against
+  the `mppx` **session server**, vouchers, and closes; the `mppx` operator settles our voucher
+  on-chain (the channel finalizes). Exercises the client vertical + the `0x76` open builder.
+- **Reverse** (`run-session-reverse.sh`): the `mppx` **client** opens a channel against our
+  `MPPConformanceServer` `/session` route (`MPPTempoServer.SessionMethod` +
+  `RPCChannelStateProvider`), vouchers, and closes; our server relays the open on-chain,
+  accepts the voucher, and settles the close with a faucet-funded operator.
+
+Both are gated on `MPP_TEMPO_FFI` (the session open/close needs the `0x76` builder) and are
+live (depend on the Moderato node + faucet), so they run in the non-required `rust-ffi`
+macOS CI job, not the default `swift test`. The session server route is compiled only under
+the FFI gate; the default reverse server stays proof-only and Rust-free.
+
+The off-chain proof flow (above) stays offline and deterministic; only the channel/settle
+flow touches the chain.
