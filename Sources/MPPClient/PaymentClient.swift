@@ -117,10 +117,11 @@ public struct PaymentClient: Sendable {
     }
 
     private func guardTransportSecurity(scheme: String?, url: URL?) throws {
-        if scheme?.lowercased() == "https" { return }
-        if allowInsecureLocal, let host = url?.host(percentEncoded: false), Self.isLoopback(host) {
-            return
-        }
+        if TransportSecurity.isAllowed(
+            scheme: scheme,
+            host: url?.host(percentEncoded: false),
+            allowInsecureLocal: allowInsecureLocal
+        ) { return }
         let target = url?.absoluteString ?? ""
         onEvent(.paymentFailed(.insecureTransport(url: target)))
         throw PaymentClientError.insecureTransport(url: target)
@@ -129,12 +130,6 @@ public struct PaymentClient: Sendable {
     private static func url(of request: HTTPRequest) -> URL? {
         guard let scheme = request.scheme, let authority = request.authority else { return nil }
         return URL(string: "\(scheme)://\(authority)\(request.path ?? "")")
-    }
-
-    private static func isLoopback(_ host: String) -> Bool {
-        let host = host.lowercased()
-        return host == "localhost" || host.hasSuffix(".localhost")
-            || host == "127.0.0.1" || host == "::1"
     }
 
     private static let acceptPayment = fieldName("Accept-Payment")

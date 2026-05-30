@@ -138,7 +138,12 @@ let package = Package(
         // MPPTempoServer below.
         .target(
             name: "MPPTempo",
-            dependencies: ["MPPCore", "MPPEVM", "MPPClient"]
+            dependencies: [
+                "MPPCore", "MPPEVM", "MPPClient",
+                // HTTPRequest/HTTPResponse for the JSON-RPC client, which runs over the
+                // shared MPPHTTPTransport seam (same currency type as the 402 flow).
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+            ]
         ),
         .testTarget(
             name: "MPPTempoTests",

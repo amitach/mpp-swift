@@ -138,18 +138,14 @@ public struct TempoProofMethod: PaymentMethodClient {
 
         let payload: [String: JSONValue] = [
             "type": .string("proof"),
-            "signature": .string(Self.hexPrefixed(signature)),
+            // `0x`-prefixed lowercase hex, the form an Ethereum signature travels in.
+            "signature": .string(signature.hexPrefixed),
         ]
         return Credential(
             challenge: challenge,
             source: ProofSource.did(address: wallet, chainId: chainId),
             payload: payload
         )
-    }
-
-    /// `0x`-prefixed lowercase hex, the form an Ethereum signature travels in.
-    private static func hexPrefixed(_ data: Data) -> String {
-        "0x" + data.map { String(format: "%02x", $0) }.joined()
     }
 
     /// The `tempo` / `charge` advertisement range, built once. `PaymentRange` only
