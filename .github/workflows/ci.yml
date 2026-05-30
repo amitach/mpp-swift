@@ -115,6 +115,21 @@ jobs:
           MPP_MODERATO_E2E: "1"
         run: swift test --filter Moderato
 
+  rust-ffi:
+    name: Rust FFI (tempo-tx-ffi build + test)
+    runs-on: macos-15
+    # NON-REQUIRED (kept out of branch protection): builds the tempo-tx-ffi crate,
+    # which git-clones the tempo monorepo and compiles a large Rust tree (revm etc.).
+    # It is the 0x76 transaction builder; the cargo test runs the byte-exact golden
+    # vector for the close tx. Pinned tag tempo-primitives@1.8.0 needs rustc >= 1.93.
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure rustc >= 1.93
+        run: rustup update stable && rustup default stable && rustc --version
+      - name: Build + test the FFI crate
+        working-directory: rust/tempo-tx-ffi
+        run: cargo test
+
   conformance-reverse:
     name: Conformance (reverse)
     runs-on: macos-15 # has swift preinstalled; node via setup-node
