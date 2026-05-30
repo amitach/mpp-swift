@@ -216,8 +216,9 @@ let package = Package(
 // xcframework via a url+checksum binaryTarget: no env gate, no Rust toolchain. Kept as
 // literal constants here (not an external file) so editing them invalidates SwiftPM's
 // manifest cache, which is keyed on Package.swift.
-let tempoFFIReleaseURL = ""
-let tempoFFIReleaseChecksum = ""
+let tempoFFIReleaseURL =
+    "https://github.com/amitach/mpp-swift/releases/download/tempo-tx-ffi-v0.0.1/TempoTxFFI.xcframework.zip"
+let tempoFFIReleaseChecksum = "b9f09fa3677cdf23ebc45288da984ca96636550b1c2792f939aa38363785ace4"
 
 let ffiFromSource = ProcessInfo.processInfo.environment["MPP_TEMPO_FFI"] != nil
 
