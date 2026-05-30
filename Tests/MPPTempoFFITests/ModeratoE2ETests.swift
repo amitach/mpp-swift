@@ -1,5 +1,4 @@
 import Foundation
-import HTTPTypes
 import MPPClient
 import MPPCore
 import MPPEVM
