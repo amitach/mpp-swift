@@ -5,38 +5,57 @@
 # (locked decision #3): nothing binary is committed; the xcframework is produced
 # from the pinned `tempo-primitives` source on every run.
 #
-# macOS spike: a single arch (aarch64-apple-darwin) for now. x86_64-apple-darwin +
-# iOS device/sim arches + the Linux `.so` follow in the next slice; this script gains
-# more `-library` legs then.
+# Apple slices built (the realistic FFI consumer platforms; a wallet building 0x76
+# txs runs on macOS / iOS):
+#   - macOS:        universal (arm64 + x86_64), lipo'd
+#   - iOS device:   arm64
+#   - iOS simulator: universal (arm64 + x86_64), lipo'd
+# tvOS / watchOS / visionOS slices are out of scope (no FFI consumer there yet); a
+# build for those platforms simply must not depend on MPPTempoFFI. The Linux `.so`
+# uses a different mechanism (not an xcframework) and lands in its own slice.
 #
-# Outputs (both gitignored):
+# Fast local iteration: set TEMPO_FFI_MACOS_ONLY=1 to build only the macOS slice (the
+# gated `swift test` only links that one); CI always builds the full Apple set.
+#
+# Outputs (both gitignored except the committed, drift-checked bindings):
 #   artifacts/TempoTxFFI.xcframework          - the binaryTarget
 #   Sources/MPPTempoFFI/Generated/...swift    - drift-checked against the committed copy in CI
 set -euo pipefail
 cd "$(dirname "$0")"
 REPO_ROOT=$(cd ../.. && pwd)
 
-TARGET=${TEMPO_FFI_TARGET:-aarch64-apple-darwin}
 PROFILE=${TEMPO_FFI_PROFILE:-debug}
 CARGO_PROFILE_FLAG=""
 [ "$PROFILE" = "release" ] && CARGO_PROFILE_FLAG="--release"
+LIBNAME=libtempo_tx_ffi
 
-echo "==> rustup target add $TARGET (idempotent)"
-rustup target add "$TARGET" >/dev/null
+# Build the staticlib for one target triple; echo the path to the produced .a.
+build_target() {
+  local target="$1"
+  rustup target add "$target" >/dev/null
+  # shellcheck disable=SC2086
+  cargo build --target "$target" $CARGO_PROFILE_FLAG >&2
+  echo "target/$target/$PROFILE/$LIBNAME.a"
+}
 
-echo "==> cargo build --target $TARGET ($PROFILE)"
-# shellcheck disable=SC2086
-cargo build --target "$TARGET" $CARGO_PROFILE_FLAG
+# lipo several single-arch .a files into one fat archive; echo its path.
+make_fat() {
+  local out="$1"; shift
+  mkdir -p "$(dirname "$out")"
+  lipo -create "$@" -output "$out"
+  echo "$out"
+}
 
-OUT="target/$TARGET/$PROFILE"
-STATIC="$OUT/libtempo_tx_ffi.a"
-DYLIB="$OUT/libtempo_tx_ffi.dylib"
-
-echo "==> generate UniFFI Swift bindings"
-# bindgen introspects a built library; use the cdylib for the host-runnable bindgen.
+echo "==> generate UniFFI Swift bindings (from a HOST-native dylib)"
+# bindgen must INTROSPECT a host-runnable library, so build the host dylib with no
+# --target (independent of which arches we package). Using a cross-compiled slice here
+# only works when the host triple happens to match it, which is not true once we add
+# x86_64 / iOS arches.
+cargo build $CARGO_PROFILE_FLAG >&2
+HOST_DYLIB="target/$PROFILE/$LIBNAME.dylib"
 rm -rf target/bindings
 cargo run --quiet --bin uniffi-bindgen -- generate \
-  --library "$DYLIB" --language swift --out-dir target/bindings
+  --library "$HOST_DYLIB" --language swift --out-dir target/bindings
 
 echo "==> assemble the xcframework headers dir"
 # The binaryTarget exposes a clang module named `tempo_tx_ffiFFI` (what the generated
@@ -53,13 +72,30 @@ module tempo_tx_ffiFFI {
 }
 EOF
 
+echo "==> build macOS slice (universal: arm64 + x86_64)"
+MACOS_ARM=$(build_target aarch64-apple-darwin)
+MACOS_X64=$(build_target x86_64-apple-darwin)
+MACOS_FAT=$(make_fat "target/universal/macos/$PROFILE/$LIBNAME.a" "$MACOS_ARM" "$MACOS_X64")
+
+XCF_ARGS=(-library "$MACOS_FAT" -headers "$HDRS")
+
+if [ "${TEMPO_FFI_MACOS_ONLY:-}" != "1" ]; then
+  echo "==> build iOS device slice (arm64)"
+  IOS_DEVICE=$(build_target aarch64-apple-ios)
+  XCF_ARGS+=(-library "$IOS_DEVICE" -headers "$HDRS")
+
+  echo "==> build iOS simulator slice (universal: arm64 + x86_64)"
+  IOS_SIM_ARM=$(build_target aarch64-apple-ios-sim)
+  IOS_SIM_X64=$(build_target x86_64-apple-ios)
+  IOS_SIM_FAT=$(make_fat "target/universal/ios-sim/$PROFILE/$LIBNAME.a" "$IOS_SIM_ARM" "$IOS_SIM_X64")
+  XCF_ARGS+=(-library "$IOS_SIM_FAT" -headers "$HDRS")
+fi
+
 echo "==> create TempoTxFFI.xcframework"
 XCF="$REPO_ROOT/artifacts/TempoTxFFI.xcframework"
 mkdir -p "$REPO_ROOT/artifacts"
 rm -rf "$XCF"
-xcodebuild -create-xcframework \
-  -library "$STATIC" -headers "$HDRS" \
-  -output "$XCF"
+xcodebuild -create-xcframework "${XCF_ARGS[@]}" -output "$XCF"
 
 echo "==> refresh committed Swift bindings"
 GEN="$REPO_ROOT/Sources/MPPTempoFFI/Generated"
