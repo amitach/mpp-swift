@@ -164,8 +164,15 @@ public struct SessionMethod: PaymentMethodServer {
                     channel.highestVoucherSignature = fields.signature
                 }
                 channel.deposit = onChain.deposit
-                if onChain.settled > channel
-                    .settledOnChain { channel.settledOnChain = onChain.settled }
+                if onChain.settled > channel.settledOnChain {
+                    channel.settledOnChain = onChain.settled
+                }
+                // Invariant: spent >= on-chain settled. Raising spent to the settled
+                // amount keeps available (highest - spent) from overstating the
+                // drawable balance after an external settlement advanced the channel.
+                if channel.settledOnChain > channel.spent {
+                    channel.spent = channel.settledOnChain
+                }
                 channel.authorizedSigner = signer
                 return channel
             }

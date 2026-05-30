@@ -174,6 +174,33 @@ struct SessionMethodTests {
         #expect(channel?.highestVoucherAmount == ChannelAmount(100))
         #expect(channel?.authorizedSigner == authorizedSigner)
     }
+
+    @Test("re-open raises spent to a newly-advanced on-chain settled (no overstated balance)")
+    func openRaisesSpentToSettled() async throws {
+        // Known channel: highest 500, spent 0. The chain then settled 300 externally.
+        let store = try await seedStore(highest: 500, spent: 0)
+        let session = sessionMethod(
+            store,
+            StubProvider(onChainChannel(deposit: 2000, settled: 300))
+        )
+        let voucher = try #require(Voucher(channelID: channelID, cumulativeAmount: "1000"))
+        let signature = try voucher.sign(
+            escrowContract: escrow,
+            chainId: chainID,
+            with: signer(byte: 1)
+        )
+        _ = try await session.verify(
+            Credential(challenge: sessionChallenge(amount: "10"), source: nil, payload: [
+                "action": .string("open"), "channelId": .string(hex(channelID)),
+                "cumulativeAmount": .string("1000"), "signature": .string(hex(signature)),
+                "transaction": .string("0xdead"),
+            ]), now: now
+        )
+        // spent raised to settled (300) before the open's own charge (10) -> 310.
+        let channel = await store.channel(channelID)
+        #expect(channel?.spent == ChannelAmount(310))
+        #expect(channel?.settledOnChain == ChannelAmount(300))
+    }
 }
 
 @Suite("SessionMethod close/topUp")
