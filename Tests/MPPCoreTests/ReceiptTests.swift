@@ -90,13 +90,16 @@ struct ReceiptTests {
         }
     }
 
-    @Test("ignores unknown JSON fields for forward/peer compatibility")
-    func ignoresUnknownFields() throws {
+    @Test("captures unknown string fields into extras for forward/peer compatibility")
+    func capturesUnknownStringFields() throws {
         let receipt = try Receipt(headerValue: encoded([
             ("status", "success"), ("method", "tempo"),
             ("timestamp", "2026-01-02T03:04:05Z"), ("reference", "r"),
-            ("futureField", "ignored"),
+            ("futureField", "kept"),
         ]))
         #expect(receipt.reference == "r")
+        // Unknown string-valued fields are preserved in extras (not dropped), so a
+        // session receipt's extra fields survive a decode/encode round-trip.
+        #expect(receipt.extras["futureField"] == "kept")
     }
 }

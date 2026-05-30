@@ -16,6 +16,8 @@ private final class StubProvider: ChannelStateProvider, @unchecked Sendable {
     var onChain: OnChainChannel
     private(set) var settleCalls = 0
     private(set) var openCalls = 0
+    /// The cumulative amount of the voucher the last `settle` was called with.
+    private(set) var settledCumulative: String?
     init(_ onChain: OnChainChannel) {
         self.onChain = onChain
     }
@@ -42,99 +44,111 @@ private final class StubProvider: ChannelStateProvider, @unchecked Sendable {
     }
 
     func settle(
-        channelID _: Data, voucher _: Voucher, escrow _: EthereumAddress, chainID _: UInt64
+        channelID _: Data, voucher: Voucher, signature _: Data, escrow _: EthereumAddress,
+        chainID _: UInt64
     ) async -> String {
         settleCalls += 1
+        settledCumulative = voucher.cumulativeAmount
         return "0xsettle"
     }
 }
 
+// Shared session-test fixtures at file scope, so both the core suite and the
+// close-action suite below reuse one set of builders (no per-suite copies).
+// Signer key=1 -> address 0x7E5F...Bdf, the channel's authorized signer.
+private let escrow = tempoTestAddress("0x5555555555555555555555555555555555555555")
+private let payee = tempoTestAddress("0x2222222222222222222222222222222222222222")
+private let token = tempoTestAddress("0x3333333333333333333333333333333333333333")
+private let channelID = Data(repeating: 0xAB, count: 32)
+private let chainID: UInt64 = 42431
+// `now` is the shared test clock from TempoProofVerifierTests (same target).
+private let authorizedSigner = tempoTestAddress("0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf")
+
+private func onChainChannel(
+    deposit: UInt64 = 1000, settled: UInt64 = 0, finalized: Bool = false,
+    closeRequestedAt: UInt64 = 0
+) -> OnChainChannel {
+    OnChainChannel(
+        payer: payee, payee: payee, token: token, authorizedSigner: authorizedSigner,
+        deposit: ChannelAmount(deposit), settled: ChannelAmount(settled),
+        finalized: finalized, closeRequestedAt: closeRequestedAt
+    )
+}
+
+/// Seeds the store with an open channel whose highest accepted voucher is `highest`.
+private func seedStore(
+    highest: UInt64,
+    spent: UInt64 = 0
+) async throws -> InMemoryChannelStore {
+    let store = InMemoryChannelStore()
+    // Store the real signature over the seeded highest voucher, so close paths
+    // that settle the stored highest use a faithfully-signed voucher.
+    let highestVoucher = try #require(
+        Voucher(channelID: channelID, cumulativeAmount: String(highest))
+    )
+    let highestSignature = try highestVoucher.sign(
+        escrowContract: escrow, chainId: chainID, with: signer(byte: 1)
+    )
+    _ = try await store.update(channelID) { _ in
+        ChannelState(
+            channelID: channelID, chainID: chainID, escrowContract: escrow,
+            payer: payee, payee: payee, token: token, authorizedSigner: authorizedSigner,
+            deposit: ChannelAmount(1000), highestVoucherAmount: ChannelAmount(highest),
+            highestVoucherSignature: highestSignature,
+            spent: ChannelAmount(spent)
+        )
+    }
+    return store
+}
+
+private func sessionChallenge(amount: String = "1") throws -> Challenge {
+    let request = EncodedJSON(json: .object([
+        "amount": .string(amount),
+        "recipient": .string("0x2222222222222222222222222222222222222222"),
+        "currency": .string("0x3333333333333333333333333333333333333333"),
+        "methodDetails": .object([
+            "chainId": .integer(Int64(chainID)),
+            "escrowContract": .string("0x5555555555555555555555555555555555555555"),
+        ]),
+    ]))
+    return try Challenge(
+        id: "session-1", realm: "https://api.example.com",
+        method: MethodName("tempo"), intent: .session, request: request
+    )
+}
+
+private func hex(_ data: Data) -> String {
+    "0x" + data.map { String(format: "%02x", $0) }
+        .joined()
+}
+
+/// A voucher-action credential signed by key=1 over `cumulative`.
+private func voucherCredential(
+    cumulative: String, action: String = "voucher", amount: String = "1"
+) throws -> Credential {
+    let voucher = try #require(Voucher(channelID: channelID, cumulativeAmount: cumulative))
+    let signature = try voucher.sign(
+        escrowContract: escrow,
+        chainId: chainID,
+        with: signer(byte: 1)
+    )
+    return try Credential(
+        challenge: sessionChallenge(amount: amount), source: nil,
+        payload: [
+            "action": .string(action),
+            "channelId": .string(hex(channelID)),
+            "cumulativeAmount": .string(cumulative),
+            "signature": .string(hex(signature)),
+        ]
+    )
+}
+
+private func method(_ store: InMemoryChannelStore, _ provider: StubProvider) -> SessionMethod {
+    SessionMethod(provider: provider, store: store, defaultChainID: chainID)
+}
+
 @Suite("SessionMethod")
 struct SessionMethodTests {
-    // Signer key=1 -> address 0x7E5F...Bdf, the channel's authorized signer.
-    private let escrow = tempoTestAddress("0x5555555555555555555555555555555555555555")
-    private let payee = tempoTestAddress("0x2222222222222222222222222222222222222222")
-    private let token = tempoTestAddress("0x3333333333333333333333333333333333333333")
-    private let channelID = Data(repeating: 0xAB, count: 32)
-    private let chainID: UInt64 = 42431
-    private let now = Date(timeIntervalSince1970: 1_767_312_000)
-
-    private let authorizedSigner = tempoTestAddress("0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf")
-
-    private func onChainChannel(
-        deposit: UInt64 = 1000, settled: UInt64 = 0, finalized: Bool = false,
-        closeRequestedAt: UInt64 = 0
-    ) -> OnChainChannel {
-        OnChainChannel(
-            payer: payee, payee: payee, token: token, authorizedSigner: authorizedSigner,
-            deposit: ChannelAmount(deposit), settled: ChannelAmount(settled),
-            finalized: finalized, closeRequestedAt: closeRequestedAt
-        )
-    }
-
-    /// Seeds the store with an open channel whose highest accepted voucher is `highest`.
-    private func seedStore(
-        highest: UInt64,
-        spent: UInt64 = 0
-    ) async throws -> InMemoryChannelStore {
-        let store = InMemoryChannelStore()
-        _ = try await store.update(channelID) { _ in
-            ChannelState(
-                channelID: channelID, chainID: chainID, escrowContract: escrow,
-                payer: payee, payee: payee, token: token, authorizedSigner: authorizedSigner,
-                deposit: ChannelAmount(1000), highestVoucherAmount: ChannelAmount(highest),
-                spent: ChannelAmount(spent)
-            )
-        }
-        return store
-    }
-
-    private func sessionChallenge(amount: String = "1") throws -> Challenge {
-        let request = EncodedJSON(json: .object([
-            "amount": .string(amount),
-            "recipient": .string("0x2222222222222222222222222222222222222222"),
-            "currency": .string("0x3333333333333333333333333333333333333333"),
-            "methodDetails": .object([
-                "chainId": .integer(Int64(chainID)),
-                "escrowContract": .string("0x5555555555555555555555555555555555555555"),
-            ]),
-        ]))
-        return try Challenge(
-            id: "session-1", realm: "https://api.example.com",
-            method: MethodName("tempo"), intent: .session, request: request
-        )
-    }
-
-    private func hex(_ data: Data) -> String {
-        "0x" + data.map { String(format: "%02x", $0) }
-            .joined()
-    }
-
-    /// A voucher-action credential signed by key=1 over `cumulative`.
-    private func voucherCredential(
-        cumulative: String, action: String = "voucher", amount: String = "1"
-    ) throws -> Credential {
-        let voucher = try #require(Voucher(channelID: channelID, cumulativeAmount: cumulative))
-        let signature = try voucher.sign(
-            escrowContract: escrow,
-            chainId: chainID,
-            with: signer(byte: 1)
-        )
-        return try Credential(
-            challenge: sessionChallenge(amount: amount), source: nil,
-            payload: [
-                "action": .string(action),
-                "channelId": .string(hex(channelID)),
-                "cumulativeAmount": .string(cumulative),
-                "signature": .string(hex(signature)),
-            ]
-        )
-    }
-
-    private func method(_ store: InMemoryChannelStore, _ provider: StubProvider) -> SessionMethod {
-        SessionMethod(provider: provider, store: store, defaultChainID: chainID)
-    }
-
     @Test("supports tempo/session, not tempo/charge")
     func supports() throws {
         let session = method(InMemoryChannelStore(), StubProvider(onChainChannel()))
@@ -274,7 +288,10 @@ struct SessionMethodTests {
         #expect(channel?.highestVoucherAmount == ChannelAmount(100))
         #expect(channel?.authorizedSigner == authorizedSigner)
     }
+}
 
+@Suite("SessionMethod close/topUp")
+struct SessionMethodCloseTests {
     @Test("topUp refreshes the recorded deposit from the broadcast result")
     func topUpRefreshesDeposit() async throws {
         let store = try await seedStore(highest: 100)
@@ -303,8 +320,46 @@ struct SessionMethodTests {
             now: now
         )
         #expect(provider.settleCalls == 1)
+        #expect(provider.settledCumulative == "100")
         #expect(receipt.extras["txHash"] == "0xsettle")
         let channel = await store.channel(channelID)
         #expect(channel?.finalized == true)
+    }
+
+    @Test("close with a lower client voucher settles the stored highest, never underpays")
+    func closeNeverUnderpays() async throws {
+        // Server drew up to highest=100; a malicious payer sends a validly self-signed
+        // close voucher for cumulative=1. Settlement must use the stored 100, not 1.
+        let store = try await seedStore(highest: 100, spent: 100)
+        let provider = StubProvider(onChainChannel(deposit: 1000))
+        let session = method(store, provider)
+        let receipt = try await session.verify(
+            voucherCredential(cumulative: "1", action: "close"),
+            now: now
+        )
+        #expect(provider.settleCalls == 1)
+        #expect(provider.settledCumulative == "100")
+        let channel = await store.channel(channelID)
+        #expect(channel?.finalized == true)
+        #expect(channel?.settledOnChain == ChannelAmount(100))
+        #expect(receipt.extras["txHash"] == "0xsettle")
+    }
+
+    @Test("close on an already-finalized channel is rejected")
+    func closeFinalizedRejected() async throws {
+        let store = try await seedStore(highest: 100, spent: 40)
+        _ = try await store.update(channelID) { current in
+            guard var channel = current else { return current }
+            channel.finalized = true
+            return channel
+        }
+        let provider = StubProvider(onChainChannel(deposit: 1000))
+        let session = method(store, provider)
+        await #expect(throws: SessionMethod.SessionError.channelClosed(reason: "finalized")) {
+            try await session.verify(
+                voucherCredential(cumulative: "100", action: "close"), now: now
+            )
+        }
+        #expect(provider.settleCalls == 0)
     }
 }

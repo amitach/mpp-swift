@@ -77,9 +77,12 @@ public protocol ChannelStateProvider: Sendable {
         serializedTransaction: Data, channelID: Data, escrow: EthereumAddress, chainID: UInt64
     ) async throws -> (state: OnChainChannel, txHash: String)
 
-    /// Settles `voucher` (the highest accepted) on-chain to close the channel,
-    /// returning the settlement transaction hash.
+    /// Settles `voucher` on-chain to close the channel, returning the settlement
+    /// transaction hash. `signature` is the 65-byte payer/authorized-signer
+    /// signature over `voucher` that the escrow recovers (`ecrecover`); the caller
+    /// passes the higher of the client's final voucher and the server's stored
+    /// highest accepted voucher, so a close can never settle below what was drawn.
     func settle(
-        channelID: Data, voucher: Voucher, escrow: EthereumAddress, chainID: UInt64
+        channelID: Data, voucher: Voucher, signature: Data, escrow: EthereumAddress, chainID: UInt64
     ) async throws -> String
 }

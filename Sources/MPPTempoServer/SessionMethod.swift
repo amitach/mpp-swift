@@ -125,15 +125,21 @@ public struct SessionMethod: PaymentMethodServer {
         if cumulative < channel.highestVoucherAmount { throw SessionError.belowHighestVoucher }
         try verifySignature(fields, expectedSigner: channel.authorizedSigner, context)
 
-        // Advance the highest only when strictly greater; an equal-cumulative replay
-        // still charges below, so it is bounded by the channel balance, never free.
-        if cumulative > channel.highestVoucherAmount {
-            guard let delta = cumulative.subtracting(channel.highestVoucherAmount),
-                  delta >= minVoucherDelta
-            else { throw SessionError.deltaTooSmall }
-            try await recordHighest(
-                fields.channelID, cumulative: cumulative, signature: fields.signature
-            )
+        // Advance the highest atomically: the delta gate re-reads the live highest
+        // inside the store's serialization (TOCTOU-safe), so a concurrent voucher
+        // cannot let a sub-`minVoucherDelta` increase slip through. Advance only when
+        // strictly greater; an equal-cumulative replay does not advance but still
+        // charges below, so it is bounded by the channel balance, never free.
+        try await store.update(fields.channelID) { current in
+            guard var channel = current else { return current }
+            if cumulative > channel.highestVoucherAmount {
+                guard let delta = cumulative.subtracting(channel.highestVoucherAmount),
+                      delta >= minVoucherDelta
+                else { throw SessionError.deltaTooSmall }
+                channel.highestVoucherAmount = cumulative
+                channel.highestVoucherSignature = fields.signature
+            }
+            return channel
         }
         let charged = try await chargeRequest(fields.channelID, context)
         return receipt(charged, context)
@@ -202,18 +208,37 @@ public struct SessionMethod: PaymentMethodServer {
         guard let channel = await store.channel(fields.channelID) else {
             throw SessionError.channelNotFound
         }
-        guard let voucher = Voucher(
-            channelID: fields.channelID, cumulativeAmount: fields.cumulativeAmount
-        ) else { throw SessionError.malformedPayload }
+        if channel.finalized { throw SessionError.channelClosed(reason: "finalized") }
         try verifySignature(fields, expectedSigner: channel.authorizedSigner, context)
+        let clientCumulative = try amount(fields.cumulativeAmount)
+
+        // Settle the higher of the client's final voucher and the server's stored
+        // highest accepted voucher: a lower (validly self-signed) client voucher must
+        // never reduce the payee's settlement below what the channel already drew.
+        let settleAmount: ChannelAmount
+        let settleSignature: Data
+        if clientCumulative >= channel.highestVoucherAmount {
+            settleAmount = clientCumulative
+            settleSignature = fields.signature
+        } else if let storedSignature = channel.highestVoucherSignature {
+            settleAmount = channel.highestVoucherAmount
+            settleSignature = storedSignature
+        } else {
+            // Unreachable: a stored highest above the client's amount always carries
+            // its signature. Fall back to the (verified) client voucher defensively.
+            settleAmount = clientCumulative
+            settleSignature = fields.signature
+        }
+        guard let voucher = Voucher(
+            channelID: fields.channelID, cumulativeAmount: settleAmount.decimalString
+        ) else { throw SessionError.malformedPayload }
         let txHash = try await provider.settle(
-            channelID: fields.channelID, voucher: voucher,
+            channelID: fields.channelID, voucher: voucher, signature: settleSignature,
             escrow: context.escrow, chainID: context.chainID
         )
-        let cumulative = try amount(fields.cumulativeAmount)
         let updated = try await store.update(fields.channelID) { current in
             guard var channel = current else { return current }
-            if cumulative > channel.settledOnChain { channel.settledOnChain = cumulative }
+            if settleAmount > channel.settledOnChain { channel.settledOnChain = settleAmount }
             channel.finalized = true
             return channel
         }
@@ -265,19 +290,6 @@ public struct SessionMethod: PaymentMethodServer {
                 signature: fields.signature, expectedSigner: expectedSigner
             )
         else { throw SessionError.invalidVoucherSignature }
-    }
-
-    private func recordHighest(
-        _ channelID: Data, cumulative: ChannelAmount, signature: Data
-    ) async throws {
-        try await store.update(channelID) { current in
-            guard var channel = current else { return current }
-            if cumulative > channel.highestVoucherAmount {
-                channel.highestVoucherAmount = cumulative
-                channel.highestVoucherSignature = signature
-            }
-            return channel
-        }
     }
 
     /// Charges this request's amount against the channel (one unit), mapping the
