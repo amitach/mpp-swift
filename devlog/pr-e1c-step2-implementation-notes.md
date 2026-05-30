@@ -125,5 +125,50 @@ the release-asset stage removes both the gate and the unsafeFlags.
 drift-clean. (Could not test Linux on the macOS dev host directly, so this was the de-risk.)
 
 ## Still deferred after 2c
-- buildOpenTx / buildTopUpTx; RPC fee oracle (PR-F); published release-asset binaryTarget
-  (the piece that lets an external consumer install the FFI without the env gate).
+- RPC fee oracle (PR-F); published release-asset binaryTarget.
+
+---
+
+# Step 2d: open + topUp builders (PR feat/ws10-ffi-open-topup)
+
+Completes the channel-bookend API so the first published release asset has the full
+builder set. Adds `build_open_tx` / `build_top_up_tx` to the Rust shim + their UniFFI
+exports + Swift wrapper methods.
+
+**Authoritative ABI (verified at source in mppx 0.6.28, the byte-parity reference):**
+`escrow.abi.ts` + the client builder `ChannelOps.ts`. open and topUp are each a **two-call
+`0x76` tx**, NOT single calls (the escrow pulls tokens via transferFrom, so each prepends
+an ERC-20 `approve`):
+- open: `[ approve(escrow, deposit) on token, open(payee, token, deposit, salt,
+  authorizedSigner) on escrow ]`
+- topUp: `[ approve(escrow, amount) on token, topUp(channelId, amount) on escrow ]`
+- ABI subtlety: `topUp.additionalDeposit` is **uint256** (open.deposit / close.cumulative
+  are uint128). Got this right; the golden would have been wrong otherwise.
+See memory `reference_tempo_escrow_write_abi`.
+
+**Byte-parity verification (beyond the RFC-6979 self-consistency golden):** each builder
+test asserts, independently of the `sol!` path, that the tx contains the **canonical
+ERC-20 approve selector `0x095ea7b3`** (a globally-known constant, so not circular) plus
+the keccak-recomputed open/topUp selectors, in the right call order (approve before the
+escrow call). That catches a wrong ABI/selector/order, which a self-consistency golden
+alone cannot. The live-Moderato e2e (PR-F) remains the authoritative on-chain check.
+
+**Right-primitive (not a parallel abstraction):** generalized the shipped
+`FFITempoCloseTxBuilder` -> **`FFITempoTxBuilder`** with `buildOpen` / `buildTopUp` /
+`buildClose` on one builder (they share the held key + fee + nonce machinery), still
+conforming to the `TempoCloseTxBuilder` seam for the server's settle path. Rename is safe
+pre-release (env-gated, no external consumers). `open`'s inputs are grouped into
+`TempoOpenParameters` (kept the method under the 5-arg lint limit and reads better).
+
+**Rust refactor:** extracted `build_signed_tx(calls)` + a `call()` helper so close/open/
+topUp share the sign/encode path (the close golden is unchanged, proving the refactor is
+byte-preserving).
+
+**Verified:** cargo test (6 Rust goldens incl. structural), clippy clean; macOS gated
+`swift test` (5, incl. open/topUp goldens); Linux in the pinned CI container (rebuilt the
+`.a` for the new symbols, all 5 pass); swiftformat/swiftlint/em-dash clean.
+
+## Still deferred after 2d
+- RPC fee oracle (gas/fee params over RPC) + live Moderato settle/open e2e -> PR-F.
+- Published release-asset url+checksum binaryTarget (lets an external consumer install
+  the FFI without the env gate) -> the "publish" step.
