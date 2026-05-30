@@ -67,12 +67,15 @@ actor TempoChannelRegistry {
         open: @Sendable @escaping () async throws -> OpenedChannel
     ) async throws -> ChannelOutcome {
         while true {
-            // A channel is being opened for this key by another charge: await it, then
-            // loop. By the time the await returns the opener has registered the entry and
-            // cleared the slot (atomically, below), so the next iteration vouchers (or, if
-            // the open failed, opens). Awaiting once per loop, never busy-waiting.
+            // A channel is being opened for this key by another charge: await its completion,
+            // then loop. By the time it completes the opener has registered the entry and
+            // cleared the slot (atomically, below), so the next iteration vouchers (or, if the
+            // open failed, opens). `result` waits without rethrowing: the open's success or
+            // failure belongs to the charge that started it (which surfaces it to its own
+            // caller); this waiter only needs the completion barrier, so it discards the
+            // outcome rather than swallowing a thrown error with `try?`.
             if let inflight = opens[key] {
-                _ = try? await inflight.value
+                _ = await inflight.result
                 continue
             }
             if let entry = entries[key] {
