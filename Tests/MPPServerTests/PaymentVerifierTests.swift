@@ -23,16 +23,13 @@ struct AcceptingMethod: PaymentMethodServer {
 
 @Suite("PaymentVerifier")
 struct PaymentVerifierTests {
-    private let secret = Data("test-secret-key-12345".utf8)
-    private let now = Date(timeIntervalSince1970: 1_767_312_000) // 2026-01-02T00:00:00Z
-
     private func signer() -> ChallengeSigner {
         ChallengeSigner(secret: secret)
     }
 
     /// The route binding the signed test credentials are minted for.
     private func expected() throws -> RouteBinding {
-        try .init(realm: "api.example.com", method: MethodName("tempo"), intent: .charge)
+        try makeBinding()
     }
 
     /// Builds a credential whose echoed challenge is signed by `signer`.

@@ -7,8 +7,6 @@ import Testing
 // id = base64url(HMAC-SHA256(secret, bindingInput)), unpadded.
 @Suite("ChallengeSigner")
 struct ChallengeSignerTests {
-    private let secret = Data("test-secret-key-12345".utf8)
-
     private func signer() -> ChallengeSigner {
         ChallengeSigner(secret: secret)
     }
