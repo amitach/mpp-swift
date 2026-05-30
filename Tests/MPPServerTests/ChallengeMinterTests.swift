@@ -8,18 +8,12 @@ import Testing
 // id = base64url(HMAC-SHA256(secret, bindingInput)).
 @Suite("ChallengeMinter")
 struct ChallengeMinterTests {
-    private let secret = Data("test-secret-key-12345".utf8)
-
     private func makeMinter() -> ChallengeMinter {
         ChallengeMinter(signer: ChallengeSigner(secret: secret))
     }
 
     private func makeSigner() -> ChallengeSigner {
         ChallengeSigner(secret: secret)
-    }
-
-    private func makeBinding() throws -> RouteBinding {
-        try RouteBinding(realm: "api.example.com", method: MethodName("tempo"), intent: .charge)
     }
 
     @Test("a minted challenge carries the route's realm, method, and intent")

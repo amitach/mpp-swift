@@ -7,52 +7,8 @@ import Testing
 // Spec: draft-httpauth-payment-00 §5.1 (mint), §11.10 (no-store on 402, private
 // on the paid response). The 413 body cap is an MPP-swift DoS guard, not a spec
 // requirement. The middleware ties ChallengeMinter + PaymentVerifier together.
-// Shared fixtures at file scope (one home; keeps the suite body under the cap).
-private let secret = Data("test-secret-key-12345".utf8)
-private let now = Date(timeIntervalSince1970: 1_767_312_000) // 2026-01-02T00:00:00Z
-
-private func makeBinding() throws -> RouteBinding {
-    try RouteBinding(realm: "api.example.com", method: MethodName("tempo"), intent: .charge)
-}
-
-/// A middleware whose minter and verifier share one secret and replay store.
-private func makeMiddleware(
-    maxBodyBytes: Int = 10 * 1024 * 1024,
-    store: any ReplayStore = InMemoryReplayStore(),
-    onEvent: @escaping @Sendable (ServerEvent) -> Void = { _ in }
-) throws -> MPPServerMiddleware {
-    let signer = ChallengeSigner(secret: secret)
-    return try MPPServerMiddleware(
-        minter: ChallengeMinter(signer: signer),
-        verifier: PaymentVerifier(signer: signer, replayStore: store),
-        binding: makeBinding(),
-        request: EncodedJSON("e30"),
-        expiresIn: 300,
-        maxBodyBytes: maxBodyBytes,
-        onEvent: onEvent
-    )
-}
-
-/// An `Authorization: Payment` value whose challenge is minted for the route.
-private func paidHeader() throws -> String {
-    try headerFor()
-}
-
-/// A credential header minted with overridable secret/binding/expiry/digest,
-/// to drive each `PaymentVerifier.Rejection` through the middleware.
-private func headerFor(
-    signedWith customSecret: Data? = nil,
-    binding customBinding: RouteBinding? = nil,
-    expires: Expires? = nil,
-    digest: String? = nil
-) throws -> String {
-    let signer = ChallengeSigner(secret: customSecret ?? secret)
-    let route = try customBinding ?? makeBinding()
-    let challenge = ChallengeMinter(signer: signer).mint(
-        binding: route, request: EncodedJSON("e30"), digest: digest, expires: expires
-    )
-    return try Credential(challenge: challenge, payload: ["proof": "0xabc"]).headerValue
-}
+// Shared fixtures (secret / now / makeBinding / makeMiddleware / paidHeader /
+// headerFor / makeRequest) live in MPPServerTestSupport.
 
 /// Drives `header` through `evaluate` and returns the resulting 402 problem type.
 private func rejectionProblemType(
@@ -62,18 +18,6 @@ private func rejectionProblemType(
         authorization: header, body: body, now: now
     )
     return challengeOf(decision)?.1.type
-}
-
-private func makeRequest(authorization: String? = nil) -> HTTPRequest {
-    var fields = HTTPFields()
-    if let authorization { fields[.authorization] = authorization }
-    return HTTPRequest(
-        method: .post,
-        scheme: "https",
-        authority: "api.example.com",
-        path: "/r",
-        headerFields: fields
-    )
 }
 
 /// Collects events emitted during a request (sink is synchronous).
