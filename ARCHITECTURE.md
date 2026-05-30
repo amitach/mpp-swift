@@ -106,9 +106,19 @@ invariant in CI: the default graph must contain no `MPPTempoFFI` / `TempoTxFFIBi
 The xcframework is built in CI from the pinned `tempo-primitives` source
 (`rust/tempo-tx-ffi/build-xcframework.sh`), never committed as a binary. It carries
 macOS (universal arm64 + x86_64), iOS device (arm64), and iOS simulator (universal)
-slices. (Remaining: the Linux `.so` (a different link mechanism, not an xcframework),
-the `open` / `topUp` builders, and the published release-asset url+checksum binaryTarget
-that lets an external consumer install the FFI without the env gate.)
+slices.
+
+**Linux** takes a different path because SwiftPM has no library `binaryTarget` there
+(only `.xcframework` / `.artifactbundle`). On Linux, `MPPTempoFFI` instead links the
+static archive directly via `linkerSettings` (`-L artifacts/linux -ltempo_tx_ffi` plus
+the system libs from `rustc --print native-static-libs`) and gets the `tempo_tx_ffiFFI`
+clang module from a small **`CTempoTxFFI`** C target (the committed, drift-checked C
+header + a module map). The manifest branches on `#if os(Linux)`. `build-linux-lib.sh`
+produces the `.a` (staticlib only, no cdylib). The `unsafeFlags` make the package
+non-consumable as a *remote* dependency on Linux, which is acceptable while the env gate
+is the pre-release stand-in; the release-asset stage replaces it. (Remaining: the
+`open` / `topUp` builders, and the published release-asset url+checksum binaryTarget that
+lets an external consumer install the FFI without the env gate.)
 
 ## A session, end to end
 

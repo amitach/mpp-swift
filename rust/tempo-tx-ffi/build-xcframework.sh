@@ -111,9 +111,13 @@ mkdir -p "$REPO_ROOT/artifacts"
 rm -rf "$XCF"
 xcodebuild -create-xcframework "${XCF_ARGS[@]}" -output "$XCF"
 
-echo "==> refresh committed Swift bindings"
+echo "==> refresh committed Swift bindings + C header"
 GEN="$REPO_ROOT/Sources/MPPTempoFFI/Generated"
 mkdir -p "$GEN"
 cp target/bindings/tempo_tx_ffi.swift "$GEN/tempo_tx_ffi.swift"
+# The C header is committed for the Linux CTempoTxFFI module (Apple gets it from the
+# xcframework instead). It is target-independent, so the macOS-generated copy is correct
+# for Linux; both committed files are drift-checked in CI against this regeneration.
+cp target/bindings/tempo_tx_ffiFFI.h "$REPO_ROOT/Sources/CTempoTxFFI/include/tempo_tx_ffiFFI.h"
 
 echo "==> done: $XCF"

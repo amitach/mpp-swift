@@ -161,8 +161,8 @@ jobs:
         if: matrix.os == 'macos-15'
         run: |
           rust/tempo-tx-ffi/build-xcframework.sh
-          git diff --exit-code -- Sources/MPPTempoFFI/Generated || {
-            echo "::error::Committed UniFFI bindings drifted from tempo-primitives@1.8.0. Run rust/tempo-tx-ffi/build-xcframework.sh and commit Sources/MPPTempoFFI/Generated."
+          git diff --exit-code -- Sources/MPPTempoFFI/Generated Sources/CTempoTxFFI/include/tempo_tx_ffiFFI.h || {
+            echo "::error::Committed UniFFI bindings/header drifted from tempo-primitives@1.8.0. Run rust/tempo-tx-ffi/build-xcframework.sh and commit Sources/MPPTempoFFI/Generated + Sources/CTempoTxFFI/include/tempo_tx_ffiFFI.h."
             exit 1
           }
       - name: Swift FFI integration test (SwiftPM links Rust, gate on)
@@ -179,6 +179,37 @@ jobs:
         run: |
           cargo install cargo-audit --locked
           cargo audit
+
+  linux-ffi:
+    name: Linux FFI (Rust staticlib + Swift link)
+    # NON-REQUIRED: the Linux counterpart to the macOS xcframework leg. SwiftPM has no
+    # library binaryTarget on Linux, so MPPTempoFFI links libtempo_tx_ffi.a directly
+    # (linkerSettings) and gets the C module from CTempoTxFFI. This builds the Rust
+    # staticlib and runs the same gated golden test. Runs in the swift container (has
+    # Swift) and installs Rust + build-essential (the rust-ffi job's plain ubuntu VM has
+    # no Swift). Compiles the large revm tree, so it is slow + non-required. Pinned by
+    # digest like the `linux` job (rotated together).
+    runs-on: ubuntu-latest
+    container: swift@sha256:cf429de05c3e84a230a75e68eaa7bf7d1367ef9dde0a1278fb2a3d53d1881040
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install build tools + Rust (>= 1.93, tempo-primitives MSRV)
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl ca-certificates build-essential
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Verify rustc >= 1.93
+        run: |
+          ver=$("$HOME/.cargo/bin/rustc" --version | awk '{print $2}')
+          printf '1.93.0\n%s\n' "$ver" | sort -V -C || {
+            echo "::error::rustc $ver is below the 1.93 floor"; exit 1; }
+          echo "rustc $ver OK"
+      - name: Build the Linux static lib
+        run: rust/tempo-tx-ffi/build-linux-lib.sh
+      - name: Swift FFI integration test (links the staticlib, gate on)
+        env:
+          MPP_TEMPO_FFI: "1"
+        run: swift test --filter MPPTempoFFITests
 
   conformance-reverse:
     name: Conformance (reverse)

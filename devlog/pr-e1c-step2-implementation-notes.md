@@ -92,5 +92,38 @@ CI: no workflow change needed; the macOS rust-ffi job already calls
 uses the macos-15 runner's bundled iOS SDKs. Drift-check + gated test steps unchanged.
 
 ## Still deferred after 2b
-- Linux `.so` + Linux SwiftPM linking (NOT an xcframework; different mechanism) -> next.
 - buildOpenTx / buildTopUpTx; RPC fee oracle (PR-F); published release-asset binaryTarget.
+
+---
+
+# Step 2c: Linux (PR feat/ws10-ffi-linux)
+
+SwiftPM has NO library `binaryTarget` on Linux (only `.xcframework` / `.artifactbundle`),
+so Linux cannot mirror the Apple xcframework path. Approach:
+- **`CTempoTxFFI`** C target: the committed (drift-checked) C header + a `module.modulemap`
+  exposing the `tempo_tx_ffiFFI` clang module the generated Swift imports. On Apple that
+  module comes from the xcframework; on Linux it comes from this target. A one-line
+  `shim.c` keeps it a buildable (not headers-only) target. The header is target-independent,
+  so build-xcframework.sh (macOS) generates + commits it for both platforms.
+- **`MPPTempoFFI` on Linux** links `libtempo_tx_ffi.a` directly via
+  `linkerSettings.unsafeFlags` (`-L artifacts/linux -ltempo_tx_ffi` + the native libs from
+  `rustc --print native-static-libs`: `-lm -ldl -lpthread -lrt -lutil -lgcc_s`; `-lc` is
+  already on the Swift link line). `Package.swift` branches `#if os(Linux)` vs the Apple
+  binaryTarget.
+- **`build-linux-lib.sh`** builds the staticlib (no cdylib) into `artifacts/linux/`.
+- **CI**: a new non-required `linux-ffi` job in the swift container (installs Rust +
+  build-essential, builds the `.a`, runs the gated golden test). The macOS drift-check now
+  also covers the committed C header.
+
+**unsafeFlags caveat:** they make the package non-consumable as a *remote* dependency on
+Linux, which is fine while the env gate already precludes remote consumption pre-release;
+the release-asset stage removes both the gate and the unsafeFlags.
+
+**Verified locally in the pinned CI swift container (Docker):** built the Linux `.a`
+(351MB), and `MPP_TEMPO_FFI=1 swift test --filter MPPTempoFFITests` links it through
+`CTempoTxFFI` + the seam and passes all 3 golden tests. The macOS path still passes and is
+drift-clean. (Could not test Linux on the macOS dev host directly, so this was the de-risk.)
+
+## Still deferred after 2c
+- buildOpenTx / buildTopUpTx; RPC fee oracle (PR-F); published release-asset binaryTarget
+  (the piece that lets an external consumer install the FFI without the env gate).
