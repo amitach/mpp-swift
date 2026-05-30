@@ -15,7 +15,7 @@ use alloy_sol_types::{sol, SolCall};
 use k256::ecdsa::SigningKey;
 use tempo_primitives::transaction::Call;
 use tempo_primitives::{TempoSignature, TempoTransaction};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 sol! {
     function close(bytes32 channelId, uint128 cumulativeAmount, bytes signature);
@@ -146,9 +146,17 @@ pub fn build_close_transaction(
     cumulative_amount: String,
     voucher_signature: Vec<u8>,
 ) -> Result<Vec<u8>, FfiError> {
-    let key: [u8; 32] = private_key
-        .try_into()
-        .map_err(|_| FfiError::InvalidInput("private_key: need 32 bytes".into()))?;
+    // Copy the key out of the incoming Vec by borrow, then zeroize the Vec's heap
+    // buffer (a `try_into` move would drop it un-zeroized). Hold the copy in a
+    // `Zeroizing` so it is wiped on every exit path, including an early return from a
+    // later `?`. build_close_tx zeroizes its own by-value copy.
+    let mut private_key = private_key;
+    let key_bytes: Result<[u8; 32], _> = private_key.as_slice().try_into();
+    private_key.zeroize();
+    let key = Zeroizing::new(
+        key_bytes.map_err(|_| FfiError::InvalidInput("private_key: need 32 bytes".into()))?,
+    );
+
     let channel: [u8; 32] = channel_id
         .try_into()
         .map_err(|_| FfiError::InvalidInput("channel_id: need 32 bytes".into()))?;
@@ -163,7 +171,7 @@ pub fn build_close_transaction(
         parse_u128("max_priority_fee_per_gas", &max_priority_fee_per_gas)?,
         gas_limit,
         fee_token,
-        key,
+        *key,
         parse_address("escrow", &escrow)?,
         channel,
         parse_u128("cumulative_amount", &cumulative_amount)?,
