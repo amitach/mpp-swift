@@ -1,0 +1,22 @@
+[package]
+name = "tempo-tx-ffi"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# The MPPTempo 0x76 transaction builder: the one piece the Swift SDK cannot do
+# natively. It binds Tempo's own `tempo-primitives` crate (the canonical, chain-
+# maintained transaction format) and builds + signs + RLP-encodes the bespoke
+# `0x76` escrow transactions. `default-features = false` keeps it pure Rust (no
+# c-kzg/blst C deps), so it cross-compiles cleanly to an Apple xcframework + Linux
+# .so. A later slice adds the UniFFI surface + the xcframework/SwiftPM wiring; this
+# crate is the verified core, built and tested on its own in CI.
+[dependencies]
+tempo-primitives = { git = "https://github.com/tempoxyz/tempo", tag = "tempo-primitives@1.8.0", default-features = false }
+alloy-primitives = "1.6.0"
+alloy-sol-types = "1.6.0"
+k256 = { version = "0.13.4", features = ["ecdsa"] }
+zeroize = "1"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
