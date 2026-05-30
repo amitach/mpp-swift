@@ -46,6 +46,13 @@ public enum FileSecretLoader {
     }
 
     private static func readSecret(atPath path: String) throws(LoadError) -> Data {
+        // Reject an over-long file by its size before reading it, so a path
+        // mistakenly pointed at a large file is not pulled into memory. The bytes
+        // are validated again by SecretStore; this just bounds the read.
+        if let size = try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int,
+           size > SecretStore.maximumSecretBytes {
+            throw .invalid(.tooLong(byteCount: size))
+        }
         guard let data = FileManager.default.contents(atPath: path) else {
             throw .unreadable(path: path)
         }

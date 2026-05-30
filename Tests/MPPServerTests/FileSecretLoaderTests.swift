@@ -122,4 +122,16 @@ final class FileSecretLoaderTests: Sendable {
             try FileSecretLoader.load(currentPath: writeFile(currentBytes), previousPaths: nine)
         }
     }
+
+    @Test("a file at the maximum length loads; one over it is rejected by size")
+    func enforcesMaximumLength() {
+        let max = SecretStore.maximumSecretBytes
+        #expect(throws: Never.self) {
+            try FileSecretLoader.load(currentPath: writeFile(Data(repeating: 0x61, count: max)))
+        }
+        // The over-long file is rejected by its size, before being read into memory.
+        #expect(throws: FileSecretLoader.LoadError.invalid(.tooLong(byteCount: max + 1))) {
+            try FileSecretLoader.load(currentPath: writeFile(Data(repeating: 0x61, count: max + 1)))
+        }
+    }
 }

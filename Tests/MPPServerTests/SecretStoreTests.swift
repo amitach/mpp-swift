@@ -50,6 +50,19 @@ struct SecretStoreTests {
         }
     }
 
+    @Test("accepts a key exactly at the maximum but rejects one over it (sanity bound)")
+    func enforcesMaximumLength() {
+        let max = SecretStore.maximumSecretBytes
+        #expect(throws: Never.self) { try SecretStore(current: Data(repeating: 1, count: max)) }
+        #expect(throws: SecretStore.ValidationError.tooLong(byteCount: max + 1)) {
+            try SecretStore(current: Data(repeating: 1, count: max + 1))
+        }
+        // The whole set is validated, so an over-long previous key is rejected too.
+        #expect(throws: SecretStore.ValidationError.tooLong(byteCount: max + 1)) {
+            try SecretStore(current: keyA, previous: [Data(repeating: 2, count: max + 1)])
+        }
+    }
+
     @Test("rejects more than the maximum previous keys (DoS bound)")
     func rejectsTooManyPreviousKeys() {
         let max = SecretStore.maximumPreviousKeys

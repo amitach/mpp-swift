@@ -76,4 +76,13 @@ struct EnvironmentSecretLoaderTests {
             try EnvironmentSecretLoader.load(from: ["MPP_SECRET_KEY": "short"])
         }
     }
+
+    @Test("a too-long key surfaces the SecretStore validation error")
+    func longKeySurfacesValidation() {
+        let overMax = SecretStore.maximumSecretBytes + 1
+        let value = String(repeating: "k", count: overMax) // ASCII => overMax UTF-8 bytes
+        #expect(throws: EnvironmentSecretLoader.LoadError.invalid(.tooLong(byteCount: overMax))) {
+            try EnvironmentSecretLoader.load(from: ["MPP_SECRET_KEY": value])
+        }
+    }
 }
