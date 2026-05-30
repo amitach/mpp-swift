@@ -4,10 +4,11 @@
 //! byte-identical to the chain's canonical implementation and makes an upgrade a
 //! version bump rather than a hand-maintained Swift port. No hand-rolled encoding.
 //!
-//! Only the escrow `close` (settlement) tx is built here for now; `open` / `topUp`
-//! and the UniFFI + xcframework wiring follow in later slices. The functions are
-//! plain Rust today; the UniFFI-friendly surface (bytes/strings, not `Address`)
-//! arrives with the bindings.
+//! Only the escrow `close` (settlement) tx is built for now; `open` / `topUp` follow.
+//! Two surfaces: the typed Rust `build_close_tx` (used by the in-crate tests), and
+//! the UniFFI-exported `build_close_transaction` (FFI-friendly types: scalars,
+//! `Vec<u8>`, and decimal `String`s for `u128`) that the Swift wrapper calls. The
+//! xcframework / Linux `.so` packaging + the SwiftPM wiring follow in the next slice.
 
 use alloy_primitives::{Address, Bytes, FixedBytes, Signature, TxKind, U256};
 use alloy_sol_types::{sol, SolCall};
@@ -93,6 +94,87 @@ pub fn build_close_tx(
     Ok(out)
 }
 
+// ── UniFFI export layer ────────────────────────────────────────────────────────
+// FFI-friendly surface for the Swift wrapper: scalars + Vec<u8> + decimal Strings
+// for u128 (UniFFI has no u128 / fixed arrays / alloy types). Validates, then calls
+// the typed `build_close_tx` above.
+
+uniffi::setup_scaffolding!();
+
+/// A reason the FFI close-tx build failed.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum FfiError {
+    /// An argument was the wrong length or not a valid value (the message names it).
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
+    /// The signing key was not a valid secp256k1 private key.
+    #[error("invalid signing key")]
+    InvalidKey,
+    /// Signing the transaction hash failed.
+    #[error("signing failed")]
+    SigningFailed,
+}
+
+fn parse_u128(label: &str, text: &str) -> Result<u128, FfiError> {
+    text.parse::<u128>()
+        .map_err(|_| FfiError::InvalidInput(format!("{label}: not a u128")))
+}
+
+fn parse_address(label: &str, bytes: &[u8]) -> Result<Address, FfiError> {
+    if bytes.len() != 20 {
+        return Err(FfiError::InvalidInput(format!("{label}: need 20 bytes")));
+    }
+    Ok(Address::from_slice(bytes))
+}
+
+/// UniFFI entry point: build + sign + RLP-encode the escrow `close` `0x76` tx.
+/// `max_fee_per_gas` / `max_priority_fee_per_gas` / `cumulative_amount` are decimal
+/// `u128` strings; `fee_token` / `escrow` are 20-byte addresses; `private_key` and
+/// `channel_id` are 32 bytes; `voucher_signature` is the 65-byte voucher signature.
+#[uniffi::export]
+#[allow(clippy::too_many_arguments)]
+pub fn build_close_transaction(
+    chain_id: u64,
+    nonce: u64,
+    max_fee_per_gas: String,
+    max_priority_fee_per_gas: String,
+    gas_limit: u64,
+    fee_token: Option<Vec<u8>>,
+    private_key: Vec<u8>,
+    escrow: Vec<u8>,
+    channel_id: Vec<u8>,
+    cumulative_amount: String,
+    voucher_signature: Vec<u8>,
+) -> Result<Vec<u8>, FfiError> {
+    let key: [u8; 32] = private_key
+        .try_into()
+        .map_err(|_| FfiError::InvalidInput("private_key: need 32 bytes".into()))?;
+    let channel: [u8; 32] = channel_id
+        .try_into()
+        .map_err(|_| FfiError::InvalidInput("channel_id: need 32 bytes".into()))?;
+    let fee_token = match fee_token {
+        Some(bytes) => Some(parse_address("fee_token", &bytes)?),
+        None => None,
+    };
+    build_close_tx(
+        chain_id,
+        nonce,
+        parse_u128("max_fee_per_gas", &max_fee_per_gas)?,
+        parse_u128("max_priority_fee_per_gas", &max_priority_fee_per_gas)?,
+        gas_limit,
+        fee_token,
+        key,
+        parse_address("escrow", &escrow)?,
+        channel,
+        parse_u128("cumulative_amount", &cumulative_amount)?,
+        voucher_signature,
+    )
+    .map_err(|error| match error {
+        BuildError::InvalidKey => FfiError::InvalidKey,
+        BuildError::SigningFailed => FfiError::SigningFailed,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,6 +204,38 @@ mod tests {
         assert_eq!(bytes.first(), Some(&0x76));
         // Full golden (351 bytes); identical on tempo-primitives 1.7.2 and 1.8.0.
         assert_eq!(hex, GOLDEN_CLOSE_TX);
+    }
+
+    /// The UniFFI wrapper (FFI-friendly types) parses to the same inputs and produces
+    /// the identical bytes, so the boundary marshalling is faithful.
+    #[test]
+    fn ffi_wrapper_matches_golden() {
+        let bytes = build_close_transaction(
+            42431,
+            7,
+            "1000000000".into(),
+            "1000000".into(),
+            100_000,
+            None,
+            vec![0x11; 32],
+            vec![0x55; 20],
+            vec![0xAB; 32],
+            "1000".into(),
+            vec![0u8; 65],
+        )
+        .expect("build");
+        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, GOLDEN_CLOSE_TX);
+    }
+
+    #[test]
+    fn ffi_wrapper_rejects_bad_lengths() {
+        // 31-byte key -> InvalidInput, not a panic.
+        let result = build_close_transaction(
+            42431, 7, "1".into(), "1".into(), 1, None,
+            vec![0x11; 31], vec![0x55; 20], vec![0xAB; 32], "1".into(), vec![0u8; 65],
+        );
+        assert!(matches!(result, Err(FfiError::InvalidInput(_))));
     }
 
     const GOLDEN_CLOSE_TX: &str = "76f9015b82a5bf830f4240843b9aca00830186a0f8fef8fc94555555555555555555555555555555555555555580b8e40d65c51dabababababababababababababababababababababababababababababababab00000000000000000000000000000000000000000000000000000000000003e800000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000041000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0800780808080c0b84170186b0fac541ff7fcfcdedd819df35bd3207eae52fdff25b79e1d84ec0cac677365daa5efb4e34e307dc760cdeac0a1b95ed8b3129fdfc82764333a0ab6945a1c";

@@ -17,6 +17,10 @@ alloy-primitives = "1.6.0"
 alloy-sol-types = "1.6.0"
 k256 = { version = "0.13.4", features = ["ecdsa"] }
 zeroize = "1"
+uniffi = { version = "0.31.1", features = ["cli"] }
+thiserror = "2.0.18"
 
 [lib]
-crate-type = ["staticlib", "rlib"]
+# staticlib for the xcframework, cdylib for UniFFI binding generation, rlib for the
+# in-crate tests.
+crate-type = ["staticlib", "cdylib", "rlib"]
