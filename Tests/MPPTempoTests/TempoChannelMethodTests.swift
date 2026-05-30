@@ -100,6 +100,17 @@ struct TempoChannelMethodTests {
         }
     }
 
+    @Test("a deposit value that is not a canonical uint128 rejects with invalidDeposit")
+    func invalidDepositRejected() async throws {
+        let builder = StubOpenTxBuilder()
+        let method = try makeMethod(depositPolicy: { _ in "not-a-number" }, builder: builder)
+        await #expect(throws: TempoChannelMethodError.invalidDeposit) {
+            _ = try await method.buildCredential(for: sessionChallenge())
+        }
+        // Fails closed before the builder is ever called.
+        #expect(await builder.parameters.isEmpty)
+    }
+
     @Test("a failing open builder surfaces openTransactionFailed")
     func openBuilderFailureSurfaces() async throws {
         let method = try makeMethod(builder: StubOpenTxBuilder(failure: StubError.boom))

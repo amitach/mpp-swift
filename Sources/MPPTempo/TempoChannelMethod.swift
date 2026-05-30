@@ -177,6 +177,12 @@ public struct TempoChannelMethod: PaymentMethodClient {
             suggestedDeposit: request.suggestedDeposit
         )
         guard let deposit = depositPolicy(context) else { throw TempoChannelMethodError.noDeposit }
+        // Fail closed early: the deposit must be a canonical `uint128` (the escrow's type).
+        // The tx builder would also reject a bad string, but as an opaque build failure;
+        // validating here surfaces a precise error before deriving the channel or building.
+        guard ChannelAmount(decimal: deposit) != nil else {
+            throw TempoChannelMethodError.invalidDeposit
+        }
         let salt = saltProvider()
         guard let parameters = Channel.Parameters(
             payer: wallet, payee: session.payee, token: session.token, salt: salt,
@@ -319,6 +325,8 @@ public enum TempoChannelMethodError: Error, Sendable, Hashable {
     case amountExceedsChannelRange
     /// The deposit policy returned no deposit for a new channel.
     case noDeposit
+    /// The deposit policy returned a value that is not a canonical `uint128`.
+    case invalidDeposit
     /// The channel salt was not 32 bytes.
     case invalidSalt
     /// Adding the charge to the running cumulative would overflow `uint128`.
