@@ -78,6 +78,47 @@ intentionally stricter than the references (those are called out in the PR).
   workstream. Do not flag a deliberately deferred item (named in the PR) as a
   gap; do flag anything in scope that is wrong, missing, or untested.
 
+## Patterns that have bitten us (check these on stateful / settlement changes)
+
+These are distilled from real findings that passed CI green before review caught
+them. On any change touching channels, vouchers, settlement, or shared mutable
+state, scrutinize each:
+
+- **A valid signature is not a valid amount.** When a client-supplied value drives
+  a settlement or payout, bound it by the server's recorded state, never trust it
+  downward. A payer can validly self-sign a *lower* terminal voucher; settle the
+  higher of the client's value and the stored highest, so a close can never
+  underpay what the channel already drew.
+- **Set the in-progress guard before the await, after verifying authorization.**
+  Mark state "closing"/"in-flight" atomically *before* any `await` on an external
+  side-effect (an on-chain settle, an RPC), so concurrent operations are rejected
+  during the window. But verify the request's signature *first*, or a bogus request
+  can freeze the channel.
+- **Setting a flag is not the same as checking it.** A guard that is set but not
+  rejected-on-already-set lets two concurrent operations both proceed (e.g. two
+  closes both broadcasting a settle = duplicate on-chain transaction). Single-flight
+  means: throw if the flag is already set.
+- **Gate inside the atomic transform, against fresh state.** A check computed
+  against an earlier non-atomic read is a TOCTOU window. Move the gate (delta,
+  monotonicity, balance) inside the serialized read-modify-write, and re-check
+  *all* guarding invariants there (`closing`/`finalized`), not just the field being
+  mutated, so a racing operation cannot leak a side effect.
+- **Fail closed on parse/validation failure.** An unparseable amount or quantity
+  must reject the request, never default to zero or a permissive value (a silent
+  free request). Audit every `?? .zero` / `try?` on a value that gates money.
+- **Field *types* are part of wire parity.** string vs number, `i64` vs `u64` are
+  interop-breaking. Verify against the reference SDK's actual serialization *at
+  source* (the struct field types), not by assumption: a strict peer rejects a
+  type mismatch, and a lenient decoder silently drops the field. Preserve the
+  distinction through decode (a quoted `"5"` stays a string; a bare `5` an integer).
+- **Do not auto-rollback a guard after a side-effect that may have partially
+  succeeded.** A settle broadcast whose response was lost may have landed on-chain;
+  rolling the flag back and retrying risks a double settlement. Park deliberately,
+  document why, and make real recovery read back the external state before retrying.
+- **Forward/peer-compat capture must be type-preserving and byte-stable.** Unknown
+  fields captured for compatibility must round-trip their type, and a value with no
+  extras must encode byte-identically to before the change.
+
 ## The bar a change has already passed
 
 Every change runs a gate pipeline before it reaches review: right-primitive reuse,
