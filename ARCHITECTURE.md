@@ -104,9 +104,11 @@ so the default package graph (every other product, and the non-FFI CI jobs) refe
 no xcframework and pulls **zero Rust**. `Scripts/assert-ffi-isolation.sh` asserts this
 invariant in CI: the default graph must contain no `MPPTempoFFI` / `TempoTxFFIBinary`.
 The xcframework is built in CI from the pinned `tempo-primitives` source
-(`rust/tempo-tx-ffi/build-xcframework.sh`), never committed as a binary. (Current spike:
-macOS arm64 + the `close` op; x86_64 / iOS arches, the Linux `.so`, and open/topUp
-follow.)
+(`rust/tempo-tx-ffi/build-xcframework.sh`), never committed as a binary. It carries
+macOS (universal arm64 + x86_64), iOS device (arm64), and iOS simulator (universal)
+slices. (Remaining: the Linux `.so` (a different link mechanism, not an xcframework),
+the `open` / `topUp` builders, and the published release-asset url+checksum binaryTarget
+that lets an external consumer install the FFI without the env gate.)
 
 ## A session, end to end
 

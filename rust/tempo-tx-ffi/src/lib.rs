@@ -8,8 +8,8 @@
 //! Two surfaces: the typed Rust `build_close_tx` (used by the in-crate tests), and
 //! the UniFFI-exported `build_close_transaction` (FFI-friendly types: scalars,
 //! `Vec<u8>`, and decimal `String`s for `u128`) that the Swift wrapper calls. It is
-//! packaged into the `TempoTxFFI` xcframework (`build-xcframework.sh`) and linked by
-//! the opt-in `MPPTempoFFI` SwiftPM product; the Linux `.so` + remaining arches follow.
+//! packaged into the `TempoTxFFI` xcframework (`build-xcframework.sh`, macOS + iOS
+//! slices) and linked by the opt-in `MPPTempoFFI` SwiftPM product; the Linux `.so` follows.
 
 use alloy_primitives::{Address, Bytes, FixedBytes, Signature, TxKind, U256};
 use alloy_sol_types::{sol, SolCall};

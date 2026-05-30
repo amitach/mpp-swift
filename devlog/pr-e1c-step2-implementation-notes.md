@@ -57,8 +57,40 @@ provider and produces the byte-exact golden tx.
   the graph (the isolation guarantee). CI keeps a gate-off leg.
 
 ## Open / deferred
-- x86_64-apple-darwin + iOS device/sim arches + Linux `.so` -> step 2b (need the extra rust
-  targets installed; CI runner has them or `rustup target add`).
 - buildOpenTx / buildTopUpTx -> after close is wired.
 - RPC-sourced fee params (gas/fee oracle) -> PR-F.
 - Published release-asset (url+checksum) binaryTarget -> packaging follow-up.
+
+---
+
+# Step 2b: all Apple arches (PR feat/ws10-ffi-apple-arches)
+
+The xcframework now carries every realistic Apple FFI-consumer slice, not just the
+macOS-arm64 spike:
+- **macOS**: universal (arm64 + x86_64), lipo'd.
+- **iOS device**: arm64.
+- **iOS simulator**: universal (arm64 + x86_64), lipo'd.
+
+tvOS / watchOS / visionOS are out of scope (no FFI consumer there; such a build just
+must not depend on `MPPTempoFFI`). Verified each slice with the xcframework Info.plist
+(`SupportedPlatform` / `SupportedPlatformVariant`) plus `vtool`/`lipo` per slice; the iOS
+device objects carry `LC_VERSION_MIN_IPHONEOS` (genuinely iOS, not mislabeled macOS).
+
+**Cross-bindgen fix (Devin #65 carry-forward).** uniffi-bindgen must introspect a
+HOST-runnable library. Step 2a generated bindings from the cross-compiled slice, which
+only worked because the target triple equalled the host on the arm64 spike. The script
+now builds a host-native dylib with no `--target` purely for bindgen, independent of
+which arches it packages. Binding drift against the committed copy stays zero.
+
+**Build cost.** Five arch compiles of the revm tree (~30s each cold) -> the rust-ffi
+macOS CI leg goes from ~40s to ~2min; it is the non-required job, so acceptable. Devs
+can `TEMPO_FFI_MACOS_ONLY=1 build-xcframework.sh` for fast local iteration (the gated
+`swift test` only links the macOS slice).
+
+CI: no workflow change needed; the macOS rust-ffi job already calls
+`build-xcframework.sh`, which now `rustup target add`s the iOS/x86_64 targets itself and
+uses the macos-15 runner's bundled iOS SDKs. Drift-check + gated test steps unchanged.
+
+## Still deferred after 2b
+- Linux `.so` + Linux SwiftPM linking (NOT an xcframework; different mechanism) -> next.
+- buildOpenTx / buildTopUpTx; RPC fee oracle (PR-F); published release-asset binaryTarget.
