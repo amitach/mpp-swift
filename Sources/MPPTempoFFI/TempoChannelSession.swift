@@ -56,6 +56,11 @@ public enum TempoChannelSessionError: Error, Sendable, Equatable {
     /// Another lifecycle operation (open/topUp/close) is already in flight. The session is
     /// driven sequentially; await one operation before starting the next.
     case operationInProgress
+    /// A prior operation's transaction was submitted but its receipt never confirmed
+    /// (a ``receiptTimeout``), so the on-chain outcome is unknown and the session cannot
+    /// safely continue (a further write could collide on the nonce or duplicate the
+    /// effect). Reconcile the channel's on-chain state, then start a fresh session.
+    case sessionUnusable
 }
 
 /// Drives the on-chain lifecycle of a single Tempo payment channel for one account:
@@ -100,6 +105,9 @@ public actor TempoChannelSession {
     // True while an async lifecycle op holds the session. Set/checked synchronously (no
     // await between check and set), so it serializes ops despite actor reentrancy.
     private var inFlight = false
+    // Set when a submitted transaction's receipt never confirmed: the on-chain outcome is
+    // unknown, so no further operation may run (it could collide on the nonce or duplicate).
+    private var poisoned = false
 
     /// Creates a session for the channel funded and signed by `privateKey` (the payer,
     /// which is also the voucher-authorized signer). `payee` is the channel recipient,
@@ -161,10 +169,8 @@ public actor TempoChannelSession {
     /// Opens the channel with `deposit` (a base-10 `uint128` string): builds + broadcasts
     /// the `open` transaction, then reads back the on-chain deposit. Returns the new state.
     public func open(deposit: String) async throws -> ChannelSessionState {
-        guard !inFlight else { throw TempoChannelSessionError.operationInProgress }
-        inFlight = true
+        try beginOperation()
         defer { inFlight = false }
-        guard !finalized else { throw TempoChannelSessionError.alreadyFinalized }
         guard !opened else { throw TempoChannelSessionError.alreadyOpen }
         guard ChannelAmount(decimal: deposit) != nil else {
             throw TempoChannelSessionError.invalidAmount("deposit")
@@ -175,17 +181,18 @@ public actor TempoChannelSession {
         )
         let transaction = try await builder.buildOpenTransaction(parameters, chainID: chainID)
         try await broadcast(transaction)
-        let onChain = try await readChannel()
-        self.deposit = onChain.deposit
+        // The open tx confirmed, so the channel IS open: record that BEFORE the deposit
+        // read-back, so a read failure here cannot leave the session thinking it is unopened
+        // (which would let a retry double-open the same channel).
         opened = true
+        self.deposit = try await readChannel().deposit // `self.` so it is not the parameter
         return state()
     }
 
     /// Tops the channel up by `additionalDeposit` (a base-10 string): builds + broadcasts
     /// the `topUp` transaction, then re-reads the on-chain deposit.
     public func topUp(additionalDeposit: String) async throws -> ChannelSessionState {
-        guard !inFlight else { throw TempoChannelSessionError.operationInProgress }
-        inFlight = true
+        try beginOperation()
         defer { inFlight = false }
         try requireOpen()
         guard ChannelAmount(decimal: additionalDeposit) != nil else {
@@ -207,6 +214,7 @@ public actor TempoChannelSession {
         // Synchronous (no await), so it runs atomically on the actor and cannot itself
         // interleave; but reject it while an async write is mid-flight, so a voucher is
         // never issued against state a topUp/open/close is concurrently changing.
+        guard !poisoned else { throw TempoChannelSessionError.sessionUnusable }
         guard !inFlight else { throw TempoChannelSessionError.operationInProgress }
         try requireOpen()
         guard let amount = ChannelAmount(decimal: cumulativeAmount) else {
@@ -224,8 +232,7 @@ public actor TempoChannelSession {
     /// (or a zero-amount voucher if none was issued): builds + broadcasts the `close`
     /// transaction and confirms the channel is finalized.
     public func close() async throws -> ChannelSessionState {
-        guard !inFlight else { throw TempoChannelSessionError.operationInProgress }
-        inFlight = true
+        try beginOperation()
         defer { inFlight = false }
         try requireOpen()
         let voucher = try lastVoucher ?? sign(cumulativeAmount: "0")
@@ -239,11 +246,24 @@ public actor TempoChannelSession {
             voucher: parsed, signature: voucher.signature, escrow: escrow, chainID: chainID
         )
         try await broadcast(transaction)
-        finalized = try await readChannel().finalized
+        // A confirmed close finalizes the channel on-chain (the escrow's close finalizes;
+        // see ModeratoE2ETests). Record it from the confirmed tx, not a separate read-back,
+        // so a read failure cannot leave the session thinking the channel is still open.
+        finalized = true
         return state()
     }
 
     // MARK: - Internals
+
+    /// The shared prelude for the async lifecycle ops: rejects a poisoned session and a
+    /// concurrent op, then takes the in-flight lock. The check-then-set is synchronous (no
+    /// await between), so it is atomic on the actor despite reentrancy. The caller pairs it
+    /// with `defer { inFlight = false }`.
+    private func beginOperation() throws(TempoChannelSessionError) {
+        guard !poisoned else { throw .sessionUnusable }
+        guard !inFlight else { throw .operationInProgress }
+        inFlight = true
+    }
 
     private func requireOpen() throws(TempoChannelSessionError) {
         guard !finalized else { throw .alreadyFinalized }
@@ -285,6 +305,10 @@ public actor TempoChannelSession {
             }
             try await Task.sleep(for: pollInterval)
         }
+        // Submitted but unconfirmed: the on-chain outcome (and whether the nonce was
+        // consumed) is unknown, so poison the session. The in-flight lock is still released
+        // by the caller's defer, but `poisoned` blocks any further operation.
+        poisoned = true
         throw TempoChannelSessionError.receiptTimeout(hash)
     }
 }

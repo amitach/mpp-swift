@@ -84,13 +84,14 @@ struct ModeratoE2ETests {
             url: #require(URL(string: "https://rpc.moderato.tempo.xyz"))
         )
         let account = try await fundFreshAccount(rpc: rpc)
-        let session = try await TempoChannelSession(
+        let fee = try await makeFee(rpc: rpc)
+        let session = try TempoChannelSession( // init is synchronous (no await)
             privateKey: account.privateKey,
             escrow: #require(EthereumAddress(hex: escrowHex)),
             token: #require(EthereumAddress(hex: tokenHex)),
             payee: account.address,
             salt: randomBytes(),
-            fee: makeFee(rpc: rpc),
+            fee: fee,
             chainID: chainID,
             rpc: rpc
         )

@@ -132,6 +132,29 @@ struct TempoChannelSessionTests {
         #expect(state.isOpen)
     }
 
+    @Test("a receipt timeout poisons the session against further operations")
+    func receiptTimeoutPoisons() async throws {
+        let stub = StubRPC(channelDeposit: 1000, channelFinalized: false, receiptConfirms: false)
+        let rpc = try EVMRPC(transport: stub, url: #require(URL(string: "https://rpc.example.com")))
+        let session = try TempoChannelSession(
+            privateKey: privateKey, escrow: address(0x55), token: address(0x22),
+            payee: address(0x33), salt: salt, fee: fee, chainID: chainID, rpc: rpc,
+            pollInterval: .zero, maxPollAttempts: 1
+        )
+        // The open tx is submitted but its receipt never confirms -> receiptTimeout.
+        await #expect(throws: TempoChannelSessionError.self) {
+            _ = try await session.open(deposit: "1000")
+        }
+        // The session is now poisoned: any further operation is refused (the prior tx's
+        // outcome is unknown, so a retry could collide on the nonce / double-open).
+        await #expect(throws: TempoChannelSessionError.sessionUnusable) {
+            _ = try await session.open(deposit: "1000")
+        }
+        await #expect(throws: TempoChannelSessionError.sessionUnusable) {
+            _ = try await session.topUp(additionalDeposit: "1")
+        }
+    }
+
     @Test("an invalid signing key is rejected at init")
     func invalidKeyRejected() throws {
         let stub = StubRPC(channelDeposit: 0, channelFinalized: false)
@@ -152,12 +175,17 @@ private final class StubRPC: MPPHTTPTransport, @unchecked Sendable {
     private let channelDeposit: UInt64
     private let channelFinalized: Bool
     private let gate: SendGate?
+    private let receiptConfirms: Bool
     private let fakeHash = "0x" + String(repeating: "a", count: 64)
 
-    init(channelDeposit: UInt64, channelFinalized: Bool, gate: SendGate? = nil) {
+    init(
+        channelDeposit: UInt64, channelFinalized: Bool, gate: SendGate? = nil,
+        receiptConfirms: Bool = true
+    ) {
         self.channelDeposit = channelDeposit
         self.channelFinalized = channelFinalized
         self.gate = gate
+        self.receiptConfirms = receiptConfirms
     }
 
     func send(_: HTTPRequest, body: Data) async throws -> (HTTPResponse, Data) {
@@ -173,6 +201,7 @@ private final class StubRPC: MPPHTTPTransport, @unchecked Sendable {
         case "eth_getTransactionCount": result = "0x0"
         case "eth_sendRawTransaction": result = fakeHash
         case "eth_getTransactionReceipt":
+            guard receiptConfirms else { return ok(rawResult: "null") } // never mines
             let receipt = #"{"status":"0x1","transactionHash":"\#(fakeHash)","blockNumber":"0x1"}"#
             return ok(rawResult: receipt)
         case "eth_call": result = getChannelHex()

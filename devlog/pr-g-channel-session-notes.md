@@ -18,8 +18,20 @@ var inFlight` set/checked synchronously (no await between check and set, so it i
 the actor) that rejects a concurrent lifecycle op with `operationInProgress`. Driven
 sequentially (await one op before the next), the writes are then nonce-sequenced correctly.
 A deterministic unit test (`reentrancyGuard`, a gated stub that parks op1 mid-flight) proves
-the rejection. Also (Devin 🚩) `broadcast` now documents its three outcomes so a caller can
-tell "not submitted" (retry-safe) from "submitted but unconfirmed" (do not blindly retry).
+the rejection. Also (Devin 🚩) `broadcast` documents its three outcomes so a caller can tell
+"not submitted" (retry-safe) from "submitted but unconfirmed" (do not blindly retry).
+
+**Second correction round (Devin 🔴 + 🚩 on failure-path state consistency):**
+- 🔴 the `defer { inFlight = false }` released the guard even after a `receiptTimeout`
+  (tx submitted, unconfirmed), letting the next op proceed and possibly collide on the
+  nonce / duplicate. Fix: a `poisoned` flag set on timeout; every op rejects with
+  `sessionUnusable` thereafter (the in-flight lock still releases, but the session is dead).
+  Test: `receiptTimeoutPoisons` (a stub whose receipt never confirms).
+- 🚩 `open()` set `opened = true` only AFTER the deposit read-back, so a read failure after
+  the open tx confirmed left the session thinking it was unopened (a retry would
+  double-open). Fix: record `opened`/`finalized` right after the confirming broadcast,
+  before the read-back; `close` records `finalized` from the confirmed tx (a confirmed
+  close finalizes) rather than a separate read.
 
 `channelID` is a `nonisolated let` (Sendable, immutable) so it reads without `await`.
 
