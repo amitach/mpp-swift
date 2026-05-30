@@ -1,5 +1,5 @@
 import Testing
-@testable import MPPTempoServer
+@testable import MPPTempo
 
 // A uint128 amount type: exact add / subtract / compare across the 64-bit boundary,
 // since channel amounts (token deposits, cumulative vouchers) routinely exceed
