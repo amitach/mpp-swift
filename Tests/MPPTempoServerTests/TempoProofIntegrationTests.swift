@@ -14,7 +14,6 @@ import Testing
 @Suite("TempoProofVerifier integration")
 struct TempoProofIntegrationTests {
     private let secret = Data("conformance-fixed-secret-key-0123456789".utf8)
-    private let integrationNow = Date(timeIntervalSince1970: 1_700_000_000)
 
     private func binding() throws -> RouteBinding {
         try RouteBinding(realm: realm, method: MethodName("tempo"), intent: .charge)
@@ -38,14 +37,14 @@ struct TempoProofIntegrationTests {
 
         // The bad proof is rejected on settlement, NOT consumed.
         let first = try await verifier.verify(
-            authorization: bad.headerValue, body: Data(), now: integrationNow, expecting: route
+            authorization: bad.headerValue, body: Data(), now: now, expecting: route
         )
         guard case .rejected(.settlementUnverified) = first else {
             Issue.record("expected settlementUnverified, got \(first)"); return
         }
         // The same challenge id is still spendable: the good proof verifies.
         let second = try await verifier.verify(
-            authorization: good.headerValue, body: Data(), now: integrationNow, expecting: route
+            authorization: good.headerValue, body: Data(), now: now, expecting: route
         )
         guard case .verified = second else {
             Issue.record("expected verified, got \(second)"); return
@@ -65,7 +64,7 @@ struct TempoProofIntegrationTests {
         let minted = minter.mint(binding: route, request: request(amount: "100"))
         let credential = Credential(challenge: minted, source: nil, payload: [:])
         let outcome = try await verifier.verify(
-            authorization: credential.headerValue, body: Data(), now: integrationNow,
+            authorization: credential.headerValue, body: Data(), now: now,
             expecting: route
         )
         guard case .rejected(.noSupportingMethod) = outcome else {
@@ -88,7 +87,7 @@ struct TempoProofIntegrationTests {
 
         // No credential -> a challenge is issued.
         guard case let .challenge(issued, _) = await middleware.evaluate(
-            authorization: nil, body: Data(), now: integrationNow
+            authorization: nil, body: Data(), now: now
         ) else { Issue.record("expected a challenge"); return }
 
         // The client pays it.
@@ -96,7 +95,7 @@ struct TempoProofIntegrationTests {
 
         // The paid retry verifies and proceeds.
         let decision = try await middleware.evaluate(
-            authorization: credential.headerValue, body: Data(), now: integrationNow
+            authorization: credential.headerValue, body: Data(), now: now
         )
         guard case .proceed = decision else {
             Issue.record("expected proceed, got \(decision)"); return
