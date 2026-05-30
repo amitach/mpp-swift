@@ -329,6 +329,47 @@ struct SessionMethodCloseTests {
         #expect(drawDuringSettleClosed.get() == true)
     }
 
+    @Test("a second concurrent close is rejected mid-settle (single-flight, no duplicate settle)")
+    func concurrentCloseRejected() async throws {
+        let store = try await seedStore(highest: 100, spent: 0)
+        let provider = StubProvider(onChainChannel(deposit: 1000))
+        let session = method(store, provider)
+        // While the first close is settling on-chain, a second close must be rejected
+        // (the channel is already closing) so settle is never broadcast twice.
+        let secondCloseRejected = Flag(false)
+        provider.onSettle = { @Sendable in
+            do {
+                _ = try await session.verify(
+                    voucherCredential(cumulative: "100", action: "close"), now: now
+                )
+            } catch let error as SessionMethod.SessionError {
+                if case .channelClosed = error { secondCloseRejected.set(true) }
+            } catch {}
+        }
+        _ = try await session.verify(
+            voucherCredential(cumulative: "100", action: "close"), now: now
+        )
+        #expect(secondCloseRejected.get() == true)
+        #expect(provider.settleCalls == 1)
+    }
+
+    @Test("a voucher racing a close cannot advance the stored highest")
+    func voucherOnClosingChannelRejected() async throws {
+        let store = try await seedStore(highest: 100, spent: 0)
+        _ = try await store.update(channelID) { current in
+            guard var channel = current else { return current }
+            channel.closing = true
+            return channel
+        }
+        let session = method(store, StubProvider(onChainChannel(deposit: 1000)))
+        await #expect(throws: SessionMethod.SessionError.channelClosed(reason: "closing")) {
+            try await session.verify(voucherCredential(cumulative: "200"), now: now)
+        }
+        // The racing voucher must not have advanced the off-chain highest.
+        let channel = await store.channel(channelID)
+        #expect(channel?.highestVoucherAmount == ChannelAmount(100))
+    }
+
     @Test("close on an already-finalized channel is rejected")
     func closeFinalizedRejected() async throws {
         let store = try await seedStore(highest: 100, spent: 40)

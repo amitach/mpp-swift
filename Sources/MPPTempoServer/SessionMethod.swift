@@ -132,6 +132,11 @@ public struct SessionMethod: PaymentMethodServer {
         // charges below, so it is bounded by the channel balance, never free.
         try await store.update(fields.channelID) { current in
             guard var channel = current else { return current }
+            // Reject a voucher racing a close: a closing/finalized channel must not
+            // advance the highest (consistent with deductFromChannel's guard), so the
+            // off-chain record cannot drift above what gets settled.
+            if channel.finalized { throw SessionError.channelClosed(reason: "finalized") }
+            if channel.closing { throw SessionError.channelClosed(reason: "closing") }
             if cumulative > channel.highestVoucherAmount {
                 guard let delta = cumulative.subtracting(channel.highestVoucherAmount),
                       delta >= minVoucherDelta
@@ -224,6 +229,10 @@ public struct SessionMethod: PaymentMethodServer {
         guard let claimed = try await store.update(fields.channelID, { current in
             guard var channel = current else { throw SessionError.channelNotFound }
             if channel.finalized { throw SessionError.channelClosed(reason: "finalized") }
+            // Single-flight: a close already in progress must reject the second one,
+            // else two concurrent closes both reach provider.settle and broadcast a
+            // duplicate on-chain settlement.
+            if channel.closing { throw SessionError.channelClosed(reason: "closing") }
             channel.closing = true
             return channel
         }) else { throw SessionError.channelNotFound }
