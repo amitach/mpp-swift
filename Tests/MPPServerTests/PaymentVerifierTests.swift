@@ -7,17 +7,21 @@ import Testing
 // Spec: draft-httpauth-payment-00 §5.1.2 (id binding) + §11.3/§11.5 (single use).
 // The verifier runs parse -> HMAC-verify -> binding-pin -> expiry -> digest ->
 // consume(last).
-/// A method that accepts any challenge and reports a fixed settlement reference,
-/// to exercise receipt minting (MPPServer ships no concrete method). Internal so
-/// the middleware suite in this target can reuse it.
+/// A method that accepts any challenge and mints a receipt with a fixed settlement
+/// reference, to exercise receipt minting (MPPServer ships no concrete method).
+/// Internal so the middleware suite in this target can reuse it.
 struct AcceptingMethod: PaymentMethodServer {
     let reference: String
     func supports(_: Challenge) -> Bool {
         true
     }
 
-    func verify(_: Credential) async throws -> String {
-        reference
+    func verify(_ credential: Credential, now: Date) async throws -> Receipt {
+        Receipt(
+            method: credential.challenge.method,
+            timestamp: RFC3339DateTime(date: now),
+            reference: reference
+        )
     }
 }
 

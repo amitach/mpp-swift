@@ -13,14 +13,15 @@ import Testing
 // mint -> pay -> verify round-trip proceeds.
 // File-scope fixtures (kept out of the suite body so it stays under the type-length
 // cap; one home for the shared helpers).
-private let chainId: UInt64 = 1
-private let realm = "https://api.example.com"
+let chainId: UInt64 = 1
+let realm = "https://api.example.com"
+let now = Date(timeIntervalSince1970: 1_767_312_000)
 
-private func signer(byte: UInt8 = 1) throws -> Secp256k1Signer {
+func signer(byte: UInt8 = 1) throws -> Secp256k1Signer {
     try Secp256k1Signer(privateKey: Data([UInt8](repeating: 0, count: 31) + [byte]))
 }
 
-private func method(
+func method(
     byte: UInt8 = 1,
     variant: ProofVariant = .v2Realm,
     defaultChainId: UInt64 = TempoChain.mainnet
@@ -32,7 +33,7 @@ private func method(
 
 /// The charge-request JSON a server puts in the challenge. A `nil` `chainId` omits
 /// `methodDetails` entirely (so the configured default resolves it).
-private func request(amount: String = "0", chainId: UInt64? = chainId) -> EncodedJSON {
+func request(amount: String = "0", chainId: UInt64? = chainId) -> EncodedJSON {
     var members: [String: JSONValue] = ["amount": .string(amount)]
     if let chainId {
         members["methodDetails"] = .object(["chainId": .integer(Int64(chainId))])
@@ -40,7 +41,7 @@ private func request(amount: String = "0", chainId: UInt64? = chainId) -> Encode
     return EncodedJSON(json: .object(members))
 }
 
-private func challenge(
+func challenge(
     amount: String = "0",
     chainId: UInt64? = chainId,
     id: String = "test-challenge",
@@ -56,7 +57,7 @@ private func challenge(
 }
 
 /// Rebuilds `credential` with its `signature` payload string transformed.
-private func withSignature(
+func withSignature(
     _ credential: Credential, _ transform: (String) -> String
 ) throws -> Credential {
     let hex = try #require(credential.payload["signature"].flatMap {
@@ -76,8 +77,11 @@ struct TempoProofVerifierTests {
         let verifier = TempoProofVerifier()
         for variant in [ProofVariant.v2Realm, .v1Wallet, .specChallengeId] {
             let credential = try await method(variant: variant).buildCredential(for: challenge())
-            // The proof settles no value, so its receipt reference is the challenge id.
-            #expect(try await verifier.verify(credential) == credential.challenge.id)
+            // The proof settles no value, so its receipt's reference is the challenge id.
+            let receipt = try await verifier.verify(credential, now: now)
+            #expect(receipt.reference == credential.challenge.id)
+            #expect(receipt.method.rawValue == "tempo")
+            #expect(receipt.timestamp.date == now)
         }
     }
 
@@ -93,7 +97,7 @@ struct TempoProofVerifierTests {
             return String(chars)
         }
         await #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
-            try await TempoProofVerifier().verify(tampered)
+            try await TempoProofVerifier().verify(tampered, now: now)
         }
     }
 
@@ -106,7 +110,7 @@ struct TempoProofVerifierTests {
             payload: credential.payload
         )
         await #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
-            try await TempoProofVerifier().verify(moved)
+            try await TempoProofVerifier().verify(moved, now: now)
         }
     }
 
@@ -120,7 +124,7 @@ struct TempoProofVerifierTests {
             payload: credential.payload
         )
         await #expect(throws: TempoProofVerifier.VerifyError.chainIdMismatch) {
-            try await TempoProofVerifier().verify(mismatched)
+            try await TempoProofVerifier().verify(mismatched, now: now)
         }
     }
 
@@ -135,21 +139,21 @@ struct TempoProofVerifierTests {
             ]
         )
         await #expect(throws: TempoProofVerifier.VerifyError.notAProof) {
-            try await TempoProofVerifier().verify(notProof)
+            try await TempoProofVerifier().verify(notProof, now: now)
         }
 
         let noSig = Credential(
             challenge: base.challenge, source: base.source, payload: ["type": .string("proof")]
         )
         await #expect(throws: TempoProofVerifier.VerifyError.missingSignature) {
-            try await TempoProofVerifier().verify(noSig)
+            try await TempoProofVerifier().verify(noSig, now: now)
         }
 
         let noSource = Credential(
             challenge: base.challenge, source: nil, payload: base.payload
         )
         await #expect(throws: TempoProofVerifier.VerifyError.invalidSource) {
-            try await TempoProofVerifier().verify(noSource)
+            try await TempoProofVerifier().verify(noSource, now: now)
         }
     }
 
@@ -161,7 +165,7 @@ struct TempoProofVerifierTests {
             payload: ["type": .string("proof"), "signature": .string("0xdeadbeef")]
         )
         await #expect(throws: TempoProofVerifier.VerifyError.malformedSignature) {
-            try await TempoProofVerifier().verify(bad)
+            try await TempoProofVerifier().verify(bad, now: now)
         }
     }
 
@@ -176,7 +180,7 @@ struct TempoProofVerifierTests {
             payload: signedByTwo.payload
         )
         await #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
-            try await TempoProofVerifier().verify(claimSignerOne)
+            try await TempoProofVerifier().verify(claimSignerOne, now: now)
         }
     }
 
@@ -188,7 +192,7 @@ struct TempoProofVerifierTests {
             payload: ["type": .string("hash"), "hash": .string("0xabc123")]
         )
         await #expect(throws: TempoProofVerifier.VerifyError.notAProof) {
-            try await TempoProofVerifier().verify(hashPayload)
+            try await TempoProofVerifier().verify(hashPayload, now: now)
         }
     }
 
@@ -199,7 +203,7 @@ struct TempoProofVerifierTests {
             challenge: challenge(amount: "100"), source: base.source, payload: base.payload
         )
         await #expect(throws: TempoProofVerifier.VerifyError.notAZeroAmountCharge) {
-            try await TempoProofVerifier().verify(onNonZero)
+            try await TempoProofVerifier().verify(onNonZero, now: now)
         }
     }
 
@@ -213,7 +217,7 @@ struct TempoProofVerifierTests {
             challenge: challenge(realm: realm), source: evil.source, payload: evil.payload
         )
         await #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
-            try await TempoProofVerifier().verify(moved)
+            try await TempoProofVerifier().verify(moved, now: now)
         }
     }
 
@@ -228,7 +232,7 @@ struct TempoProofVerifierTests {
             payload: signedOnTwo.payload
         )
         await #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
-            try await TempoProofVerifier().verify(moved)
+            try await TempoProofVerifier().verify(moved, now: now)
         }
     }
 
@@ -239,11 +243,12 @@ struct TempoProofVerifierTests {
         let specCredential = try await method(variant: .specChallengeId)
             .buildCredential(for: challenge())
         await #expect(throws: TempoProofVerifier.VerifyError.signatureMismatch) {
-            try await TempoProofVerifier(acceptedVariants: [.v2Realm]).verify(specCredential)
+            try await TempoProofVerifier(acceptedVariants: [.v2Realm])
+                .verify(specCredential, now: now)
         }
         await #expect(throws: Never.self) {
             try await TempoProofVerifier(acceptedVariants: [.specChallengeId])
-                .verify(specCredential)
+                .verify(specCredential, now: now)
         }
     }
 
@@ -256,118 +261,13 @@ struct TempoProofVerifierTests {
             .buildCredential(for: chainless)
         await #expect(throws: Never.self) {
             try await TempoProofVerifier(defaultChainId: TempoChain.moderatoTestnet)
-                .verify(credential)
+                .verify(credential, now: now)
         }
         // A verifier with a different default resolves a different chain, so the
         // source chainId no longer matches.
         await #expect(throws: TempoProofVerifier.VerifyError.chainIdMismatch) {
-            try await TempoProofVerifier(defaultChainId: TempoChain.mainnet).verify(credential)
-        }
-    }
-
-    // MARK: replay ordering (Decision A) + fail closed (Decision B), via PaymentVerifier
-
-    @Test("an invalid proof does not consume the challenge id; a later valid one succeeds")
-    func invalidProofDoesNotConsume() async throws {
-        let secret = Data("conformance-fixed-secret-key-0123456789".utf8)
-        let minter = ChallengeMinter(signer: ChallengeSigner(secret: secret))
-        let store = InMemoryReplayStore()
-        let verifier = PaymentVerifier(
-            signer: ChallengeSigner(secret: secret),
-            replayStore: store,
-            methods: [TempoProofVerifier()]
-        )
-        let binding = try RouteBinding(
-            realm: realm,
-            method: MethodName("tempo"),
-            intent: .charge
-        )
-        let minted = minter.mint(binding: binding, request: request())
-
-        let good = try await method().buildCredential(for: minted)
-        let bad = try withSignature(good) { hex in
-            var chars = Array(hex); chars[5] = chars[5] == "a" ? "b" : "a"; return String(chars)
-        }
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
-
-        // The bad proof is rejected on settlement, NOT consumed.
-        let first = try await verifier.verify(
-            authorization: bad.headerValue, body: Data(), now: now, expecting: binding
-        )
-        guard case .rejected(.settlementUnverified) = first else {
-            Issue.record("expected settlementUnverified, got \(first)"); return
-        }
-        // The same challenge id is still spendable: the good proof verifies.
-        let second = try await verifier.verify(
-            authorization: good.headerValue, body: Data(), now: now, expecting: binding
-        )
-        guard case .verified = second else {
-            Issue.record("expected verified, got \(second)"); return
-        }
-    }
-
-    @Test("fails closed when a verifier is registered but none supports the challenge")
-    func failsClosedOnUnsupported() async throws {
-        let secret = Data("conformance-fixed-secret-key-0123456789".utf8)
-        let minter = ChallengeMinter(signer: ChallengeSigner(secret: secret))
-        let verifier = PaymentVerifier(
-            signer: ChallengeSigner(secret: secret),
-            replayStore: InMemoryReplayStore(),
-            methods: [TempoProofVerifier()]
-        )
-        let binding = try RouteBinding(
-            realm: realm,
-            method: MethodName("tempo"),
-            intent: .charge
-        )
-        // A non-zero charge: protocol-valid, but the proof verifier does not support it.
-        let minted = minter.mint(binding: binding, request: request(amount: "100"))
-        let credential = Credential(challenge: minted, source: nil, payload: [:])
-        let outcome = try await verifier.verify(
-            authorization: credential.headerValue, body: Data(),
-            now: Date(timeIntervalSince1970: 1_700_000_000), expecting: binding
-        )
-        guard case .rejected(.noSupportingMethod) = outcome else {
-            Issue.record("expected noSupportingMethod, got \(outcome)"); return
-        }
-    }
-
-    // MARK: end-to-end mint -> pay -> verify
-
-    @Test("end-to-end: server mints, client pays, verifier proceeds")
-    func endToEnd() async throws {
-        let secret = Data("conformance-fixed-secret-key-0123456789".utf8)
-        let binding = try RouteBinding(
-            realm: realm,
-            method: MethodName("tempo"),
-            intent: .charge
-        )
-        let middleware = MPPServerMiddleware(
-            minter: ChallengeMinter(signer: ChallengeSigner(secret: secret)),
-            verifier: PaymentVerifier(
-                signer: ChallengeSigner(secret: secret),
-                replayStore: InMemoryReplayStore(),
-                methods: [TempoProofVerifier()]
-            ),
-            binding: binding,
-            request: request()
-        )
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
-
-        // No credential -> a challenge is issued.
-        guard case let .challenge(issued, _) = await middleware.evaluate(
-            authorization: nil, body: Data(), now: now
-        ) else { Issue.record("expected a challenge"); return }
-
-        // The client pays it.
-        let credential = try await method().buildCredential(for: issued)
-
-        // The paid retry verifies and proceeds.
-        let decision = try await middleware.evaluate(
-            authorization: credential.headerValue, body: Data(), now: now
-        )
-        guard case .proceed = decision else {
-            Issue.record("expected proceed, got \(decision)"); return
+            try await TempoProofVerifier(defaultChainId: TempoChain.mainnet)
+                .verify(credential, now: now)
         }
     }
 }
