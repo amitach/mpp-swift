@@ -18,7 +18,19 @@ public struct EVMRPC: Sendable {
     private let url: URL
 
     /// Creates a client that posts JSON-RPC to `url` over `transport`.
-    public init(transport: any MPPHTTPTransport, url: URL) {
+    ///
+    /// Enforces the shared transport-security policy (``TransportSecurity``):
+    /// `https`-only, unless `allowInsecureLocal` permits a loopback host (for a
+    /// local test node). The RPC URL carries raw signed transactions, so a plain
+    /// `http` endpoint is rejected up front rather than per call.
+    public init(
+        transport: any MPPHTTPTransport, url: URL, allowInsecureLocal: Bool = false
+    ) throws(EVMRPCError) {
+        guard TransportSecurity.isAllowed(
+            scheme: url.scheme, host: url.host, allowInsecureLocal: allowInsecureLocal
+        ) else {
+            throw .insecureTransport(url: url.absoluteString)
+        }
         self.transport = transport
         self.url = url
     }
@@ -136,7 +148,10 @@ public struct EVMRPC: Sendable {
         var fields = HTTPFields()
         fields[.contentType] = "application/json"
         let authority = url.port.map { "\(url.host ?? ""):\($0)" } ?? url.host
-        let path = url.path.isEmpty ? "/" : url.path
+        // Preserve the query (some RPC endpoints carry an API key there); default an
+        // empty path to "/".
+        let basePath = url.path.isEmpty ? "/" : url.path
+        let path = url.query.map { "\(basePath)?\($0)" } ?? basePath
         return HTTPRequest(
             method: .post,
             scheme: url.scheme ?? "https",
@@ -189,6 +204,8 @@ public enum EVMRPCError: Error, Sendable, Hashable {
     case malformedResponse(String)
     /// The node returned a JSON-RPC `error` member.
     case rpc(code: Int, message: String)
+    /// The RPC URL was not `https` and `allowInsecureLocal` did not permit it.
+    case insecureTransport(url: String)
 }
 
 private extension UInt64 {

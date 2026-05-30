@@ -54,7 +54,7 @@ struct EVMRPCTests {
     @Test("eth_call posts the 2.0 envelope and decodes the 0x-hex result")
     func ethCall() async throws {
         let stub = StubHTTP(json: #"{"jsonrpc":"2.0","id":1,"result":"0x1234"}"#)
-        let rpc = EVMRPC(transport: stub, url: rpcURL)
+        let rpc = try EVMRPC(transport: stub, url: rpcURL)
         let result = try await rpc.call(to: addr, data: Data([0xAB, 0xCD]))
         #expect(result == Data([0x12, 0x34]))
 
@@ -73,7 +73,7 @@ struct EVMRPCTests {
     func sendRaw() async throws {
         let hash = "0xabc0000000000000000000000000000000000000000000000000000000000001"
         let stub = StubHTTP(json: #"{"jsonrpc":"2.0","id":1,"result":"\#(hash)"}"#)
-        let rpc = EVMRPC(transport: stub, url: rpcURL)
+        let rpc = try EVMRPC(transport: stub, url: rpcURL)
         let returned = try await rpc.sendRawTransaction(Data([0xDE, 0xAD]))
         #expect(returned == hash)
         let envelope = try sentEnvelope(stub)
@@ -88,7 +88,7 @@ struct EVMRPCTests {
           "status":"0x1","transactionHash":"0xfeed","blockNumber":"0x1a"
         }}
         """#)
-        let rpc = EVMRPC(transport: stub, url: rpcURL)
+        let rpc = try EVMRPC(transport: stub, url: rpcURL)
         let receipt = try #require(await rpc.transactionReceipt("0xfeed"))
         #expect(receipt.succeeded == true)
         #expect(receipt.transactionHash == "0xfeed")
@@ -100,7 +100,7 @@ struct EVMRPCTests {
         let stub = StubHTTP(json: #"""
         {"jsonrpc":"2.0","id":1,"result":{"status":"0x0","transactionHash":"0xfeed"}}
         """#)
-        let rpc = EVMRPC(transport: stub, url: rpcURL)
+        let rpc = try EVMRPC(transport: stub, url: rpcURL)
         let receipt = try #require(await rpc.transactionReceipt("0xfeed"))
         #expect(receipt.succeeded == false)
         #expect(receipt.blockNumber == nil)
@@ -109,7 +109,7 @@ struct EVMRPCTests {
     @Test("a pending transaction (null result) yields nil, not an error")
     func receiptPending() async throws {
         let stub = StubHTTP(json: #"{"jsonrpc":"2.0","id":1,"result":null}"#)
-        let rpc = EVMRPC(transport: stub, url: rpcURL)
+        let rpc = try EVMRPC(transport: stub, url: rpcURL)
         let receipt = try await rpc.transactionReceipt("0xfeed")
         #expect(receipt == nil)
     }
@@ -118,7 +118,7 @@ struct EVMRPCTests {
     func rpcError() async throws {
         let stub =
             StubHTTP(json: #"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"nope"}}"#)
-        let rpc = EVMRPC(transport: stub, url: rpcURL)
+        let rpc = try EVMRPC(transport: stub, url: rpcURL)
         await #expect(throws: EVMRPCError.rpc(code: -32000, message: "nope")) {
             try await rpc.call(to: addr, data: Data())
         }
@@ -127,7 +127,7 @@ struct EVMRPCTests {
     @Test("a non-2xx status throws .httpStatus before parsing")
     func httpFailure() async throws {
         let stub = StubHTTP(json: "upstream down", statusCode: 502)
-        let rpc = EVMRPC(transport: stub, url: rpcURL)
+        let rpc = try EVMRPC(transport: stub, url: rpcURL)
         await #expect(throws: EVMRPCError.httpStatus(502)) {
             try await rpc.call(to: addr, data: Data())
         }
@@ -136,10 +136,36 @@ struct EVMRPCTests {
     @Test("a non-JSON body throws .malformedResponse")
     func malformedBody() async throws {
         let stub = StubHTTP(json: "<html>not json</html>")
-        let rpc = EVMRPC(transport: stub, url: rpcURL)
+        let rpc = try EVMRPC(transport: stub, url: rpcURL)
         await #expect(throws: EVMRPCError.self) {
             try await rpc.call(to: addr, data: Data())
         }
+    }
+
+    @Test("the URL query (e.g. an API key) is preserved in the posted request path")
+    func preservesQuery() async throws {
+        let stub = StubHTTP(json: #"{"jsonrpc":"2.0","id":1,"result":"0x"}"#)
+        let rpc = try EVMRPC(transport: stub, url: makeURL("https://rpc.example.com/v2?key=secret"))
+        _ = try await rpc.call(to: addr, data: Data())
+        let path = try #require(stub.lastRequest?.path)
+        #expect(path == "/v2?key=secret")
+    }
+
+    @Test("a non-https RPC URL is rejected up front")
+    func rejectsInsecure() throws {
+        #expect(throws: EVMRPCError.self) {
+            _ = try EVMRPC(transport: StubHTTP(json: ""), url: makeURL("http://rpc.example.com"))
+        }
+    }
+
+    @Test("a loopback http node is allowed only under allowInsecureLocal")
+    func loopbackOptIn() throws {
+        let url = makeURL("http://127.0.0.1:8545")
+        #expect(throws: EVMRPCError.self) {
+            _ = try EVMRPC(transport: StubHTTP(json: ""), url: url)
+        }
+        // Opt-in permits it (a local dev node).
+        _ = try EVMRPC(transport: StubHTTP(json: ""), url: url, allowInsecureLocal: true)
     }
 
     @Test("live Moderato eth_chainId returns 42431", .enabled(if: liveEnabled))
