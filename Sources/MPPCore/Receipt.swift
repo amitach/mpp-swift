@@ -13,11 +13,14 @@ import Foundation
 /// interoperability with a newer peer. The four fields above are required.
 ///
 /// A payment method may add its own top-level fields via ``extras`` (a Tempo
-/// session receipt adds `intent`, `channelId`, `acceptedCumulative`, `spent`, ...).
-/// They are emitted alongside the base fields and, on decode, any string-valued key
-/// that is not one of the four base fields is captured back into ``extras``
-/// (non-string unknown fields are still ignored, preserving the lenient decode). A
-/// receipt with no extras is byte-identical to before.
+/// session receipt adds `intent`, `channelId`, `acceptedCumulative`, `spent`,
+/// `units`, ...). They are emitted alongside the base fields and, on decode, any
+/// string- or integer-valued key that is not one of the four base fields is captured
+/// back into ``extras`` (other JSON types are still ignored, preserving the lenient
+/// decode). The string/integer distinction is preserved on the wire: the reference
+/// session receipt types every field as a string except `units` (a JSON integer), so
+/// a faithful round-trip must keep `units` numeric. A receipt with no extras is
+/// byte-identical to before.
 public struct Receipt: Sendable, Hashable {
     /// The settlement status. Receipts are issued only on success.
     public let status: Status
@@ -28,9 +31,18 @@ public struct Receipt: Sendable, Hashable {
     /// Method-specific settlement reference (transaction hash, invoice id, ...).
     /// Its format and whether it may be empty are defined by the payment method.
     public let reference: String
-    /// Method-specific extra top-level fields (string-valued), emitted alongside the
-    /// base fields. Empty for a plain receipt.
-    public let extras: [String: String]
+    /// Method-specific extra top-level fields, emitted alongside the base fields.
+    /// Each value is a JSON string or integer (see ``ReceiptValue``). Empty for a
+    /// plain receipt.
+    public let extras: [String: ReceiptValue]
+
+    /// A method-specific extra receipt field's value: a JSON string or integer. The
+    /// reference session receipt types every field as a string except `units` (a
+    /// `u64`), so the two cases must stay distinct on the wire.
+    public enum ReceiptValue: Sendable, Hashable {
+        case string(String)
+        case int(Int64)
+    }
 
     /// Creates a receipt.
     public init(
@@ -38,7 +50,7 @@ public struct Receipt: Sendable, Hashable {
         method: MethodName,
         timestamp: RFC3339DateTime,
         reference: String,
-        extras: [String: String] = [:]
+        extras: [String: ReceiptValue] = [:]
     ) {
         self.status = status
         self.method = method
@@ -128,11 +140,16 @@ extension Receipt: Codable {
         method = try container.decode(MethodName.self, forKey: Key("method"))
         timestamp = try container.decode(RFC3339DateTime.self, forKey: Key("timestamp"))
         reference = try container.decode(String.self, forKey: Key("reference"))
-        var captured: [String: String] = [:]
+        var captured: [String: ReceiptValue] = [:]
         for key in container.allKeys where !Self.baseKeys.contains(key.stringValue) {
-            // Lenient: capture string-valued unknowns, ignore the rest.
+            // Lenient + type-preserving: capture string- and integer-valued unknowns
+            // (a JSON string stays a string, a JSON integer stays an int), ignore the
+            // rest (floats, bools, objects). Decode String first so a quoted "5" is a
+            // string, not an int.
             if let value = try? container.decode(String.self, forKey: key) {
-                captured[key.stringValue] = value
+                captured[key.stringValue] = .string(value)
+            } else if let value = try? container.decode(Int64.self, forKey: key) {
+                captured[key.stringValue] = .int(value)
             }
         }
         extras = captured
@@ -145,7 +162,10 @@ extension Receipt: Codable {
         try container.encode(timestamp, forKey: Key("timestamp"))
         try container.encode(reference, forKey: Key("reference"))
         for (key, value) in extras {
-            try container.encode(value, forKey: Key(key))
+            switch value {
+            case let .string(string): try container.encode(string, forKey: Key(key))
+            case let .int(int): try container.encode(int, forKey: Key(key))
+            }
         }
     }
 }

@@ -127,10 +127,10 @@ struct SessionMethodTests {
             voucherCredential(cumulative: "100", amount: "10"),
             now: now
         )
-        #expect(receipt.extras["intent"] == "session")
-        #expect(receipt.extras["acceptedCumulative"] == "100")
-        #expect(receipt.extras["spent"] == "10") // charged this request's amount
-        #expect(receipt.extras["units"] == "1")
+        #expect(receipt.extras["intent"] == .string("session"))
+        #expect(receipt.extras["acceptedCumulative"] == .string("100"))
+        #expect(receipt.extras["spent"] == .string("10")) // charged this request's amount
+        #expect(receipt.extras["units"] == .int(1))
         #expect(receipt.reference == hex(channelID))
         let channel = await store.channel(channelID)
         #expect(channel?.highestVoucherAmount == ChannelAmount(100))
@@ -144,9 +144,9 @@ struct SessionMethodTests {
             voucherCredential(cumulative: "100", amount: "5"),
             now: now
         )
-        #expect(receipt.extras["acceptedCumulative"] == "100") // unchanged
-        #expect(receipt.extras["spent"] == "5") // still charged
-        #expect(receipt.extras["units"] == "1")
+        #expect(receipt.extras["acceptedCumulative"] == .string("100")) // unchanged
+        #expect(receipt.extras["spent"] == .string("5")) // still charged
+        #expect(receipt.extras["units"] == .int(1))
     }
 
     @Test("a voucher below the highest accepted is rejected")
@@ -241,8 +241,8 @@ struct SessionMethodTests {
         )
         let receipt = try await session.verify(credential, now: now)
         #expect(provider.openCalls == 1)
-        #expect(receipt.extras["acceptedCumulative"] == "100")
-        #expect(receipt.extras["spent"] == "10")
+        #expect(receipt.extras["acceptedCumulative"] == .string("100"))
+        #expect(receipt.extras["spent"] == .string("10"))
         let channel = await store.channel(channelID)
         #expect(channel?.highestVoucherAmount == ChannelAmount(100))
         #expect(channel?.authorizedSigner == authorizedSigner)
@@ -264,7 +264,7 @@ struct SessionMethodCloseTests {
             ]
         )
         let receipt = try await session.verify(credential, now: now)
-        #expect(receipt.extras["txHash"] == "0xtopup")
+        #expect(receipt.extras["txHash"] == .string("0xtopup"))
         let channel = await store.channel(channelID)
         #expect(channel?.deposit == ChannelAmount(5000))
     }
@@ -280,7 +280,7 @@ struct SessionMethodCloseTests {
         )
         #expect(provider.settleCalls == 1)
         #expect(provider.settledCumulative == "100")
-        #expect(receipt.extras["txHash"] == "0xsettle")
+        #expect(receipt.extras["txHash"] == .string("0xsettle"))
         let channel = await store.channel(channelID)
         #expect(channel?.finalized == true)
     }
@@ -301,7 +301,7 @@ struct SessionMethodCloseTests {
         let channel = await store.channel(channelID)
         #expect(channel?.finalized == true)
         #expect(channel?.settledOnChain == ChannelAmount(100))
-        #expect(receipt.extras["txHash"] == "0xsettle")
+        #expect(receipt.extras["txHash"] == .string("0xsettle"))
     }
 
     @Test("close sets closing before settling, so a concurrent draw is rejected mid-settle")

@@ -20,15 +20,17 @@ enum SessionReceipt {
         txHash: String? = nil
     ) -> Receipt {
         let channelID = channelHex(channel.channelID)
-        var extras: [String: String] = [
-            "intent": "session",
-            "challengeId": challengeID,
-            "channelId": channelID,
-            "acceptedCumulative": channel.highestVoucherAmount.decimalString,
-            "spent": channel.spent.decimalString,
-            "units": String(channel.units),
+        // Field types mirror the reference session receipt: every field is a JSON
+        // string except `units`, a JSON integer (mpp-rs `units: Option<u64>`).
+        var extras: [String: Receipt.ReceiptValue] = [
+            "intent": .string("session"),
+            "challengeId": .string(challengeID),
+            "channelId": .string(channelID),
+            "acceptedCumulative": .string(channel.highestVoucherAmount.decimalString),
+            "spent": .string(channel.spent.decimalString),
+            "units": .int(Int64(clamping: channel.units)),
         ]
-        if let txHash { extras["txHash"] = txHash }
+        if let txHash { extras["txHash"] = .string(txHash) }
         return Receipt(
             method: method,
             timestamp: RFC3339DateTime(date: now),

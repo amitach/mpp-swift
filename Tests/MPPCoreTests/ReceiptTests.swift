@@ -100,6 +100,30 @@ struct ReceiptTests {
         #expect(receipt.reference == "r")
         // Unknown string-valued fields are preserved in extras (not dropped), so a
         // session receipt's extra fields survive a decode/encode round-trip.
-        #expect(receipt.extras["futureField"] == "kept")
+        #expect(receipt.extras["futureField"] == .string("kept"))
+    }
+
+    @Test("integer extras (units) encode as a JSON number and round-trip as .int")
+    func integerExtraIsNumericOnTheWire() throws {
+        let receipt = try Receipt(
+            method: MethodName("tempo"),
+            timestamp: RFC3339DateTime("2026-01-02T03:04:05Z"),
+            reference: "0xabc",
+            extras: ["units": .int(5), "channelId": .string("0xfeed")]
+        )
+        // The reference session receipt types every field as a string except `units`
+        // (a JSON integer). So units must be an unquoted number on the wire, and a
+        // string extra must stay quoted, else a strict peer rejects the receipt.
+        let json = try #require(String(
+            bytes: Base64URL.decode(receipt.headerValue),
+            encoding: .utf8
+        ))
+        #expect(json.contains("\"units\":5"))
+        #expect(!json.contains("\"units\":\"5\""))
+        #expect(json.contains("\"channelId\":\"0xfeed\""))
+        // Decode preserves the string/integer distinction.
+        let decoded = try Receipt(headerValue: receipt.headerValue)
+        #expect(decoded.extras["units"] == .int(5))
+        #expect(decoded.extras["channelId"] == .string("0xfeed"))
     }
 }
