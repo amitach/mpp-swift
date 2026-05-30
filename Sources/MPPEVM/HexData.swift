@@ -22,4 +22,11 @@ public extension Data {
         }
         self = raw
     }
+
+    /// The bytes as a `0x`-prefixed lowercase hex string (the inverse of
+    /// ``init(hexPrefixed:)``). The shared `0x`-hex encoder for the EVM layer:
+    /// call data, raw transactions, and signatures all go on the wire this way.
+    var hexPrefixed: String {
+        "0x" + map { String(format: "%02x", $0) }.joined()
+    }
 }
