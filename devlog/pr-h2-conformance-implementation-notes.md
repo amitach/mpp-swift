@@ -115,4 +115,24 @@ P4 - **Docs:** extend `CONFORMANCE.md` "Not yet covered" -> the session flow is 
     decode the top-level field and corrected the fixture; hermetic 21/21 still green, live now
     PASSES. Verified vs mppx `Methods.ts:76-79` (server emits top-level) + `client/Session.ts:128`
     (client reads top-level).
-- P2 (reverse), P3 (CI), P4 (docs): TODO. (Branch: feat/ws10-402-conformance, off c52a34e.)
+- **P2 (reverse) DONE + LIVE-VERIFIED**: `run-session-reverse.sh` PASSED live on Moderato -
+  the mppx reference client opened (200), vouchered (200), and closed against our server, which
+  relayed the open on-chain, accepted the voucher, and settled the close with our operator
+  (channel finalized). Details below.
+- Package.swift gives `MPPConformanceServer` an
+  `MPP_TEMPO_FFI`-gated dep on `MPPTempoFFI` + an `MPP_TEMPO_FFI_ENABLED` define; the server
+  gained an FFI-gated `/session` route (`SessionMethod` + `RPCChannelStateProvider` + an FFI
+  close builder + a faucet-funded operator from `CONFORMANCE_OPERATOR_KEY`), dispatched by
+  path. `session-reverse-client.mjs` drives the mppx `sessionManager` (open/voucher/close);
+  `fund-operator.mjs` + `run-session-reverse.sh` orchestrate. Both builds (default proof-only +
+  FFI-gated) compile; lint clean.
+  - **Finding the reverse run caught (the point of cross-SDK):** a session reuses ONE
+    challenge across open/voucher/close (the reference `sessionManager` does), but our
+    `PaymentVerifier` one-time-consumes the challenge via `InMemoryReplayStore` - correct for
+    one-shot proof/charge, but it rejected every voucher after the open ("challenge already
+    used", live). Sessions are anti-replayed by the monotonic cumulative in the channel store,
+    NOT one-time challenge use, so the session verifier uses a `ReusableReplayStore` (never
+    consumes). Implication for the SDK (noted): a production session deployment wiring
+    `SessionMethod` behind `MPPServerMiddleware` must pair it with a session-appropriate
+    (reuse-permitting) replay policy, not the one-time store.
+- P3 (CI), P4 (docs): TODO. (Branch: feat/ws10-402-conformance, off c52a34e.)

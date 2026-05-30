@@ -2,6 +2,15 @@
 import Foundation
 import PackageDescription
 
+// Whether the Tempo FFI (the Rust 0x76 builder) is built from source this run. Computed up
+// front because it also gates an optional dependency of MPPConformanceServer: the reverse
+// session-conformance route needs the FFI close builder (RPCChannelStateProvider settles
+// on-chain). The default (proof-only) reverse server stays Rust-free.
+let ffiFromSource = ProcessInfo.processInfo.environment["MPP_TEMPO_FFI"] != nil
+let conformanceServerFFIDeps: [Target.Dependency] = ffiFromSource ? ["MPPTempoFFI"] : []
+let conformanceServerFFISettings: [SwiftSetting] =
+    ffiFromSource ? [.define("MPP_TEMPO_FFI_ENABLED")] : []
+
 // mpp-swift: Swift SDK for the Machine Payments Protocol (MPP).
 //
 // Products and targets grow one workstream at a time (see the implementation
@@ -186,8 +195,14 @@ let package = Package(
                 "MPPServer",
                 "MPPTempo",
                 "MPPTempoServer",
+                // MPPClient (URLSessionTransport) + MPPEVM (EthereumAddress / Secp256k1Signer)
+                // for the reverse session route's live RPC + operator key; MPPTempoFFI (the
+                // close builder) is added only under the FFI gate via conformanceServerFFIDeps.
+                "MPPClient",
+                "MPPEVM",
                 .product(name: "HTTPTypes", package: "swift-http-types"),
-            ]
+            ] + conformanceServerFFIDeps,
+            swiftSettings: conformanceServerFFISettings
         ),
     ],
     swiftLanguageModes: [.v6]
@@ -219,8 +234,6 @@ let package = Package(
 let tempoFFIReleaseURL =
     "https://github.com/amitach/mpp-swift/releases/download/tempo-tx-ffi-v0.0.1/TempoTxFFI.xcframework.zip"
 let tempoFFIReleaseChecksum = "b9f09fa3677cdf23ebc45288da984ca96636550b1c2792f939aa38363785ace4"
-
-let ffiFromSource = ProcessInfo.processInfo.environment["MPP_TEMPO_FFI"] != nil
 
 // The MPPTempoFFI target + test target that sit on top of a given binary target
 // (returned, not appended, so this stays free of the main-actor-isolated `package`).
