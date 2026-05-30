@@ -146,7 +146,9 @@ struct ModeratoE2ETests {
     private func waitForSuccess(_ hash: String, rpc: EVMRPC) async throws {
         for _ in 0 ..< 60 {
             if let receipt = try await rpc.transactionReceipt(hash) {
-                #expect(receipt.succeeded, "tx \(hash) reverted")
+                // Throw (not a soft #expect) so a revert hard-stops the flow rather than
+                // cascading into reads of a channel that never opened/closed.
+                guard receipt.succeeded else { throw E2EError.unexpected("tx \(hash) reverted") }
                 return
             }
             try await Task.sleep(for: .seconds(1))
