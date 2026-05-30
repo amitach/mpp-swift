@@ -156,6 +156,7 @@ public actor TempoChannelSession {
     public func open(deposit: String) async throws -> ChannelSessionState {
         try beginOperation()
         defer { inFlight = false }
+        guard !finalized else { throw TempoChannelSessionError.alreadyFinalized }
         guard !opened else { throw TempoChannelSessionError.alreadyOpen }
         guard let amount = ChannelAmount(decimal: deposit) else {
             throw TempoChannelSessionError.invalidAmount("deposit")
@@ -180,14 +181,17 @@ public actor TempoChannelSession {
         guard let amount = ChannelAmount(decimal: additionalDeposit) else {
             throw TempoChannelSessionError.invalidAmount("additionalDeposit")
         }
+        // Validate the new total BEFORE the on-chain side effect: if it would overflow the
+        // tracked deposit, do not broadcast (and the escrow's uint128 deposit would revert
+        // anyway). So local state never desyncs from a confirmed-but-unrecorded top-up.
+        guard let total = deposit.adding(amount) else {
+            throw TempoChannelSessionError.invalidAmount("additionalDeposit: deposit overflow")
+        }
         let transaction = try await builder.buildTopUpTransaction(
             escrow: escrow, token: token, channelID: channelID,
             additionalDeposit: additionalDeposit, chainID: chainID
         )
         try await broadcast(transaction)
-        guard let total = deposit.adding(amount) else {
-            throw TempoChannelSessionError.invalidAmount("additionalDeposit: deposit overflow")
-        }
         deposit = total
         return state()
     }
