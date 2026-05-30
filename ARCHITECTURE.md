@@ -101,6 +101,14 @@ The write path is **proven on-chain**, not just by the byte-golden vectors: a ga
 `open` (deposit lands) and `close` (channel finalizes) against the live testnet. It is
 self-contained: the faucet means no pre-funded account or secret is needed.
 
+**`TempoChannelSession`** (an `actor` in `MPPTempoFFI`) wraps this into the lifecycle a
+self-managing wallet calls: `open` / `topUp` / `voucher` (off-chain) / `close`, over the
+FFI builder + `EVMRPC` + the escrow read. Being an actor, it serializes operations, so the
+channel state (deposit, cumulative amount, open/finalized) mutates race-free and each
+transaction is nonce-sequenced (each waits for its receipt before the next). It enforces
+monotonic, within-deposit vouchers. The 402-server payment path (emitting the session
+payloads a server relays/settles) builds on these same primitives.
+
 ### Linking the Rust shim, and keeping it opt-in
 
 `MPPTempoFFI` is the **only** target that links Rust, and it carries the committed,

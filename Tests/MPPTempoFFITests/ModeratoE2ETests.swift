@@ -74,6 +74,41 @@ struct ModeratoE2ETests {
         #expect(closed.finalized)
     }
 
+    @Test(
+        "the channel session drives open -> voucher -> topUp -> close on-chain",
+        .enabled(if: liveEnabled)
+    )
+    func sessionLifecycle() async throws {
+        let rpc = try EVMRPC(
+            transport: URLSessionTransport(),
+            url: #require(URL(string: "https://rpc.moderato.tempo.xyz"))
+        )
+        let account = try await fundFreshAccount(rpc: rpc)
+        let session = try await TempoChannelSession(
+            privateKey: account.privateKey,
+            escrow: #require(EthereumAddress(hex: escrowHex)),
+            token: #require(EthereumAddress(hex: tokenHex)),
+            payee: account.address,
+            salt: randomBytes(),
+            fee: makeFee(rpc: rpc),
+            chainID: chainID,
+            rpc: rpc
+        )
+        let opened = try await session.open(deposit: "1000")
+        #expect(opened.isOpen)
+        #expect(opened.deposit == ChannelAmount(1000))
+
+        let voucher = try await session.voucher(cumulativeAmount: "300")
+        #expect(voucher.signature.count == 65)
+        #expect(voucher.channelID == session.channelID)
+
+        let toppedUp = try await session.topUp(additionalDeposit: "500")
+        #expect(toppedUp.deposit == ChannelAmount(1500))
+
+        let closed = try await session.close()
+        #expect(closed.isFinalized)
+    }
+
     // MARK: - Phases
 
     private struct Account {
@@ -99,20 +134,23 @@ struct ModeratoE2ETests {
         return Account(privateKey: privateKey, signer: signer, address: address)
     }
 
-    /// A builder whose fee params pay native gas (the faucet grant is abundant), a
-    /// generous gas limit, priority 0 (Moderato reports eth_maxPriorityFeePerGas 0), and
-    /// whose nonce comes from the live chain.
-    private func makeBuilder(signingKey: Data, rpc: EVMRPC) async throws -> FFITempoTxBuilder {
+    /// Fee params that pay native gas (the faucet grant is abundant), a generous gas
+    /// limit, priority 0 (Moderato reports eth_maxPriorityFeePerGas 0).
+    private func makeFee(rpc: EVMRPC) async throws -> TempoFeeParameters {
         let gasPrice = try await rpc.gasPrice()
-        let fee = TempoFeeParameters(
+        return TempoFeeParameters(
             maxFeePerGas: String(gasPrice * 2),
             maxPriorityFeePerGas: "0",
             gasLimit: 2_000_000,
             feeToken: nil
         )
-        return FFITempoTxBuilder(
+    }
+
+    /// A builder over the live chain (nonce read per call).
+    private func makeBuilder(signingKey: Data, rpc: EVMRPC) async throws -> FFITempoTxBuilder {
+        try await FFITempoTxBuilder(
             signingKey: signingKey,
-            fee: fee,
+            fee: makeFee(rpc: rpc),
             nonceProvider: { address in try await rpc.transactionCount(address) }
         )
     }
