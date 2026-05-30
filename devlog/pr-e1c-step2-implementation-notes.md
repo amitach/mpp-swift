@@ -1,0 +1,64 @@
+# PR-E.1c step 2a: SwiftPM links the Rust 0x76 builder (macOS spike)
+
+Running notes. Step 1 (#64) proved Swift -> UniFFI -> Rust end to end via a standalone
+`swiftc` smoke binary. Step 2a proves the part the smoke binary did **not**: that
+**SwiftPM itself** (`swift build` / `swift test`) can link the Rust staticlib through a
+`binaryTarget` and reach the same byte-exact golden `0x76` close tx, exposed in Swift as a
+type conforming to the existing `TempoCloseTxBuilder` seam.
+
+## Scope of this slice (deliberately bounded)
+- macOS, single arch (`aarch64-apple-darwin`) only. The plan flags xcframework packaging as
+  "fiddly; spike macOS before all arches." x86_64 + iOS arches + the Linux `.so` are step 2b.
+- Only the **close** op (the seam we already have). `buildOpenTx` / `buildTopUpTx` follow.
+
+## Design decisions (and why)
+
+### 1. binaryTarget = an `.xcframework` built in CI, not a committed blob
+The Rust staticlib (`libtempo_tx_ffi.a`) + its C header/modulemap (`tempo_tx_ffiFFI`) are
+packaged into `TempoTxFFI.xcframework` by `rust/tempo-tx-ffi/build-xcframework.sh`, written to
+a **gitignored** `artifacts/` dir. Matches locked decision #3 (build-in-CI for provenance, no
+binary checked in). The eventual *published* form is a GitHub-release-asset `url:`+`checksum:`
+binaryTarget (always-declared, downloaded); out of scope here; noted as a follow-up.
+
+### 2. The whole FFI surface is env-gated behind `MPP_TEMPO_FFI`
+`Package.swift` only declares the binaryTarget + `MPPTempoFFI` product/target + its test target
+when `MPP_TEMPO_FFI` is set. Rationale: a local-path `binaryTarget` whose `.xcframework` is
+absent fails *every* `swift build` (which builds all targets), even for a consumer who only
+wants `MPPCore`. Env-gating means the **default** build (every consumer, and all the existing
+CI jobs) never references the artifact and pulls **zero Rust**, which is exactly the isolation
+guarantee, now structurally provable rather than asserted. The dedicated FFI CI job sets the
+env and builds the xcframework first.
+- Tradeoff: until we ship a release-asset URL binaryTarget, a consumer who *wants* the FFI must
+  build it from source with the env set. Acceptable pre-release; the URL form removes it later.
+
+### 3. The UniFFI-generated Swift bindings are COMMITTED source, drift-checked in CI
+`Sources/MPPTempoFFI/Generated/tempo_tx_ffi.swift` is committed (reviewable Swift, not a
+binary). The C header + modulemap are NOT committed; they ride inside the xcframework, which
+provides the `tempo_tx_ffiFFI` clang module the generated Swift imports. CI regenerates the
+bindings and `git diff --exit-code`s them against the committed copy, so they can never silently
+drift from the pinned `tempo-primitives@1.8.0` crate. Only the compiled `.a` is build-in-CI.
+
+### 4. The Swift wrapper: `FFITempoCloseTxBuilder` conforms to `TempoCloseTxBuilder`
+The seam is `buildCloseTransaction(voucher:signature:escrow:chainID:) async throws -> Data`. The
+raw FFI needs more: nonce, gas/fee params, the sender private key. The wrapper holds the signing
+key + a `FeeParameters` value and is injected with a `nonceProvider` closure
+(`@Sendable (EthereumAddress) async throws -> UInt64`). It derives the sender address from the
+private key (MPPEVM: secp256k1 pubkey -> Keccak -> address), reads the nonce via the provider,
+then calls the FFI. **Deferred:** sourcing fee params from Tempo's gas/fee oracle over RPC (the
+plan's open question: attodollar prices, TIP-20 fee tokens); that lands in PR-F with the live
+settle e2e. Here fee params are injected, so the wrapper is fully testable with a stub nonce
+provider and produces the byte-exact golden tx.
+
+## Verification plan
+- `MPP_TEMPO_FFI=1 swift test --filter MPPTempoFFI`: golden bytes through the typed wrapper AND
+  through the seam conformer (stub nonce provider, fixed key/fee = the same fixed inputs as the
+  Rust `close_tx_golden_bytes` test) assert the identical 351-byte hex.
+- Default `swift build` / `swift test` (gate off): must resolve and pass with no Rust target in
+  the graph (the isolation guarantee). CI keeps a gate-off leg.
+
+## Open / deferred
+- x86_64-apple-darwin + iOS device/sim arches + Linux `.so` -> step 2b (need the extra rust
+  targets installed; CI runner has them or `rustup target add`).
+- buildOpenTx / buildTopUpTx -> after close is wired.
+- RPC-sourced fee params (gas/fee oracle) -> PR-F.
+- Published release-asset (url+checksum) binaryTarget -> packaging follow-up.

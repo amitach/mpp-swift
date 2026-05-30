@@ -60,3 +60,6 @@ excluded:
   # The Rust FFI crate's Swift smoke harness is not SDK source and does not follow
   # the SDK Swift style (long golden-hex literals, a script-style main).
   - rust
+  # UniFFI-generated bindings (committed + drift-checked in CI against the pinned
+  # crate). Generated verbatim, carries its own `swiftlint:disable all`, not ours to lint.
+  - Sources/MPPTempoFFI/Generated

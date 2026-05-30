@@ -33,6 +33,13 @@ jobs:
             swift test --parallel || exit 1
             echo "::endgroup::"
           done
+      - name: FFI isolation guard (default graph pulls zero Rust)
+        # The opt-in Tempo 0x76 FFI must never leak into the default package graph, so
+        # a consumer of MPPCore / MPPClient / MPPServer / MPPTempo links no Rust. Cheap
+        # and Rust-free, so it runs in this required job rather than the non-required
+        # rust-ffi one. (The build + test steps above already prove the default graph
+        # builds with no xcframework present; this asserts the invariant explicitly.)
+        run: ./Scripts/assert-ffi-isolation.sh
 
   audit:
     name: Dependency audit (OSV)
@@ -146,6 +153,24 @@ jobs:
         # byte-exact golden 0x76 tx. Proves Swift -> UniFFI -> Rust end to end.
         if: matrix.os == 'macos-15'
         run: rust/tempo-tx-ffi/build-ffi.sh
+      - name: Build TempoTxFFI xcframework + drift-check the committed bindings
+        # Package the staticlib + C header into the xcframework SwiftPM links via the
+        # binaryTarget, and refresh Sources/MPPTempoFFI/Generated. The committed UniFFI
+        # bindings must match what the pinned crate regenerates (they are reviewable
+        # source, not a blob); a drift fails the build with how to fix it.
+        if: matrix.os == 'macos-15'
+        run: |
+          rust/tempo-tx-ffi/build-xcframework.sh
+          git diff --exit-code -- Sources/MPPTempoFFI/Generated || {
+            echo "::error::Committed UniFFI bindings drifted from tempo-primitives@1.8.0. Run rust/tempo-tx-ffi/build-xcframework.sh and commit Sources/MPPTempoFFI/Generated."
+            exit 1
+          }
+      - name: Swift FFI integration test (SwiftPM links Rust, gate on)
+        # The real SwiftPM proof (vs the standalone-swiftc smoke above): `swift test`
+        # links the xcframework binaryTarget and the FFITempoCloseTxBuilder seam
+        # conformer produces the same byte-exact golden 0x76 close tx.
+        if: matrix.os == 'macos-15'
+        run: MPP_TEMPO_FFI=1 swift test --filter MPPTempoFFITests
       - name: Audit Rust dependencies (RustSec advisory DB)
         # Closes the supply-chain gap (the Swift OSV gate does not cover Cargo deps).
         # OS-independent, so run once (Linux leg). Fails on a known advisory.

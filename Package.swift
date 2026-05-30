@@ -1,4 +1,5 @@
 // swift-tools-version: 6.0
+import Foundation
 import PackageDescription
 
 // mpp-swift: Swift SDK for the Machine Payments Protocol (MPP).
@@ -191,3 +192,33 @@ let package = Package(
     ],
     swiftLanguageModes: [.v6]
 )
+
+// MPPTempoFFI: the OPT-IN Tempo `0x76` transaction builder, the only target that links
+// the Rust `tempo-tx-ffi` shim (via the TempoTxFFI xcframework binaryTarget). It is
+// gated behind the `MPP_TEMPO_FFI` environment variable so the DEFAULT build (every
+// consumer, and all the non-FFI CI jobs) never references the build-in-CI xcframework
+// and pulls ZERO Rust: the isolation guarantee, structural rather than asserted. The
+// dedicated FFI CI job sets the variable and builds the xcframework first
+// (rust/tempo-tx-ffi/build-xcframework.sh). MPPCore / MPPClient / MPPServer / MPPTempo
+// never depend on this target, so depending on them pulls no Rust even when the gate is
+// on. (The eventual published form is a release-asset url+checksum binaryTarget that is
+// always declared; this env gate is the pre-release stand-in.)
+if ProcessInfo.processInfo.environment["MPP_TEMPO_FFI"] != nil {
+    package.products.append(
+        .library(name: "MPPTempoFFI", targets: ["MPPTempoFFI"])
+    )
+    package.targets.append(contentsOf: [
+        .binaryTarget(
+            name: "TempoTxFFIBinary",
+            path: "artifacts/TempoTxFFI.xcframework"
+        ),
+        .target(
+            name: "MPPTempoFFI",
+            dependencies: ["MPPTempo", "MPPEVM", "TempoTxFFIBinary"]
+        ),
+        .testTarget(
+            name: "MPPTempoFFITests",
+            dependencies: ["MPPTempoFFI", "MPPTempo", "MPPEVM"]
+        ),
+    ])
+}
