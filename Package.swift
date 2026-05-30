@@ -194,40 +194,60 @@ let package = Package(
 )
 
 // MPPTempoFFI: the OPT-IN Tempo `0x76` transaction builder, the only target that links
-// the Rust `tempo-tx-ffi` shim (via the TempoTxFFI xcframework binaryTarget). It is
-// gated behind the `MPP_TEMPO_FFI` environment variable so the DEFAULT build (every
-// consumer, and all the non-FFI CI jobs) never references the build-in-CI xcframework
-// and pulls ZERO Rust: the isolation guarantee, structural rather than asserted. The
-// dedicated FFI CI job sets the variable and builds the xcframework first
-// (rust/tempo-tx-ffi/build-xcframework.sh). MPPCore / MPPClient / MPPServer / MPPTempo
-// never depend on this target, so depending on them pulls no Rust even when the gate is
-// on. (The eventual published form is a release-asset url+checksum binaryTarget that is
-// always declared; this env gate is the pre-release stand-in.)
-// On Apple, the Rust shim is linked via the TempoTxFFI xcframework binaryTarget. On
-// Linux, SwiftPM has no library binaryTarget (only .xcframework / .artifactbundle), so
-// MPPTempoFFI instead links the static archive directly (linkerSettings) and gets the
-// `tempo_tx_ffiFFI` clang module from the CTempoTxFFI C target. The unsafeFlags make the
-// package non-consumable as a remote dependency on Linux, which is fine while the gate is
-// the pre-release stand-in; the future release-asset stage replaces both paths.
-if ProcessInfo.processInfo.environment["MPP_TEMPO_FFI"] != nil {
-    package.products.append(
-        .library(name: "MPPTempoFFI", targets: ["MPPTempoFFI"])
-    )
-    #if os(Linux)
+// the Rust `tempo-tx-ffi` shim. MPPCore / MPPClient / MPPServer / MPPTempo never depend
+// on it, so a consumer of those pulls ZERO Rust (the isolation invariant, enforced by
+// Scripts/assert-ffi-isolation.sh). It is wired one of two ways:
+//
+//   - PUBLISHED (Apple, external consumers): when the tempoFFIReleaseURL +
+//     tempoFFIReleaseChecksum constants below are set, an always-declared
+//     `binaryTarget(url:checksum:)` downloads the released xcframework. No env gate, no
+//     Rust toolchain on the consumer.
+//   - FROM SOURCE (dev / CI, and Linux): when the `MPP_TEMPO_FFI` env var is set, the
+//     xcframework (Apple) or the static archive (Linux, via CTempoTxFFI + linkerSettings)
+//     is built locally by the rust/tempo-tx-ffi scripts. This is how CI exercises the
+//     actual build, so it takes PRECEDENCE over the published asset when both are present.
+//
+// SwiftPM has no library binaryTarget on Linux (only .xcframework / .artifactbundle), so
+// Linux always builds from source; the linkerSettings unsafeFlags make the package
+// non-consumable as a remote dependency there, which is acceptable (Apple is the
+// published-install target; a Linux consumer builds from source).
+// Set by the release process (see .github/workflows/release-ffi.yml, which prints both
+// values). When BOTH are non-empty, an external Apple consumer downloads the published
+// xcframework via a url+checksum binaryTarget: no env gate, no Rust toolchain. Kept as
+// literal constants here (not an external file) so editing them invalidates SwiftPM's
+// manifest cache, which is keyed on Package.swift.
+let tempoFFIReleaseURL = ""
+let tempoFFIReleaseChecksum = ""
+
+let ffiFromSource = ProcessInfo.processInfo.environment["MPP_TEMPO_FFI"] != nil
+
+// The MPPTempoFFI target + test target that sit on top of a given binary target
+// (returned, not appended, so this stays free of the main-actor-isolated `package`).
+func mppTempoFFITargets(binaryName: String) -> [Target] {
+    [
+        .target(
+            name: "MPPTempoFFI",
+            dependencies: ["MPPTempo", "MPPEVM", .target(name: binaryName)]
+        ),
+        .testTarget(name: "MPPTempoFFITests", dependencies: ["MPPTempoFFI", "MPPTempo", "MPPEVM"]),
+    ]
+}
+
+#if os(Linux)
+    if ffiFromSource {
+        package.products.append(.library(name: "MPPTempoFFI", targets: ["MPPTempoFFI"]))
+        package.targets.append(.target(name: "CTempoTxFFI"))
         package.targets.append(contentsOf: [
-            .target(name: "CTempoTxFFI"),
             .target(
                 name: "MPPTempoFFI",
                 dependencies: ["MPPTempo", "MPPEVM", "CTempoTxFFI"],
                 linkerSettings: [
-                    // The static archive built by rust/tempo-tx-ffi/build-linux-lib.sh, plus
-                    // the system libraries a Rust staticlib pulls in on linux-gnu (from
-                    // `rustc --print native-static-libs`).
+                    // The static archive built by rust/tempo-tx-ffi/build-linux-lib.sh,
+                    // plus the system libraries a Rust staticlib pulls in on linux-gnu
+                    // (from `rustc --print native-static-libs`; libc is already on the
+                    // Swift link line, gcc_s is the unwinder).
                     .unsafeFlags([
-                        "-L", "artifacts/linux",
-                        "-ltempo_tx_ffi",
-                        // From `rustc --print native-static-libs` (libc is already on the
-                        // Swift link line; gcc_s is the unwinder).
+                        "-L", "artifacts/linux", "-ltempo_tx_ffi",
                         "-lm", "-ldl", "-lpthread", "-lrt", "-lutil", "-lgcc_s",
                     ]),
                 ]
@@ -237,20 +257,24 @@ if ProcessInfo.processInfo.environment["MPP_TEMPO_FFI"] != nil {
                 dependencies: ["MPPTempoFFI", "MPPTempo", "MPPEVM"]
             ),
         ])
-    #else
-        package.targets.append(contentsOf: [
-            .binaryTarget(
-                name: "TempoTxFFIBinary",
-                path: "artifacts/TempoTxFFI.xcframework"
-            ),
-            .target(
-                name: "MPPTempoFFI",
-                dependencies: ["MPPTempo", "MPPEVM", "TempoTxFFIBinary"]
-            ),
-            .testTarget(
-                name: "MPPTempoFFITests",
-                dependencies: ["MPPTempoFFI", "MPPTempo", "MPPEVM"]
-            ),
-        ])
-    #endif
-}
+    }
+#else
+    if ffiFromSource {
+        // CI / dev: build + link the local xcframework so the build itself is exercised.
+        package.products.append(.library(name: "MPPTempoFFI", targets: ["MPPTempoFFI"]))
+        package.targets.append(.binaryTarget(
+            name: "TempoTxFFIBinary",
+            path: "artifacts/TempoTxFFI.xcframework"
+        ))
+        package.targets.append(contentsOf: mppTempoFFITargets(binaryName: "TempoTxFFIBinary"))
+    } else if !tempoFFIReleaseURL.isEmpty, !tempoFFIReleaseChecksum.isEmpty {
+        // Published: external consumers download the released xcframework. No gate.
+        package.products.append(.library(name: "MPPTempoFFI", targets: ["MPPTempoFFI"]))
+        package.targets.append(.binaryTarget(
+            name: "TempoTxFFIBinary",
+            url: tempoFFIReleaseURL,
+            checksum: tempoFFIReleaseChecksum
+        ))
+        package.targets.append(contentsOf: mppTempoFFITargets(binaryName: "TempoTxFFIBinary"))
+    }
+#endif

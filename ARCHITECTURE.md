@@ -97,17 +97,28 @@ The one seam the FFI fills:
 
 ### Linking the Rust shim, and keeping it opt-in
 
-`MPPTempoFFI` is the **only** target that links Rust. It depends on a `binaryTarget`
-(the `TempoTxFFI` xcframework: the `tempo-tx-ffi` staticlib + its C header) and carries
-the committed, drift-checked UniFFI-generated Swift bindings. Both the product and the
-binaryTarget are declared only when the **`MPP_TEMPO_FFI`** environment variable is set,
-so the default package graph (every other product, and the non-FFI CI jobs) references
-no xcframework and pulls **zero Rust**. `Scripts/assert-ffi-isolation.sh` asserts this
-invariant in CI: the default graph must contain no `MPPTempoFFI` / `TempoTxFFIBinary`.
-The xcframework is built in CI from the pinned `tempo-primitives` source
-(`rust/tempo-tx-ffi/build-xcframework.sh`), never committed as a binary. It carries
-macOS (universal arm64 + x86_64), iOS device (arm64), and iOS simulator (universal)
-slices.
+`MPPTempoFFI` is the **only** target that links Rust, and it carries the committed,
+drift-checked UniFFI-generated Swift bindings. No other product depends on it, so a
+consumer of MPPCore / MPPClient / MPPServer / MPPTempo / MPPTempoServer links **zero
+Rust**. `Scripts/assert-ffi-isolation.sh` enforces that as the durable invariant in CI:
+it walks each non-FFI product's target dependency closure and fails if any reaches
+`MPPTempoFFI` / `TempoTxFFIBinary`. It is wired one of two ways (`Package.swift`):
+
+- **Published (Apple, external consumers).** When the `tempoFFIReleaseURL` /
+  `tempoFFIReleaseChecksum` constants are set (by the release process), an
+  always-declared `binaryTarget(url:checksum:)` downloads the released xcframework: no
+  env var, no Rust toolchain on the consumer. The xcframework carries macOS (universal
+  arm64 + x86_64), iOS device (arm64), and iOS simulator (universal) slices.
+- **From source (dev / CI, and all of Linux).** When `MPP_TEMPO_FFI` is set, the
+  xcframework (Apple) or static archive (Linux) is built locally from the pinned
+  `tempo-primitives` source by the `rust/tempo-tx-ffi` scripts (`build-xcframework.sh` /
+  `build-linux-lib.sh`), never committed as a binary. This is how CI exercises the real
+  build, so it takes precedence over the published asset when both are present.
+
+The release pipeline (`.github/workflows/release-ffi.yml`, triggered by a
+`tempo-tx-ffi-v*` tag) builds the release-profile xcframework, zips it, computes the
+SwiftPM checksum, and publishes a GitHub release; its notes print the two constants to
+commit into `Package.swift` to activate external Apple install.
 
 **Linux** takes a different path because SwiftPM has no library `binaryTarget` there
 (only `.xcframework` / `.artifactbundle`). On Linux, `MPPTempoFFI` instead links the
@@ -116,10 +127,9 @@ the system libs from `rustc --print native-static-libs`) and gets the `tempo_tx_
 clang module from a small **`CTempoTxFFI`** C target (the committed, drift-checked C
 header + a module map). The manifest branches on `#if os(Linux)`. `build-linux-lib.sh`
 produces the `.a` (staticlib only, no cdylib). The `unsafeFlags` make the package
-non-consumable as a *remote* dependency on Linux, which is acceptable while the env gate
-is the pre-release stand-in; the release-asset stage replaces it. (Remaining: the
-`open` / `topUp` builders, and the published release-asset url+checksum binaryTarget that
-lets an external consumer install the FFI without the env gate.)
+non-consumable as a *remote* dependency on Linux: there is no published-binary path on
+Linux, so a Linux consumer of the FFI always builds it from source. (Remaining: the RPC
+gas/fee oracle + the live Moderato open/settle e2e, in a later workstream.)
 
 ## A session, end to end
 
