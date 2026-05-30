@@ -1,4 +1,4 @@
-# PR-H: Tempo 402-server channel-payment CLIENT (`TempoChannelMethod`) — implementation notes
+# PR-H: Tempo 402-server channel-payment CLIENT (`TempoChannelMethod`): implementation notes
 
 Running log of decisions, deviations, and what was / was not verified. Companion to the
 plan (`~/.claude/plans/nested-crafting-map.md`).
@@ -76,7 +76,7 @@ only **after its own continuation resumed** from `await task.value`, while 11 aw
 busy-looped (`continue`) re-checking state. Under the cooperative executor the awaiters'
 continuations could be scheduled ahead of the opener's, starving it. Fix: move the registration
 into the open task itself (`register`, actor-isolated, sets the entry then clears the slot), so
-any awaiter sees a consistent state the instant its `await` returns — at most two loop
+any awaiter sees a consistent state the instant its `await` returns: at most two loop
 iterations, no busy-wait, no continuation-ordering race. (Process note: the apparent multi-minute
 "hangs" while diagnosing were compounded by leftover poll-watcher shells contending on the
 SwiftPM `.build` lock; cleaned up.)
