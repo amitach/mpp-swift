@@ -64,6 +64,13 @@ public struct SessionMethod: PaymentMethodServer {
         challenge.method == TempoMethod.name && challenge.intent == .session
     }
 
+    /// A session reuses one challenge across open / voucher / close; anti-replay is the
+    /// monotonic cumulative the channel store enforces (not one-time challenge use), so the
+    /// verifier must not consume the challenge id (it would reject every voucher after open).
+    public var reusesChallenge: Bool {
+        true
+    }
+
     public func verify(_ credential: Credential, now: Date) async throws -> Receipt {
         guard let action = SessionAction.parse(credential.payload) else {
             throw SessionError.malformedPayload

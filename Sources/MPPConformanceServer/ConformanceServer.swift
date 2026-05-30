@@ -87,17 +87,6 @@ private func makeMiddleware() throws -> MPPServerMiddleware {
 
     private enum SessionConfigError: Error { case badOperatorKey }
 
-    /// A `ReplayStore` that never consumes: a session reuses ONE challenge across
-    /// open/voucher/close (the reference `sessionManager` does this), and its anti-replay is
-    /// the monotonic cumulative the channel store enforces, not one-time challenge use. The
-    /// default one-time `InMemoryReplayStore` is correct only for one-shot proof/charge and
-    /// would reject every voucher after the open.
-    private struct ReusableReplayStore: ReplayStore {
-        func consume(_: String) async -> Bool {
-            true
-        }
-    }
-
     /// Resolves the on-chain relay/settle provider and the operator (payee) address from the
     /// faucet-funded operator key, or nil if no key is configured (proof-only run).
     private func makeSessionProvider()
@@ -148,8 +137,11 @@ private func makeMiddleware() throws -> MPPServerMiddleware {
         ]))
         return MPPServerMiddleware(
             minter: ChallengeMinter(signer: signer),
+            // A normal one-time replay store is fine: SessionMethod.reusesChallenge tells the
+            // verifier not to consume the challenge id (the channel cumulative is the
+            // anti-replay), so the same challenge serves open, vouchers, and close.
             verifier: PaymentVerifier(
-                signer: signer, replayStore: ReusableReplayStore(), methods: [sessionMethod]
+                signer: signer, replayStore: InMemoryReplayStore(), methods: [sessionMethod]
             ),
             binding: binding,
             request: request

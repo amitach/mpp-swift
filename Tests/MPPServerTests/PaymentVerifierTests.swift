@@ -25,6 +25,26 @@ struct AcceptingMethod: PaymentMethodServer {
     }
 }
 
+/// A method that accepts any challenge and reuses it (a session): the verifier must not
+/// consume the challenge id between presentations, since the method guards replay itself.
+struct ReusingMethod: PaymentMethodServer {
+    func supports(_: Challenge) -> Bool {
+        true
+    }
+
+    func verify(_ credential: Credential, now: Date) async throws -> Receipt {
+        Receipt(
+            method: credential.challenge.method,
+            timestamp: RFC3339DateTime(date: now),
+            reference: "session"
+        )
+    }
+
+    var reusesChallenge: Bool {
+        true
+    }
+}
+
 @Suite("PaymentVerifier")
 struct PaymentVerifierTests {
     private func signer() -> ChallengeSigner {
@@ -223,6 +243,25 @@ struct PaymentVerifierTests {
         )
         #expect(verified(first) != nil)
         #expect(rejection(second) == .replayed)
+    }
+
+    @Test("a challenge-reusing method (session) is not consumed: the same challenge verifies again")
+    func reusingMethodIsNotConsumed() async throws {
+        let verifier = PaymentVerifier(
+            signer: signer(), replayStore: InMemoryReplayStore(), methods: [ReusingMethod()]
+        )
+        let header = try signedCredential(signer: signer()).headerValue
+        let binding = try expected()
+        let first = await verifier.verify(
+            authorization: header, body: Data(), now: now, expecting: binding
+        )
+        let second = await verifier.verify(
+            authorization: header, body: Data(), now: now, expecting: binding
+        )
+        // Both verify: the session reuses its challenge (anti-replay is the method's own
+        // state), so the one-time consume is skipped instead of rejecting the second.
+        #expect(verified(first) != nil)
+        #expect(verified(second) != nil)
     }
 
     @Test("an invalid credential does not burn the challenge id (consume is last)")
