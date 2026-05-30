@@ -7,34 +7,31 @@ a payment flows end to end.
 
 ## Module layering
 
-Products depend downward only; a consumer pulls just what it needs.
+Products depend downward only; a consumer pulls just what it needs. Each product's
+actual SwiftPM dependencies (verified against `Package.swift`):
 
-```
-MPPCore            wire/data types (Challenge, Credential, Receipt, JCS, Amount,
-  │                ProblemDetails), no crypto, no network
-  ├── MPPBodyDigest      RFC 9530 Content-Digest (swift-crypto)
-  ├── MPPServer          framework-agnostic 402 middleware (swift-http-types):
-  │                      challenge mint/verify, replay, the verify pipeline
-  ├── MPPClient          the 402 client flow + the MPPHTTPTransport seam + URLSession
-  ├── MPPEVM             EVM message-signing + helpers (pure Swift): Keccak-256,
-  │                      secp256k1 signer, EIP-712 proof/voucher, channel id, 0x-hex
-  └── MPPDiscovery       OpenAPI x-payment-info parse/emit
-        │
-      MPPTempo           Tempo rail (depends on MPPCore + MPPEVM + MPPClient):
-        │                EVMRPC (JSON-RPC), TempoEscrow (getChannel read),
-        │                ChannelAmount, OnChainChannel, TempoCloseTxBuilder seam,
-        │                the zero-amount proof charge method
-        └── MPPTempoServer   Tempo SERVER side (also depends on MPPServer):
-                             proof verify, the 4-action SessionMethod, ChannelStore,
-                             RPCChannelStateProvider
+| Product | Depends on (other MPP products) | Purpose |
+|---|---|---|
+| `MPPCore` | (none) | wire/data types: Challenge, Credential, Receipt, JCS, Amount, ProblemDetails. No crypto, no network |
+| `MPPBodyDigest` | (none) | RFC 9530 Content-Digest (swift-crypto) |
+| `MPPEVM` | (none) | EVM message-signing (pure Swift): Keccak-256, secp256k1 signer, EIP-712 proof/voucher, channel id, 0x-hex |
+| `MPPClient` | `MPPCore` | the 402 client flow + the `MPPHTTPTransport` seam + URLSession |
+| `MPPServer` | `MPPCore`, `MPPBodyDigest` | framework-agnostic 402 middleware: challenge mint/verify, replay, the verify pipeline |
+| `MPPDiscovery` | `MPPCore` | OpenAPI x-payment-info parse/emit |
+| `MPPTempo` | `MPPCore`, `MPPEVM`, `MPPClient` | Tempo rail: EVMRPC, TempoEscrow (getChannel read), ChannelAmount, OnChainChannel, the `TempoCloseTxBuilder` seam, the proof charge method |
+| `MPPTempoServer` | `MPPTempo`, `MPPCore`, `MPPEVM`, `MPPServer` | Tempo SERVER side: proof verify, the 4-action SessionMethod, ChannelStore, RPCChannelStateProvider |
 
-rust/tempo-tx-ffi      Rust crate (NOT a SwiftPM product): builds + signs + RLP-
-                       encodes the bespoke Tempo 0x76 transaction, binding Tempo's
-                       own tempo-primitives. Reached from Swift over an FFI boundary.
-```
+`MPPCore`, `MPPBodyDigest`, and `MPPEVM` are **independent roots** (no inter-MPP
+dependencies); `MPPEVM` in particular is standalone EVM crypto and does not depend on
+`MPPCore`. The rails compose them: `MPPTempo` = Core + EVM + Client, and
+`MPPTempoServer` adds Server.
+
+Separately, **`rust/tempo-tx-ffi`** is a Rust crate (NOT a SwiftPM product) that
+builds + signs + RLP-encodes the bespoke Tempo `0x76` transaction by binding Tempo's
+own `tempo-primitives`. It is reached from Swift over an FFI boundary (see below).
 
 A non-EVM consumer (e.g. a future Stripe rail, or pure client/server/MCP) pulls
-**none** of MPPEVM/MPPTempo and **no Rust**.
+**none** of `MPPEVM`/`MPPTempo` and **no Rust**.
 
 ## The two-layer EVM split
 
