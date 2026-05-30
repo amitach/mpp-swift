@@ -107,7 +107,7 @@ pub fn build_close_tx(
     max_priority_fee_per_gas: u128,
     gas_limit: u64,
     fee_token: Option<Address>,
-    private_key: [u8; 32],
+    mut private_key: [u8; 32],
     escrow: Address,
     channel_id: [u8; 32],
     cumulative_amount: u128,
@@ -119,7 +119,9 @@ pub fn build_close_tx(
         signature: Bytes::from(voucher_signature),
     }
     .abi_encode();
-    build_signed_tx(
+    // `[u8; 32]` is `Copy`, so zeroize this caller-frame copy after handing one to
+    // build_signed_tx (which wipes its own); nothing keeps the key un-zeroized.
+    let result = build_signed_tx(
         chain_id,
         nonce,
         max_fee_per_gas,
@@ -128,7 +130,9 @@ pub fn build_close_tx(
         fee_token,
         private_key,
         vec![call(escrow, close)],
-    )
+    );
+    private_key.zeroize();
+    result
 }
 
 /// Builds the signed `0x76` transaction that opens a channel: a two-call transaction
@@ -143,7 +147,7 @@ pub fn build_open_tx(
     max_priority_fee_per_gas: u128,
     gas_limit: u64,
     fee_token: Option<Address>,
-    private_key: [u8; 32],
+    mut private_key: [u8; 32],
     escrow: Address,
     token: Address,
     payee: Address,
@@ -164,7 +168,7 @@ pub fn build_open_tx(
         authorizedSigner: authorized_signer,
     }
     .abi_encode();
-    build_signed_tx(
+    let result = build_signed_tx(
         chain_id,
         nonce,
         max_fee_per_gas,
@@ -173,7 +177,9 @@ pub fn build_open_tx(
         fee_token,
         private_key,
         vec![call(token, approve), call(escrow, open)],
-    )
+    );
+    private_key.zeroize();
+    result
 }
 
 /// Builds the signed `0x76` transaction that tops up a channel: a two-call transaction
@@ -187,7 +193,7 @@ pub fn build_top_up_tx(
     max_priority_fee_per_gas: u128,
     gas_limit: u64,
     fee_token: Option<Address>,
-    private_key: [u8; 32],
+    mut private_key: [u8; 32],
     escrow: Address,
     token: Address,
     channel_id: [u8; 32],
@@ -203,7 +209,7 @@ pub fn build_top_up_tx(
         additionalDeposit: additional_deposit,
     }
     .abi_encode();
-    build_signed_tx(
+    let result = build_signed_tx(
         chain_id,
         nonce,
         max_fee_per_gas,
@@ -212,7 +218,9 @@ pub fn build_top_up_tx(
         fee_token,
         private_key,
         vec![call(token, approve), call(escrow, top_up)],
-    )
+    );
+    private_key.zeroize();
+    result
 }
 
 // ── UniFFI export layer ────────────────────────────────────────────────────────
