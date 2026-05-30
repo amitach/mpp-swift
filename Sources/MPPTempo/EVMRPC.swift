@@ -81,7 +81,12 @@ public struct EVMRPC: Sendable {
         }
         var blockNumber: UInt64?
         if case let .string(blockHex)? = fields["blockNumber"] {
-            blockNumber = UInt64(hexQuantity: blockHex)
+            // Absent is fine (nil); present-but-unparseable is malformed, not nil
+            // (consistent with the status check: never silently drop a bad field).
+            guard let parsed = UInt64(hexQuantity: blockHex) else {
+                throw .malformedResponse("receipt blockNumber is not a hex quantity")
+            }
+            blockNumber = parsed
         }
         guard let status = UInt64(hexQuantity: statusHex) else {
             throw .malformedResponse("receipt status is not a hex quantity")

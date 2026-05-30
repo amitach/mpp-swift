@@ -106,6 +106,19 @@ struct EVMRPCTests {
         #expect(receipt.blockNumber == nil)
     }
 
+    @Test("a present-but-malformed blockNumber is rejected, not silently nil")
+    func receiptMalformedBlockNumber() async throws {
+        let stub = StubHTTP(json: #"""
+        {"jsonrpc":"2.0","id":1,"result":{
+          "status":"0x1","transactionHash":"0xfeed","blockNumber":"oops"
+        }}
+        """#)
+        let rpc = try EVMRPC(transport: stub, url: rpcURL)
+        await #expect(throws: EVMRPCError.self) {
+            try await rpc.transactionReceipt("0xfeed")
+        }
+    }
+
     @Test("a pending transaction (null result) yields nil, not an error")
     func receiptPending() async throws {
         let stub = StubHTTP(json: #"{"jsonrpc":"2.0","id":1,"result":null}"#)
