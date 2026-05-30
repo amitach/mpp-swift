@@ -170,5 +170,53 @@ byte-preserving).
 
 ## Still deferred after 2d
 - RPC fee oracle (gas/fee params over RPC) + live Moderato settle/open e2e -> PR-F.
-- Published release-asset url+checksum binaryTarget (lets an external consumer install
-  the FFI without the env gate) -> the "publish" step.
+- Published release-asset url+checksum binaryTarget -> step 2e (below).
+
+---
+
+# Step 2e: published release-asset binaryTarget (PR feat/ws10-ffi-release-asset)
+
+Makes the FFI installable by an external Apple consumer with no env var and no Rust
+toolchain. Builds the pipeline + the Package.swift mechanism; cutting the actual release
+(a public `tempo-tx-ffi-v*` tag + committing the printed constants) is a deliberate
+follow-up.
+
+**Two wiring paths in Package.swift:**
+- **Published (Apple):** when `tempoFFIReleaseURL` + `tempoFFIReleaseChecksum` (literal
+  constants) are set, an always-declared `binaryTarget(url:checksum:)` downloads the
+  released xcframework. No gate, no toolchain.
+- **From source (dev/CI + all Linux):** when `MPP_TEMPO_FFI` is set, build locally. Takes
+  **precedence** over the published asset when both are set, so CI exercises the real
+  build, not the binary.
+
+**Why constants, not a JSON file (cache gotcha):** SwiftPM caches the compiled manifest
+keyed on `Package.swift`, NOT on arbitrary files it reads. An external `release.json`
+would be ignored after an in-place edit (a stale cache); proven locally (editing the JSON
+left MPPTempoFFI undeclared). Literal constants in Package.swift invalidate the cache when
+edited. So the release workflow's notes print two `let` lines to commit.
+
+**Isolation guard upgraded** (`assert-ffi-isolation.sh`): once a release is configured,
+`MPPTempoFFI` is always declared, so "FFI target absent" is no longer the invariant. The
+guard now walks each non-FFI product's target dependency CLOSURE and fails if it reaches
+`MPPTempoFFI` / `TempoTxFFIBinary`. Verified correct in both regimes (release empty -> FFI
+absent -> pass; release configured -> FFI declared but unreferenced -> still pass).
+
+**Release pipeline** (`.github/workflows/release-ffi.yml`, on a `tempo-tx-ffi-v*` tag):
+builds the **release-profile** xcframework (optimized/smaller than the debug CI artifact),
+`ditto`-zips it, `swift package compute-checksum`, and `gh release create` with the asset
++ notes printing the two constants. Least privilege: `contents: write` only on that job.
+
+**Linux:** unchanged; no SwiftPM Linux library binaryTarget exists, so a Linux FFI
+consumer always builds from source (documented, not a regression).
+
+**Verified:** manifest evaluates with constants empty (FFI absent) and, simulated, with
+constants filled (FFI declared, guard still passes); gate-on macOS `swift test` (5) +
+default suite (434) green; swiftformat/em-dash/yaml clean. Local Docker Linux re-check was
+skipped this round (daemon instability); the Linux branch change is structural only
+(statement split, logic-identical) and the CI `linux-ffi` job is the authoritative check.
+
+## Activation (the actual publish, a deliberate follow-up)
+1. Push a `tempo-tx-ffi-v<semver>` tag -> the release workflow publishes the asset.
+2. Copy the two printed constants into `Package.swift` (`tempoFFIReleaseURL` /
+   `tempoFFIReleaseChecksum`), commit.
+3. External Apple consumers then get `MPPTempoFFI` via download, no gate.

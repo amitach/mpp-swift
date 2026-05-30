@@ -1,0 +1,64 @@
+name: Release TempoTxFFI xcframework
+
+# Cuts a binary release of the Tempo 0x76 FFI: builds the xcframework from the pinned
+# tempo-primitives source (release profile, all Apple slices), zips it, computes the
+# SwiftPM checksum, and publishes a GitHub release with the asset. After the release,
+# point Package.swift at it by committing the URL + checksum into its
+# `tempoFFIReleaseURL` / `tempoFFIReleaseChecksum` constants (the release notes print the
+# exact values) so an external Apple consumer installs the FFI without building Rust or
+# setting MPP_TEMPO_FFI.
+#
+# Triggered by a component tag, not a full-SDK version tag: the FFI artifact versions
+# independently of the Swift package.
+on:
+  push:
+    tags:
+      - "tempo-tx-ffi-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build + publish the xcframework
+    runs-on: macos-15
+    # Only this job needs write, and only to create the release + upload the asset.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure rustc >= 1.93 (tempo-primitives MSRV)
+        run: |
+          rustup update stable && rustup default stable
+          ver=$(rustc --version | awk '{print $2}')
+          printf '1.93.0\n%s\n' "$ver" | sort -V -C || {
+            echo "::error::rustc $ver is below the 1.93 floor"; exit 1; }
+      - name: Build the release xcframework (all Apple slices)
+        env:
+          TEMPO_FFI_PROFILE: release
+        run: rust/tempo-tx-ffi/build-xcframework.sh
+      - name: Zip the xcframework + compute the SwiftPM checksum
+        id: package
+        run: |
+          # ditto preserves the bundle structure SwiftPM expects when it unzips the asset.
+          ditto -c -k --keepParent artifacts/TempoTxFFI.xcframework TempoTxFFI.xcframework.zip
+          checksum=$(swift package compute-checksum TempoTxFFI.xcframework.zip)
+          echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/TempoTxFFI.xcframework.zip"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Wire it up"
+            echo "Set these constants in \`Package.swift\` to activate external Apple install:"
+            echo '```swift'
+            echo "let tempoFFIReleaseURL = \"$url\""
+            echo "let tempoFFIReleaseChecksum = \"$checksum\""
+            echo '```'
+          } > release-notes.md
+      - name: Publish the GitHub release with the asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            TempoTxFFI.xcframework.zip \
+            --title "TempoTxFFI ${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md
