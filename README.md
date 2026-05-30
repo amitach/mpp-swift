@@ -10,7 +10,7 @@ MPP standardizes machine-to-machine payments using a **challenge → credential 
 
 This is the canonical Swift implementation of the protocol. The **client** and **server** are independent: a Swift client can pay any MPP server in any language, and a Swift server can charge any client.
 
-> **Status:** early development (pre-1.0), built one module at a time with a strict quality bar (spec-traced tests, cross-SDK conformance vs the reference SDKs, no flaky tests). The protocol core, body-digest, server middleware, the 402 client flow, and the EVM message-signing layer (Keccak-256, secp256k1, EIP-712 proof + session voucher) are implemented; the Tempo/Stripe rails, discovery, MCP, proxy, and WebSocket follow. See the module table below.
+> **Status:** early development (pre-1.0), built one module at a time with a strict quality bar (spec-traced tests, cross-SDK conformance vs the reference SDKs, no flaky tests). The protocol core, body-digest, server middleware, the 402 client flow, and the EVM message-signing layer (Keccak-256, secp256k1, EIP-712 proof + session voucher) are implemented. The Tempo rail is in progress: the zero-amount proof charge, the session-channel server (open/topUp/voucher/close), and the blob-free on-chain layer (a JSON-RPC client, the escrow `getChannel` read, and an RPC-backed channel-state provider) are in; the bespoke `0x76` transaction builder is landing as a Rust FFI to Tempo's own `tempo-primitives` (see `rust/tempo-tx-ffi`). Stripe, discovery (parser done), MCP, proxy, and WebSocket follow. See the module table below.
 
 ## Installation
 
@@ -34,12 +34,56 @@ Then depend on the products you need (you pull only those):
 | `MPPBodyDigest` | available | RFC 9530 `Content-Digest` (SHA-256) |
 | `MPPServer` | available | Framework-agnostic middleware over `swift-http-types`: challenge mint, replay, verify pipeline |
 | `MPPClient` | available | The 402 client flow (send → parse → select → build → retry); concrete transports in progress |
-| `MPPEVM` | available | EVM message-signing: Keccak-256, secp256k1 recoverable signer, EIP-712 zero-amount proof + `did:pkh` source, session voucher |
-| `MPPDiscovery` | planned | OpenAPI `x-payment-info` discovery |
+| `MPPEVM` | available | EVM message-signing + JSON-RPC: Keccak-256, secp256k1 recoverable signer, EIP-712 zero-amount proof + `did:pkh` source, session voucher, channel id, `0x`-hex codec |
+| `MPPTempo` | in progress | Tempo rail: zero-amount proof charge, the `EVMRPC` JSON-RPC client, the escrow `getChannel` read (`TempoEscrow` → `OnChainChannel`), `ChannelAmount`, and the `TempoCloseTxBuilder` seam. Channel-open/topUp/close transaction building is the `rust/tempo-tx-ffi` FFI (below) |
+| `MPPTempoServer` | in progress | Tempo SERVER side: zero-amount proof verify, the 4-action `SessionMethod` (open/topUp/voucher/close), `ChannelStore`, and `RPCChannelStateProvider` (reads + relays signed txs + settle via the seam) |
+| `MPPDiscovery` | in progress | OpenAPI `x-payment-info` discovery (parser + emitter done) |
 | `MPPMCP` | planned | JSON-RPC / Model Context Protocol binding |
 | `MPPProxy` / `MPPWebSocket` | planned | 402-protected reverse proxy; WebSocket transport |
-| `MPPTempo` / `MPPStripe` | planned | Payment rails (Tempo charge + channel/voucher settlement, subscription; Stripe) |
+| `MPPStripe` | planned | Stripe rail (Shared Payment Token charge) |
 | `MPPVapor` / `MPPHummingbird` | planned | Server framework adapters |
+
+The bespoke Tempo `0x76` transaction (channel open/topUp/close) is the one piece we deliberately do **not** build in Swift. Swift could encode it, but the format is Tempo-specific and evolving, so binding Tempo's own `tempo-primitives` (the chain's canonical implementation) gives byte-for-byte parity and turns an upgrade into a version bump, instead of a drift-prone Swift port we would have to chase by hand. It is produced by **`rust/tempo-tx-ffi`** and exposed to Swift over an FFI boundary. It is **only needed by a consumer that builds Tempo channel transactions** (a wallet): a non-Tempo consumer, or a Tempo server that only verifies and reads, should link none of it. Today the crate is standalone and **not yet wired into the Swift package** (no Swift target links any Rust); when it is wired it goes in a dedicated opt-in product so only a transaction-building consumer pulls the binary (see [ARCHITECTURE.md](ARCHITECTURE.md)). It is a **build input that ships in the artifact** (unlike the dev-only npm test tooling); its dependency tree is pinned (`Cargo.lock`), built in CI on macOS and Linux, byte-golden-tested, and `cargo audit`-scanned. See [SECURITY.md](SECURITY.md#rust-ffi-the-0x76-transaction-builder).
+
+## Development (running locally)
+
+**Prerequisites:** a Swift 6 toolchain (Xcode 16+ on macOS, or the Swift 6 toolchain on Linux). The Rust FFI crate additionally needs a Rust toolchain `>= 1.93` (`rustup update stable`), but only if you build *that* crate - the Swift package builds and tests with no Rust.
+
+```sh
+git clone https://github.com/amitach/mpp-swift && cd mpp-swift
+swift build            # builds all products
+swift test             # runs the full suite (hermetic; no network)
+```
+
+Both must pass on macOS and Linux. Lint matches CI:
+
+```sh
+swiftformat --lint .   # formatting
+swiftlint --strict     # style; zero warnings
+```
+
+**Cross-SDK conformance** (exercises the wire format against the reference TypeScript SDK; needs Node):
+
+```sh
+Scripts/conformance/run.sh             # offline, vs a local mppx server
+Scripts/conformance/run.sh --testnet   # against the live Moderato node
+```
+
+**Live-chain tests** (read path against the real Moderato testnet) are gated so the default suite stays hermetic; opt in with an env var:
+
+```sh
+MPP_MODERATO_E2E=1 swift test --filter Moderato
+```
+
+**The Rust FFI crate** (the `0x76` transaction builder) is separate from the Swift package:
+
+```sh
+cd rust/tempo-tx-ffi
+cargo test     # builds the crate (clones tempo + compiles the tree) and runs the byte-golden test
+cargo audit    # scans the Rust dependency tree against the RustSec advisory DB
+```
+
+CI runs all of the above; the Swift `Tests` jobs and the `Rust FFI` job both run on macOS **and** Linux. See [the architecture overview](ARCHITECTURE.md) for how the pieces fit and [SECURITY.md](SECURITY.md) for the supply-chain posture.
 
 ## Design
 

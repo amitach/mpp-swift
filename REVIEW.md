@@ -119,6 +119,25 @@ state, scrutinize each:
   fields captured for compatibility must round-trip their type, and a value with no
   extras must encode byte-identically to before the change.
 
+## The Rust FFI (`rust/tempo-tx-ffi`)
+
+The `0x76` transaction builder is the one non-Swift, shipped build input (see
+`ARCHITECTURE.md`). On a change here, scrutinize:
+
+- **No hand-rolled transaction encoding.** The format must come from
+  `tempo-primitives`, not from bytes we assemble ourselves. The `0x76` envelope and
+  RLP/ABI come from the bound crate.
+- **Pin + lockfile.** `tempo-primitives` stays on an exact git tag with a committed
+  `Cargo.lock`; a version bump is reviewed as a security-relevant diff, and the
+  byte-golden test must be regenerated deliberately (never silently) if it changes.
+- **The golden vector is the regression net.** Any change to the produced bytes
+  must be explained; the live-Moderato test is the authoritative on-chain check.
+- **Pure Rust.** `default-features = false` must hold (no `std` → no `c-kzg`/`blst`
+  C deps), so cross-compilation stays clean; `cargo audit` must pass.
+- **Key material.** Private keys are zeroized after use; nothing is logged.
+- **Boundary minimality.** Keep the FFI surface to building/signing a transaction;
+  everything reachable without building a transaction belongs in Swift.
+
 ## The bar a change has already passed
 
 Every change runs a gate pipeline before it reaches review: right-primitive reuse,

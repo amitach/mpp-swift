@@ -1,7 +1,8 @@
 //! Builds + signs + RLP-encodes the Tempo `0x76` escrow transactions the Swift SDK
-//! broadcasts (the one operation Swift cannot do natively). It binds Tempo's own
-//! `tempo-primitives` crate so the format stays byte-identical to the chain's
-//! canonical implementation, with no hand-rolled transaction encoding.
+//! broadcasts. Swift could encode this, but the format is Tempo-specific and
+//! evolving, so binding Tempo's own `tempo-primitives` crate keeps the output
+//! byte-identical to the chain's canonical implementation and makes an upgrade a
+//! version bump rather than a hand-maintained Swift port. No hand-rolled encoding.
 //!
 //! Only the escrow `close` (settlement) tx is built here for now; `open` / `topUp`
 //! and the UniFFI + xcframework wiring follow in later slices. The functions are
