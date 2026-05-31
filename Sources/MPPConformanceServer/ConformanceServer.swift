@@ -5,6 +5,14 @@ import MPPServer
 import MPPTempo
 import MPPTempoServer
 
+// MPPClient/MPPEVM/MPPTempoFFI are used only by the FFI-gated session route, so they (and
+// their imports) ride the gate; the default proof-only server depends on neither.
+#if MPP_TEMPO_FFI_ENABLED
+    import MPPClient
+    import MPPEVM
+    import MPPTempoFFI
+#endif
+
 #if canImport(Glibc)
     import Glibc
 #elseif canImport(Musl)
@@ -67,6 +75,96 @@ private func makeMiddleware() throws -> MPPServerMiddleware {
         }
     }
 }
+
+#if MPP_TEMPO_FFI_ENABLED
+    // Reverse session conformance (live on Moderato). The mppx CLIENT opens a channel to
+    // our recipient, vouchers, and closes; our SessionMethod relays the open, accepts the
+    // vouchers, and settles the close on-chain with the faucet-funded operator key. Gated
+    // on the FFI (the close builder) and on CONFORMANCE_OPERATOR_KEY being set.
+    private let moderatoRPCURL = "https://rpc.moderato.tempo.xyz"
+    private let sessionEscrowHex = "0xe1c4d3dce17bc111181ddf716f75bae49e61a336"
+    private let sessionTokenHex = "0x20c0000000000000000000000000000000000000"
+
+    private enum SessionConfigError: Error { case badOperatorKey }
+
+    /// A `ReplayStore` that never consumes: a session reuses ONE challenge across
+    /// open/voucher/close (the reference `sessionManager` does this), and its anti-replay is
+    /// the monotonic cumulative the channel store enforces, not one-time challenge use. The
+    /// default one-time `InMemoryReplayStore` is correct only for one-shot proof/charge and
+    /// would reject every voucher after the open.
+    private struct ReusableReplayStore: ReplayStore {
+        func consume(_: String) async -> Bool {
+            true
+        }
+    }
+
+    /// Resolves the on-chain relay/settle provider and the operator (payee) address from the
+    /// faucet-funded operator key, or nil if no key is configured (proof-only run).
+    private func makeSessionProvider()
+        async throws -> (provider: RPCChannelStateProvider, payee: EthereumAddress)? {
+        guard let keyHex = ProcessInfo.processInfo.environment["CONFORMANCE_OPERATOR_KEY"],
+              let keyData = Data(hexPrefixed: keyHex)
+        else { return nil }
+        let operatorSigner = try Secp256k1Signer(privateKey: keyData)
+        guard let payee = EthereumAddress(uncompressedPublicKey: operatorSigner.publicKey),
+              let rpcURL = URL(string: moderatoRPCURL)
+        else { throw SessionConfigError.badOperatorKey }
+        let rpc = try EVMRPC(transport: URLSessionTransport(), url: rpcURL)
+        let gasPrice = try await rpc.gasPrice()
+        let builder = FFITempoTxBuilder(
+            signingKey: keyData,
+            fee: TempoFeeParameters(
+                maxFeePerGas: String(gasPrice * 2),
+                maxPriorityFeePerGas: "0",
+                gasLimit: 2_000_000,
+                feeToken: nil
+            ),
+            nonceProvider: { try await rpc.transactionCount($0) }
+        )
+        return (RPCChannelStateProvider(rpc: rpc, closeTxBuilder: builder), payee)
+    }
+
+    /// Builds the session middleware, or nil if no operator key is configured (proof-only).
+    private func makeSessionMiddleware() async throws -> MPPServerMiddleware? {
+        guard let (provider, payee) = try await makeSessionProvider() else { return nil }
+        let sessionMethod = SessionMethod(
+            provider: provider, store: InMemoryChannelStore(), defaultChainID: chainId
+        )
+        let signer = ChallengeSigner(secret: secret)
+        let binding = try RouteBinding(
+            realm: "127.0.0.1", method: MethodName("tempo"), intent: .session
+        )
+        // The session 402 the mppx client opens against: amount + payee (our operator) +
+        // currency + a top-level suggestedDeposit + methodDetails.{chainId, escrowContract}.
+        let request = EncodedJSON(json: .object([
+            "amount": .string("1"),
+            "recipient": .string(payee.checksummed),
+            "currency": .string(sessionTokenHex),
+            "suggestedDeposit": .string("1000"),
+            "methodDetails": .object([
+                "chainId": .integer(Int64(chainId)),
+                "escrowContract": .string(sessionEscrowHex),
+            ]),
+        ]))
+        return MPPServerMiddleware(
+            minter: ChallengeMinter(signer: signer),
+            verifier: PaymentVerifier(
+                signer: signer, replayStore: ReusableReplayStore(), methods: [sessionMethod]
+            ),
+            binding: binding,
+            request: request
+        ) { event in
+            switch event {
+            case let .challengeIssued(challenge):
+                log("[server] issued 402 (session) id=\(challenge.id)")
+            case let .paymentVerified(verified):
+                log("[server] VERIFIED (session) source=\(verified.credential.source ?? "nil")")
+            case let .paymentRejected(rejection):
+                log("[server] rejected (session) \(rejection)")
+            }
+        }
+    }
+#endif
 
 /// Reads up to 4096 more bytes from `descriptor` into `buffer` (one syscall), or
 /// returns false at EOF/error.
@@ -181,40 +279,50 @@ private func logIncoming(_ request: HTTPRequest) {
     }
 }
 
+/// Binds + listens on `127.0.0.1:requestedPort` (PORT=0 -> an OS-assigned ephemeral port)
+/// and returns the listening socket and the actually-bound port. Traps on failure (this is
+/// a dev-only tool).
+private func bindListener() -> (descriptor: Int32, port: UInt16) {
+    let listener = socket(AF_INET, sockStreamType, 0)
+    guard listener >= 0 else { fatalError("socket() failed") }
+    var reuse: Int32 = 1
+    setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+
+    var addr = sockaddr_in()
+    addr.sin_family = sa_family_t(AF_INET)
+    addr.sin_port = requestedPort.bigEndian
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+    let bound = withUnsafePointer(to: &addr) { pointer in
+        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            bind(listener, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        }
+    }
+    guard bound == 0, listen(listener, 16) == 0 else { fatalError("bind/listen failed") }
+
+    var local = sockaddr_in()
+    var localLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+    _ = withUnsafeMutablePointer(to: &local) { pointer in
+        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            getsockname(listener, $0, &localLen)
+        }
+    }
+    return (listener, UInt16(bigEndian: local.sin_port))
+}
+
 @main
 enum ConformanceServer {
     static func main() async throws {
         // A client that disconnects mid-write would otherwise raise SIGPIPE and kill
         // the process; ignore it and let the write fail (handled by the write loop).
         signal(SIGPIPE, SIG_IGN)
-        let middleware = try makeMiddleware()
+        let proofMiddleware = try makeMiddleware()
+        #if MPP_TEMPO_FFI_ENABLED
+            let sessionMiddleware = try await makeSessionMiddleware()
+        #endif
 
-        let listener = socket(AF_INET, sockStreamType, 0)
-        guard listener >= 0 else { fatalError("socket() failed") }
-        var reuse: Int32 = 1
-        setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
-
-        var addr = sockaddr_in()
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = requestedPort.bigEndian
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
-        let bound = withUnsafePointer(to: &addr) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(listener, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
-        }
-        guard bound == 0, listen(listener, 16) == 0 else { fatalError("bind/listen failed") }
-
-        // The actually-bound port (PORT=0 asks the OS for an ephemeral one); the run
-        // script parses this line to learn where to send the client.
-        var local = sockaddr_in()
-        var localLen = socklen_t(MemoryLayout<sockaddr_in>.size)
-        _ = withUnsafeMutablePointer(to: &local) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                getsockname(listener, $0, &localLen)
-            }
-        }
-        let boundPort = UInt16(bigEndian: local.sin_port)
+        let (listener, boundPort) = bindListener()
+        // The run script parses this line to learn the actually-bound port (PORT=0 asks the
+        // OS for an ephemeral one).
         print("reverse-conformance-server listening http://127.0.0.1:\(boundPort)/proof")
         fflush(nil)
 
@@ -228,6 +336,14 @@ enum ConformanceServer {
                 -> (HTTPResponse, Data) = { _, _ in
                     (HTTPResponse(status: .ok), Data(#"{"ok":true,"paid":true}"#.utf8))
                 }
+            // Route by path: /session goes to the (FFI-gated) session middleware when it is
+            // configured; everything else is the zero-amount proof middleware.
+            var middleware = proofMiddleware
+            #if MPP_TEMPO_FFI_ENABLED
+                if (request.path ?? "").hasPrefix("/session"), let sessionMiddleware {
+                    middleware = sessionMiddleware
+                }
+            #endif
             let (response, responseBody) = await middleware.handle(
                 request, body: body, now: Date(), handler: serve
             )

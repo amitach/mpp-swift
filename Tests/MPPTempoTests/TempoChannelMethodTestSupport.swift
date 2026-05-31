@@ -107,10 +107,12 @@ func sessionChallenge(
     var details: [String: JSONValue] = [:]
     if let chainId { details["chainId"] = .integer(Int64(chainId)) }
     if let escrow { details["escrowContract"] = .string(escrow) }
-    if let suggestedDeposit { details["suggestedDeposit"] = .string(suggestedDeposit) }
     var members: [String: JSONValue] = ["amount": .string(amount)]
     if let recipient { members["recipient"] = .string(recipient) }
     if let currency { members["currency"] = .string(currency) }
+    // suggestedDeposit is a top-level request field (sibling of amount), matching the
+    // reference session challenge wire, not a methodDetails member.
+    if let suggestedDeposit { members["suggestedDeposit"] = .string(suggestedDeposit) }
     if !details.isEmpty { members["methodDetails"] = .object(details) }
     let request = requestOverride ?? EncodedJSON(json: .object(members))
     return try Challenge(

@@ -297,7 +297,7 @@ public struct DepositContext: Sendable, Hashable {
     public let chainId: UInt64
     /// The per-request charge amount (for sizing the deposit, not the deposit itself).
     public let chargeAmount: Amount
-    /// The server-suggested deposit (`methodDetails.suggestedDeposit`), if any.
+    /// The server-suggested deposit (the top-level `suggestedDeposit` request field), if any.
     public let suggestedDeposit: String?
 
     /// Creates the deposit facts. Public (like ``ChargeApproval``) so a consumer can
