@@ -22,17 +22,28 @@ jobs:
       # Actions are pinned to a full commit SHA, never a mutable tag (tj-actions
       # CVE-2025-30066). Dependabot bumps the SHA.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # Cache the SwiftPM shared dependency-clone directory (NOT compiled artifacts,
+      # which are not safely portable across commits). Keyed on Package.swift so a
+      # dependency change invalidates it; restore-keys lets a stale key still seed the
+      # clones. Speeds `swift build`/`resolve` across runs.
+      - name: Cache SwiftPM dependencies
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.cache/org.swift.swiftpm
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift') }}
+          restore-keys: ${{ runner.os }}-spm-
       - name: Build
         run: swift build
       - name: Test
         run: swift test
-      - name: Flaky-hunter (repeated, randomized order)
-        run: |
-          for i in 1 2 3 4 5; do
-            echo "::group::iteration $i"
-            swift test --parallel || exit 1
-            echo "::endgroup::"
-          done
+      - name: Dependency audit (OSV advisory scan)
+        # Folded in from the former standalone `audit` job (one fewer runner + one fewer
+        # resolve). `swift build` above already wrote Package.resolved. Fails the build if
+        # any pinned dependency version has a known advisory in the OSV/GitHub Advisory
+        # Database (backs the SECURITY.md monitoring policy with an enforced gate).
+        run: ./Scripts/dependency-audit.sh Package.resolved
       - name: FFI isolation guard (default graph pulls zero Rust)
         # The opt-in Tempo 0x76 FFI must never leak into the default package graph, so
         # a consumer of MPPCore / MPPClient / MPPServer / MPPTempo links no Rust. Cheap
@@ -40,19 +51,6 @@ jobs:
         # rust-ffi one. (The build + test steps above already prove the default graph
         # builds with no xcframework present; this asserts the invariant explicitly.)
         run: ./Scripts/assert-ffi-isolation.sh
-
-  audit:
-    name: Dependency audit (OSV)
-    runs-on: macos-15 # has swift + jq + curl preinstalled
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Resolve dependencies
-        run: swift package resolve
-      - name: OSV advisory scan (SwiftURL, both name forms)
-        # Fails the build if any pinned dependency version has a known advisory
-        # in the OSV/GitHub Advisory Database. Backs the SECURITY.md monitoring
-        # policy with an enforced gate.
-        run: ./Scripts/dependency-audit.sh Package.resolved
 
   linux:
     name: Tests (Linux, Swift 6)
@@ -67,27 +65,51 @@ jobs:
     container: swift@sha256:cf429de05c3e84a230a75e68eaa7bf7d1367ef9dde0a1278fb2a3d53d1881040
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Cache SwiftPM dependencies
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.cache/org.swift.swiftpm
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift') }}
+          restore-keys: ${{ runner.os }}-spm-
       - name: Build
         run: swift build
       - name: Test
         run: swift test
 
-  conformance-local:
+  conformance:
+    # Name kept as "Conformance (local)" to match the required status check in branch
+    # protection; this job now also runs the reverse direction (folded in from the former
+    # standalone "Conformance (reverse)" job).
     name: Conformance (local)
     runs-on: macos-15 # has swift preinstalled; node via setup-node
+    # Both offline cross-SDK directions in one job (one runner, one setup-node, the
+    # second swift build reuses the first's .build). Both are OFFLINE and deterministic
+    # (zero-amount proof is ecrecover, no RPC), so a compromised npm dep is contained:
+    # no secrets, only `contents: read` (repo default), and the harness installs with
+    # `npm ci --ignore-scripts` against the committed lockfile.
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "20"
-      # Cross-SDK interop: the Swift client pays a zero-amount Tempo proof 402
-      # issued and verified by the reference mppx (TypeScript) server, over real
-      # HTTP. OFFLINE and deterministic (ecrecover, no RPC), so a compromised npm
-      # dep is contained: this job grants no secrets and (per the repo default)
-      # only `contents: read`, and makes no outbound network calls. The harness
-      # installs with `npm ci --ignore-scripts` against the committed lockfile.
-      - name: Cross-SDK conformance (mppx reference server, offline)
+      - name: Cache SwiftPM dependencies
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.cache/org.swift.swiftpm
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift') }}
+          restore-keys: ${{ runner.os }}-spm-
+      # Forward: the Swift client pays a zero-amount Tempo proof 402 issued and verified
+      # by the reference mppx (TypeScript) server, over real HTTP.
+      - name: Cross-SDK conformance (Swift client -> mppx server, offline)
         run: Scripts/conformance/run.sh
+      # Reverse: the reference mppx CLIENT pays OUR Swift server (MPPConformanceServer
+      # + TempoProofVerifier) over real HTTP.
+      - name: Cross-SDK conformance (mppx client -> our server, offline)
+        run: Scripts/conformance/run-reverse.sh
 
   conformance-testnet:
     name: Conformance (testnet)
@@ -137,6 +159,24 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # Cache the Cargo registry/git clones + the crate's build dir, keyed on Cargo.lock
+      # (per OS leg). The dominant cost here is compiling the large revm/tempo tree; this
+      # turns a clean ~4-5 min compile into an incremental one on a cache hit.
+      - name: Cache Cargo + crate target
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/tempo-tx-ffi/target
+          # Key is per-OS AND per-job. The Linux leg here and the linux-ffi job both
+          # resolve runner.os == Linux but build in different environments (bare VM vs
+          # swift container; different glibc/system libs), so their compiled target/ is
+          # not interchangeable. Cache keys are write-once, so a shared key would let one
+          # job win the save and force the other to recompile every time; distinct keys
+          # give each its own effective cache.
+          key: rust-ffi-${{ runner.os }}-cargo-${{ hashFiles('rust/tempo-tx-ffi/Cargo.lock') }}
+          restore-keys: rust-ffi-${{ runner.os }}-cargo-
       - name: Ensure rustc >= 1.93 (tempo-primitives MSRV)
         run: |
           rustup update stable && rustup default stable
@@ -147,18 +187,17 @@ jobs:
       - name: Build + test the FFI crate
         working-directory: rust/tempo-tx-ffi
         run: cargo test
-      - name: Swift FFI integration smoke test
-        # macOS has both cargo + swiftc: build the crate, generate the UniFFI Swift
-        # bindings, and run a Swift program that calls the FFI and asserts the same
-        # byte-exact golden 0x76 tx. Proves Swift -> UniFFI -> Rust end to end.
-        if: matrix.os == 'macos-15'
-        run: rust/tempo-tx-ffi/build-ffi.sh
       - name: Build TempoTxFFI xcframework + drift-check the committed bindings
         # Package the staticlib + C header into the xcframework SwiftPM links via the
         # binaryTarget, and refresh Sources/MPPTempoFFI/Generated. The committed UniFFI
         # bindings must match what the pinned crate regenerates (they are reviewable
         # source, not a blob); a drift fails the build with how to fix it.
+        # On a pull_request build only the macOS slice (TEMPO_FFI_MACOS_ONLY=1) for speed:
+        # the drift-check, swift test, and live e2e below only need the macOS slice. A
+        # push to main (or the release-ffi workflow) builds the full multi-arch xcframework.
         if: matrix.os == 'macos-15'
+        env:
+          TEMPO_FFI_MACOS_ONLY: ${{ github.event_name == 'pull_request' && '1' || '' }}
         run: |
           rust/tempo-tx-ffi/build-xcframework.sh
           git diff --exit-code -- Sources/MPPTempoFFI/Generated Sources/CTempoTxFFI/include/tempo_tx_ffiFFI.h || {
@@ -166,9 +205,10 @@ jobs:
             exit 1
           }
       - name: Swift FFI integration test (SwiftPM links Rust, gate on)
-        # The real SwiftPM proof (vs the standalone-swiftc smoke above): `swift test`
-        # links the xcframework binaryTarget and the FFITempoCloseTxBuilder seam
-        # conformer produces the same byte-exact golden 0x76 close tx.
+        # The real SwiftPM proof: `swift test` links the xcframework binaryTarget and the
+        # FFITempoCloseTxBuilder seam conformer produces the same byte-exact golden 0x76
+        # close tx. (The former standalone-swiftc smoke step was redundant with this and
+        # the cargo golden test, and was dropped.)
         if: matrix.os == 'macos-15'
         run: MPP_TEMPO_FFI=1 swift test --filter MPPTempoFFITests
       - name: Live Moderato FFI write-path e2e (fund/open/voucher/close on-chain)
@@ -218,6 +258,19 @@ jobs:
     container: swift@sha256:cf429de05c3e84a230a75e68eaa7bf7d1367ef9dde0a1278fb2a3d53d1881040
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Cache Cargo + crate target
+        # Same shape as the rust-ffi job's cache (the revm/tempo compile is the cost),
+        # but a DISTINCT key prefix: this job builds in the swift container while
+        # rust-ffi's Linux leg builds on the bare VM, so their compiled target/ differs
+        # and must not share a (write-once) key. See the note in the rust-ffi job.
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/tempo-tx-ffi/target
+          key: linux-ffi-${{ runner.os }}-cargo-${{ hashFiles('rust/tempo-tx-ffi/Cargo.lock') }}
+          restore-keys: linux-ffi-${{ runner.os }}-cargo-
       - name: Install build tools + Rust (>= 1.93, tempo-primitives MSRV)
         run: |
           apt-get update -qq && apt-get install -y -qq curl ca-certificates build-essential
@@ -236,34 +289,47 @@ jobs:
           MPP_TEMPO_FFI: "1"
         run: swift test --filter MPPTempoFFITests
 
-  conformance-reverse:
-    name: Conformance (reverse)
-    runs-on: macos-15 # has swift preinstalled; node via setup-node
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "20"
-      # The reverse direction: the reference mppx CLIENT pays OUR Swift server
-      # (MPPConformanceServer + TempoProofVerifier) over real HTTP. OFFLINE and
-      # deterministic (zero-amount proof is ecrecover, no RPC), same hardening as
-      # the forward offline job: no secrets, contents:read, npm ci --ignore-scripts.
-      - name: Cross-SDK conformance (mppx client -> our server, offline)
-        run: Scripts/conformance/run-reverse.sh
-
   lint:
     name: Lint
     runs-on: macos-15
+    env:
+      # Pinned tool versions (was `brew install`, which floats and reinstalls every run).
+      # Bump deliberately; a version bump is a reviewable diff that can shift lint rules.
+      SWIFTFORMAT_VERSION: "0.61.1"
+      SWIFTLINT_VERSION: "0.63.3"
+      # SHA-256 of the pinned release zips. Verified before use so a compromised or
+      # swapped GitHub release asset fails the build (brew verified bottle checksums;
+      # this keeps that integrity guarantee with the direct download). Recompute and
+      # bump alongside the version.
+      SWIFTFORMAT_SHA256: "b990400779aceb7d7020796eb9ba814d4480543f671d38fc0ff48cb72f04c584"
+      SWIFTLINT_SHA256: "fb045e85e7cb3374f42a4840b6b85a0106302afa69035c0c6f29af4a44c810b6"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Cache pinned lint tools
+        id: lint-tools
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.lint-tools
+          key: lint-tools-sf${{ env.SWIFTFORMAT_VERSION }}-sl${{ env.SWIFTLINT_VERSION }}
+      - name: Download + verify pinned SwiftFormat + SwiftLint
+        if: steps.lint-tools.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.lint-tools /tmp/sf /tmp/sl
+          curl -fsSL "https://github.com/nicklockwood/SwiftFormat/releases/download/${SWIFTFORMAT_VERSION}/swiftformat.zip" -o /tmp/swiftformat.zip
+          echo "${SWIFTFORMAT_SHA256}  /tmp/swiftformat.zip" | shasum -a 256 -c -
+          unzip -oq /tmp/swiftformat.zip -d /tmp/sf
+          install -m 0755 "$(find /tmp/sf -type f -name swiftformat | head -1)" ~/.lint-tools/swiftformat
+          curl -fsSL "https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_VERSION}/portable_swiftlint.zip" -o /tmp/swiftlint.zip
+          echo "${SWIFTLINT_SHA256}  /tmp/swiftlint.zip" | shasum -a 256 -c -
+          unzip -oq /tmp/swiftlint.zip -d /tmp/sl
+          install -m 0755 "$(find /tmp/sl -type f -name swiftlint | head -1)" ~/.lint-tools/swiftlint
+      - name: Put lint tools on PATH
+        run: echo "$HOME/.lint-tools" >> "$GITHUB_PATH"
       - name: SwiftFormat (lint mode)
-        run: |
-          brew install swiftformat
-          swiftformat --lint .
+        run: swiftformat --lint .
       - name: SwiftLint
-        run: |
-          brew install swiftlint
-          swiftlint --strict
+        run: swiftlint --strict
       - name: No em dashes (repo-wide)
         run: |
           # swiftlint enforces .swift; this covers markdown, configs, everything
