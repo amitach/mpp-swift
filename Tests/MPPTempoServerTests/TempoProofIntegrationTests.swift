@@ -7,10 +7,11 @@ import MPPTempoServer
 import Testing
 
 // TempoProofVerifier wired through PaymentVerifier / MPPServerMiddleware: replay
-// ordering (an invalid proof must not burn the challenge id, Decision A), fail
-// closed when no registered method supports the challenge (Decision B), and a full
-// mint -> pay -> verify round-trip. Shares the file-scope fixtures in
-// TempoProofVerifierTests (method/challenge/request/withSignature/realm).
+// ordering (the challenge is consumed BEFORE settlement, so a reused challenge is
+// rejected as replayed and side effects never run on a replay), fail closed when no
+// registered method supports the challenge, and a full mint -> pay -> verify
+// round-trip. Shares the file-scope fixtures in TempoProofVerifierTests
+// (method/challenge/request/withSignature/realm).
 @Suite("TempoProofVerifier integration")
 struct TempoProofIntegrationTests {
     private let secret = Data("conformance-fixed-secret-key-0123456789".utf8)
