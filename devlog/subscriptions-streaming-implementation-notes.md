@@ -91,6 +91,39 @@ non-canonical short-form (a byte < 0x80 wrapped in a prefix); 🚩 accepted long
 child-within-parent-bound) + the `uint64` guard, with adversarial tests in `RLPTests`. The
 cross-validation above confirms our strict decode matches the chain's.
 
+## PR-2 spec (subscription protocol core) - branch feat/subscription-core (off main ab0947f, has #82+#83)
+
+Exact `tempo/subscription` Method (from mppx Methods.ts:289), the build target:
+- **Credential payload**: `{ type: "keyAuthorization", signature: <hex serialized RLP TempoKeyAuthorization> }`.
+- **Wire request** (post-transform, what the 402 challenge carries; `decimals` is consumed client-side,
+  `amount` is already base-units): `{ amount: <base-units string>, currency: <addr>, recipient: <addr>,
+  periodCount: <uint64 string>, periodUnit: dev_second|day|week, subscriptionExpires: <ISO8601>,
+  description?: string, externalId?: string, methodDetails?: { accessKey?: {accessKeyAddress, keyType:
+  p256|secp256k1|webAuthn}, chainId?: number } }`.
+- period units: dev_second=1, day=86400, week=604800 (period seconds = periodCount * unit, uint64-bounded).
+- subscriptionExpires must be whole seconds; expiry (key-auth) = its unix-seconds; MUST be strictly later
+  than the challenge expiry (a verify-side check).
+
+PR-2 files (mirror TempoChargeRequest's `init(challenge:) throws(DecodingFailure)` via
+`challenge.request.decodedData()` + a Codable wire struct):
+1. `Sources/MPPTempo/SubscriptionRequest.swift` - decode the wire request; expose periodSeconds (uint64,
+   overflow-checked), expiry unix-seconds (parse ISO via RFC3339DateTime), accessKey?, chainId?.
+2. `Sources/MPPTempo/TempoSubscriptionMethod.swift` - `PaymentMethodClient`: resolve accessKey
+   (context/params/request.methodDetails) + chainId; build TempoKeyAuthorization {address=accessKey,
+   chainId, expiry, limits=[{token=currency, limit=amount, period=periodSeconds}], scopes=[{currency,
+   transferWithMemo 0x95777d59, [recipient]}]}; sign (root Secp256k1Signer) -> signedSerialization ->
+   payload {type:"keyAuthorization", signature: hexPrefixed}; source = did:pkh(payer, chainId).
+3. `Sources/MPPTempoServer/TempoSubscriptionVerifier.swift` - `PaymentMethodServer`: decode
+   SubscriptionRequest; **re-encode-and-compare** = rebuild the EXPECTED TempoKeyAuthorization from the
+   request + accessKey, `serialize()` it, require the credential's inner-tuple bytes == expected (so we
+   never trust client decode; non-canonical/mismatched rejects); recover the payer via
+   `TempoKeyAuthorization.recover(serialized:)`; assert expiry > challenge expiry. reusesChallenge=FALSE
+   (activation is one-shot; renewals are server-driven in PR-3, which self-guards per the P0-1 invariant).
+   No store/renewal/side-effects in PR-2 (PR-3).
+4. Tests: hermetic activation round-trip through PaymentClient (402 -> key-auth credential -> verified);
+   field-mismatch rejections (currency/amount/period/expiry/scope/recipient/chainId); + cross-SDK
+   conformance vs mppx subscription activation (both directions) - may ride PR-2.5 like MPPMCP did.
+
 ## Deviations / open
 
 - The tuple builder targets the subscription shape (always emits expiry+limits+calls). A fully
