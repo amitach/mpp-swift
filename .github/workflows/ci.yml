@@ -128,6 +128,10 @@ jobs:
       # signed key authorization. Offline (activation settles no transaction).
       - name: Cross-SDK subscription conformance (Swift client -> mppx server, offline)
         run: Scripts/conformance/run-subscription.sh
+      # Reverse subscription: the reference mppx CLIENT signs a key authorization and activates
+      # against OUR Swift server (MPPConformanceServer + TempoSubscriptionVerifier). Offline.
+      - name: Cross-SDK subscription conformance (mppx client -> our server, offline)
+        run: Scripts/conformance/run-subscription-reverse.sh
       # MCP: the reference mppx mcp-sdk CLIENT pays OUR Swift MCP server (MPPMCPConformanceServer
       # + MPPMCP gate) over a real stdio transport. Proves the JSON-RPC / MCP payment binding
       # interoperates with the live peer (the -32042 frame, the credential in params._meta, the
