@@ -18,8 +18,8 @@ actual SwiftPM dependencies (verified against `Package.swift`):
 | `MPPClient` | `MPPCore` | the 402 client flow + the `MPPHTTPTransport` seam + URLSession |
 | `MPPServer` | `MPPCore`, `MPPBodyDigest` | framework-agnostic 402 middleware: challenge mint/verify, replay, the verify pipeline |
 | `MPPDiscovery` | `MPPCore` | OpenAPI x-payment-info parse/emit |
-| `MPPTempo` | `MPPCore`, `MPPEVM`, `MPPClient` | Tempo rail: EVMRPC, TempoEscrow (getChannel read), ChannelAmount, OnChainChannel, the `TempoCloseTxBuilder` seam, the proof charge method |
-| `MPPTempoServer` | `MPPTempo`, `MPPCore`, `MPPEVM`, `MPPServer` | Tempo SERVER side: proof verify, the 4-action SessionMethod, ChannelStore, RPCChannelStateProvider |
+| `MPPTempo` | `MPPCore`, `MPPEVM`, `MPPClient` | Tempo rail: the proof charge method, the 402 channel-payment client `TempoChannelMethod` (open/voucher/topUp/close, deposit policy, recovery, access-key signer) + the `TempoOpenTxBuilder`/`TempoTopUpTxBuilder`/`TempoCloseTxBuilder` + `ChannelStateReading` seams, EVMRPC, TempoEscrow (getChannel read), ChannelAmount, OnChainChannel |
+| `MPPTempoServer` | `MPPTempo`, `MPPCore`, `MPPEVM`, `MPPServer` | Tempo SERVER side: proof verify, the 4-action SessionMethod (opts into `reusesChallenge`, so the session's one challenge is not consumed per voucher; the channel-store cumulative is the anti-replay), ChannelStore, RPCChannelStateProvider |
 
 `MPPCore`, `MPPBodyDigest`, and `MPPEVM` are **independent roots** (no inter-MPP
 dependencies); `MPPEVM` in particular is standalone EVM crypto and does not depend on
