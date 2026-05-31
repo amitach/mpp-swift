@@ -1,8 +1,10 @@
 # Cross-SDK conformance
 
 This SDK is verified to interoperate with the reference [`mppx`](https://github.com/wevm/mppx)
-(TypeScript) implementation over real HTTP, not just against fixed vectors, in
-**both directions** of the zero-amount `tempo`/`charge` **proof** flow.
+(TypeScript) implementation over real HTTP, not just against fixed vectors, in **both directions**
+across every implemented Tempo flow: the zero-amount `tempo`/`charge` **proof**, the settled
+payment-**channel** session, **subscription** activation (key authorization), and the metered
+**streaming** codecs (SSE + WebSocket). Each is detailed below.
 
 ## Forward: our client pays the mppx server
 
@@ -34,6 +36,8 @@ Scripts/conformance/run.sh --testnet  # forward proof, also probe the live Moder
 Scripts/conformance/run-reverse.sh     # reverse proof: mppx client pays our Swift server
 Scripts/conformance/run-session.sh         # forward CHANNEL: our client open/voucher/close vs the mppx session server (live)
 Scripts/conformance/run-session-reverse.sh # reverse CHANNEL: mppx client open/voucher/close vs our SessionMethod server (live)
+Scripts/conformance/run-subscription.sh         # forward SUBSCRIPTION: our client signs a key-auth vs the mppx subscription server (offline)
+Scripts/conformance/run-subscription-reverse.sh # reverse SUBSCRIPTION: mppx client signs a key-auth vs our TempoSubscriptionVerifier (offline)
 ```
 
 The forward Swift test is gated on `MPP_CONFORMANCE_URL` (skipped by the default
@@ -62,3 +66,28 @@ the FFI gate; the default reverse server stays proof-only and Rust-free.
 
 The off-chain proof flow (above) stays offline and deterministic; only the channel/settle
 flow touches the chain.
+
+## Subscriptions (key authorization, both directions, offline)
+
+The `tempo`/`subscription` activation is verified in BOTH directions against `mppx`. Activation
+signs no on-chain transaction (it grants a `TempoKeyAuthorization`), so this is fully **offline**
+(no faucet, RPC, or testnet), deterministic and cheap.
+
+- **Forward** (`run-subscription.sh`): our `TempoSubscriptionMethod` (client) signs the key
+  authorization delegating the access key the `mppx` **subscription server** issued in its 402, and
+  the `mppx` server's verifier accepts it. Proves our signed `TempoKeyAuthorization` bytes are
+  accepted by the reference verifier.
+- **Reverse** (`run-subscription-reverse.sh`): the `mppx` **client** signs a key authorization
+  against our `MPPConformanceServer` `/subscription` route (`MPPTempoServer.TempoSubscriptionVerifier`),
+  and our re-encode-and-compare verifier accepts it.
+
+Gated on `MPP_CONFORMANCE_SUBSCRIPTION_URL` (forward) / run as an internal executable (reverse); the
+`/subscription` route is un-gated (offline) so it runs in the standard `Conformance (local)` CI job.
+
+## Metered streaming codecs (SSE + WebSocket)
+
+`ConformanceStreamCodecTests` pins the streaming wire formats: our `SessionStreamEvent` (SSE) and
+`SessionWebSocketFrame` (WebSocket) parsers accept the **exact bytes** the reference `mppx`
+formatters emit (golden vectors captured from `mppx` `session/Sse.js` + `session/Ws.js`). The reverse
+direction (`mppx`'s own `parseEvent` / `parseMessage` accept our output) was verified directly
+against those parsers. Hermetic (no server), part of the default suite.
