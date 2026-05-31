@@ -24,8 +24,13 @@ import MPPEVM
 /// `did:pkh` source, the voucher signer, and the channel `payer`/`authorizedSigner` all
 /// match the signing key.
 public struct TempoChannelMethod: PaymentMethodClient {
-    private let signer: Secp256k1Signer
     private let wallet: EthereumAddress
+    /// Signs vouchers. The funding `signer` by default; a separate access key when one is
+    /// configured (the root account funds the channel, the access key signs vouchers).
+    private let voucherSigner: Secp256k1Signer
+    /// The address authorized to sign vouchers (the channel's `authorizedSigner`): the
+    /// `wallet` by default, or the access key's address when a `voucherSigner` is configured.
+    private let authorizedSigner: EthereumAddress
     private let openBuilder: any TempoOpenTxBuilder
     private let topUpBuilder: (any TempoTopUpTxBuilder)?
     private let channelReader: (any ChannelStateReading)?
@@ -57,7 +62,11 @@ public struct TempoChannelMethod: PaymentMethodClient {
     ///   - channelReader: reads on-chain channel state to attach to a server-suggested
     ///     channel (`methodDetails.channelId`) instead of opening a fresh one; nil disables
     ///     recovery (the default - the method always opens for a key it has not seen).
-    /// - Returns: `nil` only if a valid address cannot be derived from the signer.
+    ///   - voucherSigner: a separate access key that signs vouchers (and becomes the channel's
+    ///     `authorizedSigner`) while `signer`'s wallet funds the channel and is the `did:pkh`
+    ///     source. nil (the default) signs vouchers with `signer` itself (payer == signer).
+    /// - Returns: `nil` if a valid address cannot be derived from `signer` (or from
+    ///   `voucherSigner` when one is given).
     public init?(
         signer: Secp256k1Signer,
         openBuilder: any TempoOpenTxBuilder,
@@ -68,13 +77,21 @@ public struct TempoChannelMethod: PaymentMethodClient {
             Data((0 ..< 32).map { _ in UInt8.random(in: .min ... .max) })
         },
         topUpBuilder: (any TempoTopUpTxBuilder)? = nil,
-        channelReader: (any ChannelStateReading)? = nil
+        channelReader: (any ChannelStateReading)? = nil,
+        voucherSigner: Secp256k1Signer? = nil
     ) {
         guard let wallet = EthereumAddress(uncompressedPublicKey: signer.publicKey) else {
             return nil
         }
-        self.signer = signer
+        let resolvedVoucherSigner = voucherSigner ?? signer
+        guard let authorizedSigner = EthereumAddress(
+            uncompressedPublicKey: resolvedVoucherSigner.publicKey
+        ) else {
+            return nil
+        }
         self.wallet = wallet
+        self.voucherSigner = resolvedVoucherSigner
+        self.authorizedSigner = authorizedSigner
         self.openBuilder = openBuilder
         self.topUpBuilder = topUpBuilder
         self.channelReader = channelReader
@@ -194,7 +211,7 @@ public struct TempoChannelMethod: PaymentMethodClient {
         let signature = try signVoucher(
             open.channelID, open.cumulative, escrow: session.escrow, chainId: chainId
         )
-        let payload = voucherPayload("close", open.channelID, open.cumulative, signature)
+        let payload = channelVoucherPayload("close", open.channelID, open.cumulative, signature)
         return credential(challenge, chainId: chainId, payload: payload)
     }
 
@@ -282,13 +299,13 @@ public struct TempoChannelMethod: PaymentMethodClient {
         let salt = saltProvider()
         guard let parameters = Channel.Parameters(
             payer: wallet, payee: session.payee, token: session.token, salt: salt,
-            authorizedSigner: wallet, escrowContract: session.escrow, chainId: chainId
+            authorizedSigner: authorizedSigner, escrowContract: session.escrow, chainId: chainId
         ) else {
             throw TempoChannelMethodError.invalidSalt
         }
         let openParameters = TempoOpenParameters(
             escrow: session.escrow, token: session.token, payee: session.payee,
-            deposit: deposit, salt: salt, authorizedSigner: wallet
+            deposit: deposit, salt: salt, authorizedSigner: authorizedSigner
         )
         let transaction: Data
         do {
@@ -311,17 +328,17 @@ public struct TempoChannelMethod: PaymentMethodClient {
         switch outcome {
         case let .voucher(channelID, cumulative):
             let signature = try signVoucher(channelID, cumulative, escrow: escrow, chainId: chainId)
-            payload = voucherPayload("voucher", channelID, cumulative, signature)
+            payload = channelVoucherPayload("voucher", channelID, cumulative, signature)
         case let .open(channelID, cumulative, transaction):
             let signature = try signVoucher(channelID, cumulative, escrow: escrow, chainId: chainId)
-            var open = voucherPayload("open", channelID, cumulative, signature)
+            var open = channelVoucherPayload("open", channelID, cumulative, signature)
             // The open action carries the signed channel-open transaction for the server to
             // relay. `type: transaction` tags the payload as a transaction-bearing action
             // (per draft-tempo-charge, alongside topUp); the field is advisory for a server
             // that switches on `action`, but it is part of the canonical open payload.
             open["type"] = .string("transaction")
             open["transaction"] = .string(transaction.hexPrefixed)
-            open["authorizedSigner"] = .string(wallet.checksummed)
+            open["authorizedSigner"] = .string(authorizedSigner.checksummed)
             payload = open
         }
         return credential(challenge, chainId: chainId, payload: payload)
@@ -337,23 +354,10 @@ public struct TempoChannelMethod: PaymentMethodClient {
             throw TempoChannelMethodError.amountExceedsChannelRange
         }
         do {
-            return try voucher.sign(escrowContract: escrow, chainId: chainId, with: signer)
+            return try voucher.sign(escrowContract: escrow, chainId: chainId, with: voucherSigner)
         } catch {
             throw TempoChannelMethodError.signingFailed(error)
         }
-    }
-
-    /// The `{action, channelId, cumulativeAmount, signature}` shared by both payloads.
-    /// `channelId`/`signature` are `0x`-prefixed hex; `cumulativeAmount` is decimal.
-    private func voucherPayload(
-        _ action: String, _ channelID: Data, _ cumulative: ChannelAmount, _ signature: Data
-    ) -> [String: JSONValue] {
-        [
-            "action": .string(action),
-            "channelId": .string(channelID.hexPrefixed),
-            "cumulativeAmount": .string(cumulative.decimalString),
-            "signature": .string(signature.hexPrefixed),
-        ]
     }
 
     /// The `tempo` / `session` advertisement range, built once. The default quality is in
@@ -368,29 +372,16 @@ public struct TempoChannelMethod: PaymentMethodClient {
     }()
 }
 
-/// The escrow / payee / token a session challenge resolves to. File-scope (not nested in the
-/// method) so it does not count against the method's type-body length.
-private struct ResolvedSession {
-    let escrow: EthereumAddress
-    let payee: EthereumAddress
-    let token: EthereumAddress
-    /// The registry key for this channel on `chainId`. `chainId` is part of the key (unlike
-    /// the reference client) because it binds the voucher's EIP-712 domain and the on-chain
-    /// channel id: without it, the same `(payee, token, escrow)` on two chains would share one
-    /// entry, and the second charge would voucher against the first chain's channel with the
-    /// wrong domain. The key is internal client state (never on the wire), so this is a
-    /// correctness fix with no protocol impact.
-    func key(chainId: UInt64) -> ChannelKey {
-        ChannelKey(payee: payee, token: token, escrow: escrow, chainId: chainId)
-    }
-}
-
-/// Resolves the escrow / payee / token a session challenge names, or `nil` if any is absent
-/// or not a valid address.
-private func resolveSession(_ request: TempoChargeRequest) -> ResolvedSession? {
-    guard let escrowHex = request.escrowContract, let escrow = EthereumAddress(hex: escrowHex),
-          let payeeHex = request.recipient, let payee = EthereumAddress(hex: payeeHex),
-          let tokenHex = request.currency, let token = EthereumAddress(hex: tokenHex)
-    else { return nil }
-    return ResolvedSession(escrow: escrow, payee: payee, token: token)
+/// The `{action, channelId, cumulativeAmount, signature}` shared by the voucher / open / close
+/// payloads. `channelId`/`signature` are `0x`-prefixed hex; `cumulativeAmount` is decimal.
+/// File-scope (pure) so it does not count against the method's type-body length.
+func channelVoucherPayload(
+    _ action: String, _ channelID: Data, _ cumulative: ChannelAmount, _ signature: Data
+) -> [String: JSONValue] {
+    [
+        "action": .string(action),
+        "channelId": .string(channelID.hexPrefixed),
+        "cumulativeAmount": .string(cumulative.decimalString),
+        "signature": .string(signature.hexPrefixed),
+    ]
 }

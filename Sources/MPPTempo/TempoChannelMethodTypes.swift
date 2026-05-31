@@ -70,3 +70,30 @@ public enum TempoChannelMethodError: Error, Sendable, Hashable {
     /// Building the signed open transaction failed (carries the builder error's text).
     case openTransactionFailed(String)
 }
+
+/// The escrow / payee / token a session challenge resolves to. File-scope (not nested in the
+/// method) so it does not count against the method's type-body length.
+struct ResolvedSession {
+    let escrow: EthereumAddress
+    let payee: EthereumAddress
+    let token: EthereumAddress
+    /// The registry key for this channel on `chainId`. `chainId` is part of the key (unlike
+    /// the reference client) because it binds the voucher's EIP-712 domain and the on-chain
+    /// channel id: without it, the same `(payee, token, escrow)` on two chains would share one
+    /// entry, and the second charge would voucher against the first chain's channel with the
+    /// wrong domain. The key is internal client state (never on the wire), a correctness fix
+    /// with no protocol impact.
+    func key(chainId: UInt64) -> ChannelKey {
+        ChannelKey(payee: payee, token: token, escrow: escrow, chainId: chainId)
+    }
+}
+
+/// Resolves the escrow / payee / token a session challenge names, or `nil` if any is absent
+/// or not a valid address.
+func resolveSession(_ request: TempoChargeRequest) -> ResolvedSession? {
+    guard let escrowHex = request.escrowContract, let escrow = EthereumAddress(hex: escrowHex),
+          let payeeHex = request.recipient, let payee = EthereumAddress(hex: payeeHex),
+          let tokenHex = request.currency, let token = EthereumAddress(hex: tokenHex)
+    else { return nil }
+    return ResolvedSession(escrow: escrow, payee: payee, token: token)
+}

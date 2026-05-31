@@ -16,6 +16,8 @@ import Testing
 enum Fixture {
     static let chainId: UInt64 = 1
     static let key = Data([UInt8](repeating: 0, count: 31) + [1])
+    /// A distinct access key (for the separate-authorizedSigner tests).
+    static let accessKey = Data([UInt8](repeating: 0, count: 31) + [2])
     static let escrowHex = "0x000000000000000000000000000000000000eeee"
     static let payeeHex = "0x1111111111111111111111111111111111111111"
     static let payee2Hex = "0x2222222222222222222222222222222222222222"
@@ -105,7 +107,8 @@ func makeMethod(
     approval: TempoApprovalPolicy = .allowAll,
     builder: StubOpenTxBuilder,
     topUpBuilder: (any TempoTopUpTxBuilder)? = nil,
-    channelReader: (any ChannelStateReading)? = nil
+    channelReader: (any ChannelStateReading)? = nil,
+    voucherSigner: Secp256k1Signer? = nil
 ) throws -> TempoChannelMethod {
     let method = try TempoChannelMethod(
         signer: makeSigner(),
@@ -115,7 +118,8 @@ func makeMethod(
         approval: approval,
         saltProvider: { Fixture.salt },
         topUpBuilder: topUpBuilder,
-        channelReader: channelReader
+        channelReader: channelReader,
+        voucherSigner: voucherSigner
     )
     return try #require(method)
 }
@@ -193,15 +197,18 @@ func sessionChallenge(
     )
 }
 
-/// The channel id the client should derive for a payee, with the fixed salt and the
-/// wallet as both payer and authorized signer.
-func expectedChannelID(payeeHex: String, wallet: EthereumAddress) throws -> Data {
+/// The channel id the client should derive for a payee, with the fixed salt and `wallet` as
+/// payer. `authorizedSigner` defaults to `wallet` (no separate access key).
+func expectedChannelID(
+    payeeHex: String, wallet: EthereumAddress, authorizedSigner: EthereumAddress? = nil
+) throws -> Data {
     let payee = try #require(EthereumAddress(hex: payeeHex))
     let token = try #require(EthereumAddress(hex: Fixture.tokenHex))
     let escrow = try #require(EthereumAddress(hex: Fixture.escrowHex))
     let parameters = try #require(Channel.Parameters(
         payer: wallet, payee: payee, token: token, salt: Fixture.salt,
-        authorizedSigner: wallet, escrowContract: escrow, chainId: Fixture.chainId
+        authorizedSigner: authorizedSigner ?? wallet, escrowContract: escrow,
+        chainId: Fixture.chainId
     ))
     return Channel.id(parameters)
 }
