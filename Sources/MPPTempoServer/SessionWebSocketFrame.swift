@@ -58,17 +58,17 @@ public enum SessionWebSocketFrame: Sendable, Hashable {
     public func encoded() throws -> String {
         switch self {
         case let .authorization(value):
-            try Self.json(Authorization(mpp: tag, authorization: value))
+            try CanonicalJSON.string(Authorization(mpp: tag, authorization: value))
         case let .message(text):
-            try Self.json(Tagged(mpp: tag, data: text))
+            try CanonicalJSON.string(Tagged(mpp: tag, data: text))
         case let .needVoucher(payload):
-            try Self.json(Tagged(mpp: tag, data: payload))
+            try CanonicalJSON.string(Tagged(mpp: tag, data: payload))
         case let .receipt(receipt), let .closeReady(receipt):
-            try Self.json(Tagged(mpp: tag, data: receipt))
+            try CanonicalJSON.string(Tagged(mpp: tag, data: receipt))
         case .closeRequest:
-            try Self.json(Untagged(mpp: tag))
+            try CanonicalJSON.string(Untagged(mpp: tag))
         case let .error(status, message):
-            try Self.json(Failure(mpp: tag, status: status, message: message))
+            try CanonicalJSON.string(Failure(mpp: tag, status: status, message: message))
         }
     }
 
@@ -107,18 +107,6 @@ public enum SessionWebSocketFrame: Sendable, Hashable {
 
     private struct Authorization: Codable { let mpp: String; let authorization: String }
     private struct Failure: Codable { let mpp: String; let status: Int; let message: String }
-
-    private static func json(_ value: some Encodable) throws -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        let data = try encoder.encode(value)
-        guard let string = String(bytes: data, encoding: .utf8) else {
-            throw EncodingError.invalidValue(value, .init(
-                codingPath: [], debugDescription: "JSON encoding was not valid UTF-8"
-            ))
-        }
-        return string
-    }
 
     private static func decode<T: Decodable>(_ type: T.Type, _ data: Data) -> T? {
         try? JSONDecoder().decode(type, from: data)
