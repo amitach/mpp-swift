@@ -97,7 +97,9 @@ struct DiscoveryTests {
     func validatorPasses() {
         let json = Data(#"""
         {"openapi":"3.0.0","info":{"title":"x","version":"1"},"paths":{
-          "/p":{"get":{"x-payment-info":{"amount":"100","currency":"USD"}}}},
+          "/p":{"get":{"x-payment-info":{"amount":"100","currency":"USD"},
+            "requestBody":{"content":{}},
+            "responses":{"402":{"description":"Payment Required"}}}}},
           "x-service-info":{"categories":["ai"],"docs":{"llms":"/llms.txt"}}}
         """#.utf8)
         #expect(DiscoveryValidator.validate(json).isEmpty)
@@ -207,7 +209,9 @@ struct DiscoveryTests {
     func validatorPassesOffers() {
         let json = Data(#"""
         {"openapi":"3.1.0","info":{"title":"x","version":"1"},"paths":{
-          "/p":{"get":{"x-payment-info":{"offers":[{"amount":"5"},{"amount":null}]}}}}}
+          "/p":{"get":{"x-payment-info":{"offers":[{"amount":"5"},{"amount":null}]},
+            "requestBody":{"content":{}},
+            "responses":{"402":{"description":"Payment Required"}}}}}}
         """#.utf8)
         #expect(DiscoveryValidator.validate(json).isEmpty)
     }

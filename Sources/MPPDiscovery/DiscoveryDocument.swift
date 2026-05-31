@@ -10,6 +10,12 @@ import Foundation
 /// `3.1.0`. (Round-tripping the full foreign document verbatim is out of scope;
 /// the model captures the discovery surface, which is what a client needs.)
 public struct DiscoveryDocument: Sendable, Hashable {
+    /// The conventional path a service publishes its discovery document at: `GET /openapi.json`,
+    /// served over HTTPS with `Content-Type: application/json` (the Payment Discovery spec).
+    public static let conventionalPath = "/openapi.json"
+    /// The media type of the served document.
+    public static let mediaType = "application/json"
+
     /// The `openapi` version string of the parsed input (emit is always 3.1.0).
     public var openapi: String
     /// The `info` object (title, version).
