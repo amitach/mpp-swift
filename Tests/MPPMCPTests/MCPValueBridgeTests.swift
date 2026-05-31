@@ -49,4 +49,24 @@ struct MCPValueBridgeTests {
             try JSONValue(mcp: .object(["outer": .array([.double(2.0)])]))
         }
     }
+
+    @Test("a hostile, deeply-nested value fails closed instead of overflowing")
+    func tooDeepRejected() {
+        var deep = MCP.Value.string("leaf")
+        for _ in 0 ..< (JSONValue.maxBridgeDepth + 50) {
+            deep = .array([deep])
+        }
+        #expect(throws: JSONValue.BridgeError.tooDeep) {
+            try JSONValue(mcp: deep)
+        }
+    }
+
+    @Test("nesting within the depth limit still converts")
+    func withinDepthLimitOK() throws {
+        var value = MCP.Value.string("leaf")
+        for _ in 0 ..< (JSONValue.maxBridgeDepth - 2) {
+            value = .array([value])
+        }
+        _ = try JSONValue(mcp: value)
+    }
 }

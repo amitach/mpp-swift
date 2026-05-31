@@ -36,7 +36,15 @@ public struct MCPPaymentServer: Sendable {
         let middleware = middleware
         let now = now
         return { params in
-            let credential = try Self.credential(from: params._meta)
+            let credential: Credential?
+            do {
+                credential = try Self.credential(from: params._meta)
+            } catch is MCPPaymentCodec.CodecError {
+                // A present-but-malformed credential is a client error, not an internal one:
+                // answer -32602 (invalid params), matching the reference peer, rather than letting
+                // the codec error surface as -32603. (An ABSENT credential returns nil -> -32042.)
+                throw MCPError.invalidParams("malformed payment credential")
+            }
             let decision = try await middleware.evaluate(
                 authorization: credential?.headerValue,
                 body: Data(),

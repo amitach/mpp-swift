@@ -53,6 +53,21 @@ struct MCPPaymentServerGateTests {
         }
     }
 
+    @Test("a present-but-malformed credential answers -32602, not an internal error")
+    func malformedCredential() async throws {
+        let handler = try mcpGate(okHandler())
+        // A credential the codec cannot parse (no challenge / payload).
+        let meta = Metadata(additionalFields: [
+            MCPPayment.credentialMetaKey: .object(["bogus": .string("x")]),
+        ])
+        do {
+            _ = try await handler(CallTool.Parameters(name: "premium", meta: meta))
+            Issue.record("expected invalidParams")
+        } catch let error as MCPError {
+            #expect(error.code == -32602)
+        }
+    }
+
     @Test("a valid credential proceeds and the receipt is attached to result._meta")
     func validCredentialProceeds() async throws {
         let handler = try mcpGate(okHandler())
