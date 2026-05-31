@@ -261,7 +261,10 @@ fn parse_address(label: &str, bytes: &[u8]) -> Result<Address, FfiError> {
     Ok(Address::from_slice(bytes))
 }
 
-fn parse_optional_address(label: &str, bytes: Option<Vec<u8>>) -> Result<Option<Address>, FfiError> {
+fn parse_optional_address(
+    label: &str,
+    bytes: Option<Vec<u8>>,
+) -> Result<Option<Address>, FfiError> {
     match bytes {
         Some(bytes) => Ok(Some(parse_address(label, &bytes)?)),
         None => Ok(None),
@@ -460,8 +463,17 @@ mod tests {
     fn ffi_wrapper_rejects_bad_lengths() {
         // 31-byte key -> InvalidInput, not a panic.
         let result = build_close_transaction(
-            42431, 7, "1".into(), "1".into(), 1, None,
-            vec![0x11; 31], vec![0x55; 20], vec![0xAB; 32], "1".into(), vec![0u8; 65],
+            42431,
+            7,
+            "1".into(),
+            "1".into(),
+            1,
+            None,
+            vec![0x11; 31],
+            vec![0x55; 20],
+            vec![0xAB; 32],
+            "1".into(),
+            vec![0u8; 65],
         );
         assert!(matches!(result, Err(FfiError::InvalidInput(_))));
     }
@@ -479,7 +491,7 @@ mod tests {
             Address::from([0x22; 20]), // token
             Address::from([0x33; 20]), // payee
             1000,
-            [0xAB; 32], // salt
+            [0xAB; 32],                // salt
             Address::from([0x44; 20]), // authorizedSigner
         )
         .expect("build open")
@@ -511,7 +523,9 @@ mod tests {
     /// recomputed here as an INDEPENDENT oracle (not via the same `sol!` path the
     /// builder uses), so a wrong ABI in the builder is caught rather than mirrored.
     fn selector(signature: &[u8]) -> [u8; 4] {
-        alloy_primitives::keccak256(signature)[..4].try_into().expect("4 bytes")
+        alloy_primitives::keccak256(signature)[..4]
+            .try_into()
+            .expect("4 bytes")
     }
 
     /// open is a two-call tx: approve(escrow, deposit) on the token, then
@@ -559,19 +573,47 @@ mod tests {
     #[test]
     fn ffi_open_and_top_up_match_golden() {
         let open = build_open_transaction(
-            42431, 7, "1000000000".into(), "1000000".into(), 100_000, None,
-            vec![0x11; 32], vec![0x55; 20], vec![0x22; 20], vec![0x33; 20],
-            "1000".into(), vec![0xAB; 32], vec![0x44; 20],
+            42431,
+            7,
+            "1000000000".into(),
+            "1000000".into(),
+            100_000,
+            None,
+            vec![0x11; 32],
+            vec![0x55; 20],
+            vec![0x22; 20],
+            vec![0x33; 20],
+            "1000".into(),
+            vec![0xAB; 32],
+            vec![0x44; 20],
         )
         .expect("build open");
-        assert_eq!(open.iter().map(|b| format!("{b:02x}")).collect::<String>(), GOLDEN_OPEN_TX);
+        assert_eq!(
+            open.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+            GOLDEN_OPEN_TX
+        );
 
         let top_up = build_top_up_transaction(
-            42431, 7, "1000000000".into(), "1000000".into(), 100_000, None,
-            vec![0x11; 32], vec![0x55; 20], vec![0x22; 20], vec![0xAB; 32], "1000".into(),
+            42431,
+            7,
+            "1000000000".into(),
+            "1000000".into(),
+            100_000,
+            None,
+            vec![0x11; 32],
+            vec![0x55; 20],
+            vec![0x22; 20],
+            vec![0xAB; 32],
+            "1000".into(),
         )
         .expect("build topUp");
-        assert_eq!(top_up.iter().map(|b| format!("{b:02x}")).collect::<String>(), GOLDEN_TOP_UP_TX);
+        assert_eq!(
+            top_up
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>(),
+            GOLDEN_TOP_UP_TX
+        );
     }
 
     const GOLDEN_CLOSE_TX: &str = "76f9015b82a5bf830f4240843b9aca00830186a0f8fef8fc94555555555555555555555555555555555555555580b8e40d65c51dabababababababababababababababababababababababababababababababab00000000000000000000000000000000000000000000000000000000000003e800000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000041000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0800780808080c0b84170186b0fac541ff7fcfcdedd819df35bd3207eae52fdff25b79e1d84ec0cac677365daa5efb4e34e307dc760cdeac0a1b95ed8b3129fdfc82764333a0ab6945a1c";
@@ -579,5 +621,69 @@ mod tests {
     const GOLDEN_OPEN_TX: &str = "76f9017a82a5bf830f4240843b9aca00830186a0f9011cf85c94222222222222222222222222222222222222222280b844095ea7b3000000000000000000000000555555555555555555555555555555555555555500000000000000000000000000000000000000000000000000000000000003e8f8bc94555555555555555555555555555555555555555580b8a4c79ea4850000000000000000000000003333333333333333333333333333333333333333000000000000000000000000222222222222222222222222222222222222222200000000000000000000000000000000000000000000000000000000000003e8abababababababababababababababababababababababababababababababab0000000000000000000000004444444444444444444444444444444444444444c0800780808080c0b841de9fb016ce44ed02dca54f29b1ebabe7a64a1a6ac99e83a58cc1adb6cee88d887406777d5e7e3347d60866e9569ae234a3faa625ee643ef6986d7115ec1deb591b";
 
     const GOLDEN_TOP_UP_TX: &str = "76f9011982a5bf830f4240843b9aca00830186a0f8bcf85c94222222222222222222222222222222222222222280b844095ea7b3000000000000000000000000555555555555555555555555555555555555555500000000000000000000000000000000000000000000000000000000000003e8f85c94555555555555555555555555555555555555555580b844b67644b9abababababababababababababababababababababababababababababababab00000000000000000000000000000000000000000000000000000000000003e8c0800780808080c0b841614b14a310bd2d62e898ea879e38c84dbd59b869209c51dd4c261b2eddce322439e6f11f9a4b5678909d4ab9bf29e8052abcb7ab9f6c4518e6455ec5d0ae43241b";
-}
 
+    // --- KeyAuthorization differential check vs the chain (tempo-primitives 1.8.0) ---
+    // The MPP-swift pure-Swift KeyAuthorization encoder must be byte-identical to the chain's own
+    // RLP, and the chain must round-trip MPP-swift's canonical bytes. This is the authoritative peer
+    // validation for the subscription key authorization: the chain's alloy-strict codec is the
+    // oracle, so we never approximate canonicality by hand. INNER_TUPLE is the
+    // RLP([chainId, keyType, keyId, expiry, limits, calls]) that MPP-swift hashes for the sign
+    // payload (its `TempoKeyAuthorizationTests.innerTuple`); the chain's KeyAuthorization RLP is
+    // exactly this tuple (the signature is carried separately on-chain, not inside it), and the
+    // trailing `witness` field is canonically omitted when absent.
+    const INNER_TUPLE: &str = "f87182a5bf8094be95c3f554e9fc85ec51be69a3d807a0d55bcf2c8470dbd880dedd9420c0000000000000000000000000000000000001830f424083093a80f3f29420c0000000000000000000000000000000000001dcdb8495777d59d5941111111111111111111111111111111111111111";
+
+    fn mpp_swift_golden_key_authorization(
+    ) -> tempo_primitives::transaction::key_authorization::KeyAuthorization {
+        use alloy_primitives::{address, U256};
+        use std::num::NonZeroU64;
+        use tempo_primitives::transaction::key_authorization::{
+            CallScope, KeyAuthorization, SelectorRule, TokenLimit,
+        };
+        use tempo_primitives::SignatureType;
+        let token = address!("20c0000000000000000000000000000000000001");
+        KeyAuthorization {
+            chain_id: 42431,
+            key_type: SignatureType::Secp256k1,
+            key_id: address!("be95c3f554e9fc85ec51be69a3d807a0d55bcf2c"),
+            expiry: NonZeroU64::new(1_893_456_000),
+            limits: Some(vec![TokenLimit {
+                token,
+                limit: U256::from(1_000_000u64),
+                period: 604_800,
+            }]),
+            allowed_calls: Some(vec![CallScope {
+                target: token,
+                selector_rules: vec![SelectorRule {
+                    selector: [0x95, 0x77, 0x7d, 0x59],
+                    recipients: vec![address!("1111111111111111111111111111111111111111")],
+                }],
+            }]),
+            witness: None,
+            is_admin: false,
+            account: None,
+        }
+    }
+
+    /// The chain's RLP of the key authorization is byte-identical to MPP-swift's inner tuple, so
+    /// keccak256 of it is the same sign payload both sides compute.
+    #[test]
+    fn key_authorization_encoding_matches_mpp_swift() {
+        use alloy_rlp::Encodable;
+        let mut buf = Vec::new();
+        mpp_swift_golden_key_authorization().encode(&mut buf);
+        let hex: String = buf.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, INNER_TUPLE);
+    }
+
+    /// The chain's strict decoder accepts MPP-swift's canonical bytes and recovers the same fields.
+    #[test]
+    fn chain_round_trips_mpp_swift_canonical_bytes() {
+        use alloy_rlp::Decodable;
+        use tempo_primitives::transaction::key_authorization::KeyAuthorization;
+        let bytes = alloy_primitives::hex::decode(INNER_TUPLE).expect("hex");
+        let decoded =
+            KeyAuthorization::decode(&mut bytes.as_slice()).expect("chain decodes our bytes");
+        assert_eq!(decoded, mpp_swift_golden_key_authorization());
+    }
+}
