@@ -131,9 +131,6 @@ public enum RLP {
     private static func readLength(
         _ bytes: [UInt8], at index: Int, base: UInt8
     ) throws(DecodingError) -> (length: Int, headerSize: Int) {
-        // The prefix range caps a length-of-length at 8 bytes, so `length` accumulates at most 64
-        // bits: an 8-byte value with its top bit set overflows `Int` into a negative number, which
-        // the `length >= 0` guard below rejects as non-canonical.
         let byteCount = Int(bytes[index] - base)
         guard index + 1 + byteCount <= bytes.count else { throw .truncated }
         guard bytes[index + 1] != 0 else { throw .nonCanonicalLength }
@@ -141,7 +138,11 @@ public enum RLP {
         for offset in 0 ..< byteCount {
             length = (length << 8) | Int(bytes[index + 1 + offset])
         }
-        guard length >= 0 else { throw .nonCanonicalLength }
+        // A declared payload can never exceed the whole input. Enforcing this both rejects an
+        // oversized claim AND bounds `length` so the `from + count` / `start + payload` additions
+        // downstream cannot overflow `Int` and trap (a near-`Int.max` length is a crash-DoS vector,
+        // including the 8-byte top-bit-clear value that passes a `>= 0` check).
+        guard length >= 0, length <= bytes.count else { throw .truncated }
         // The long form is only canonical for lengths > 55; anything <= 55 must use the short form.
         guard length > 55 else { throw .nonCanonicalLength }
         return (length, 1 + byteCount)
@@ -151,7 +152,8 @@ public enum RLP {
     private static func parseList(
         _ bytes: [UInt8], from start: Int, payload: Int, depth: Int
     ) throws(DecodingError) -> Item {
-        guard start + payload <= bytes.count else { throw .truncated }
+        // Subtraction form (never `start + payload`) so a large `payload` cannot overflow `Int`.
+        guard start <= bytes.count, payload <= bytes.count - start else { throw .truncated }
         var items: [Item] = []
         var cursor = start
         let end = start + payload
@@ -159,7 +161,7 @@ public enum RLP {
             let (item, consumed) = try parse(bytes, at: cursor, depth: depth + 1)
             // A child must lie entirely within this list's declared payload: a child whose length
             // crosses `end` into sibling/trailing bytes is a malformed (inconsistent) length.
-            guard cursor + consumed <= end else { throw .truncated }
+            guard consumed <= end - cursor else { throw .truncated }
             items.append(item)
             cursor += consumed
         }
@@ -170,7 +172,8 @@ public enum RLP {
     private static func slice(
         _ bytes: [UInt8], from: Int, count: Int
     ) throws(DecodingError) -> Data {
-        guard count >= 0, from + count <= bytes.count else { throw .truncated }
+        // Subtraction form (never `from + count`) so a large `count` cannot overflow `Int`.
+        guard count >= 0, from <= bytes.count, count <= bytes.count - from else { throw .truncated }
         return Data(bytes[from ..< (from + count)])
     }
 }

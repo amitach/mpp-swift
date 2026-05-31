@@ -61,12 +61,15 @@ struct RLPTests {
         #expect(throws: RLP.DecodingError.nonCanonicalLength) {
             try RLP.decode(data("0xb90001ff"))
         }
-        // An 8-byte length whose top bit is set overflows Int (rejected as non-canonical).
-        #expect(throws: RLP.DecodingError.nonCanonicalLength) {
-            try RLP.decode(data("0xbfffffffffffffffff"))
-        }
         // A valid item followed by a stray trailing byte.
         #expect(throws: RLP.DecodingError.trailingBytes) { try RLP.decode(data("0x80ff")) }
+        // Oversized 8-byte declared lengths exceed the input and are rejected before any offset
+        // arithmetic, so neither traps on Int overflow (a crash DoS): the top-bit-set value
+        // (negative when accumulated) and the top-bit-clear Int.max value both reject as truncated.
+        #expect(throws: RLP.DecodingError.truncated) { try RLP.decode(data("0xbfffffffffffffffff"))
+        }
+        #expect(throws: RLP.DecodingError.truncated) { try RLP.decode(data("0xbf7fffffffffffffff"))
+        }
     }
 
     @Test("decoding rejects non-canonical encodings (strict, no malleability)")

@@ -272,6 +272,7 @@ public struct TempoKeyAuthorization: Sendable, Hashable {
               case let .bytes(token) = fields[0], let address = EthereumAddress(bytes: token),
               case let .bytes(amount) = fields[1]
         else { throw .malformedSerialization }
+        try requireMinimalInteger(amount)
         var period: UInt64 = 0
         if fields.count == 3 {
             guard case let .bytes(periodBytes) = fields[2] else { throw .malformedSerialization }
@@ -317,11 +318,21 @@ public struct TempoKeyAuthorization: Sendable, Hashable {
         Data([UInt8](bytes).drop { $0 == 0 })
     }
 
-    /// A big-endian byte string as a `UInt64`, rejecting more than 8 bytes (which would silently
-    /// truncate an attacker-supplied chainId / expiry / period).
+    /// A big-endian byte string as a `UInt64`, rejecting a non-minimal encoding (leading zero) and
+    /// more than 8 bytes (which would silently truncate an attacker-supplied
+    /// chainId/expiry/period).
     private static func uint64(_ bytes: Data) throws(AuthorizationError) -> UInt64 {
+        try requireMinimalInteger(bytes)
         guard bytes.count <= 8 else { throw .malformedSerialization }
         return [UInt8](bytes).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+    }
+
+    /// Rejects a non-minimal big-endian integer (a leading `0x00` byte); the canonical encoding of
+    /// an
+    /// integer has no leading zeros (and `0` is the empty string), matching the chain's RLP
+    /// decoder.
+    private static func requireMinimalInteger(_ bytes: Data) throws(AuthorizationError) {
+        if bytes.first == 0 { throw .malformedSerialization }
     }
 
     /// A big-endian byte string as a base-10 integer string (the inverse of

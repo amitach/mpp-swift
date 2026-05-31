@@ -199,4 +199,22 @@ struct TempoKeyAuthorizationTests {
             try TempoKeyAuthorization.deserialize(malformed)
         }
     }
+
+    @Test("a non-minimal integer encoding (leading zero) is rejected on deserialize")
+    func nonMinimalIntegerRejected() {
+        let addr = Data(repeating: 0x11, count: 20)
+        // A structurally valid tuple whose chainId carries a leading zero byte (non-minimal): the
+        // chain's RLP decoder rejects this, so ours must too (no alternate encodings).
+        let tuple = RLP.Item.list([
+            .bytes(Data([0x00, 0xA5, 0xBF])), // non-minimal chainId
+            .bytes(Data()), // secp256k1
+            .bytes(addr), // key id
+            .bytes(Data([0x70, 0xDB, 0xD8, 0x80])), // expiry
+            .list([]), // limits
+            .list([]), // calls
+        ])
+        #expect(throws: TempoKeyAuthorization.AuthorizationError.self) {
+            try TempoKeyAuthorization.deserialize(RLP.encode(.list([tuple])))
+        }
+    }
 }
