@@ -7,11 +7,13 @@ import Testing
 @testable import MPPTempoServer
 
 // SessionMethod over an injected stub provider + in-memory store, matching the
-// reference SDK's session-server cases: voucher accept / idempotent-still-charges /
-// strictly-increasing / below-settled / exceeds-deposit / bad-signature / closed /
-// insufficient-balance, plus open (validate + create), topUp, and close (settle).
-// The StubProvider/Flag doubles and the shared session fixtures (escrow, seedStore,
-// voucherCredential, sessionMethod, ...) live in TempoServerTestSupport.swift.
+// reference SDK's session-server cases: voucher accept / equal-cumulative-rejected /
+// concurrent-single-charge / strictly-increasing / below-settled / exceeds-deposit /
+// bad-signature / closed / insufficient-balance, plus open (validate + create), topUp,
+// and close (settle). The voucher monotonic decision is atomic: an equal-cumulative
+// replay is rejected, not charged. The StubProvider/Flag doubles and the shared session
+// fixtures (escrow, seedStore, voucherCredential, sessionMethod, ...) live in
+// TempoServerTestSupport.swift.
 
 @Suite("SessionMethod")
 struct SessionMethodTests {
