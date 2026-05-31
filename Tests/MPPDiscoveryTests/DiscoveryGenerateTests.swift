@@ -48,13 +48,12 @@ struct DiscoveryGenerateTests {
         #expect(DiscoveryValidator.validate(data).isEmpty)
 
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let op =
-            ((object?["paths"] as? [
-                String: Any
-            ])?["/free"] as? [String: Any])?["get"] as? [String: Any]
-        #expect(op?["x-payment-info"] == nil)
-        #expect((op?["responses"] as? [String: Any])?["402"] == nil)
-        #expect((op?["responses"] as? [String: Any])?["200"] != nil)
+        let paths = object?["paths"] as? [String: Any]
+        let operation = (paths?["/free"] as? [String: Any])?["get"] as? [String: Any]
+        let responses = operation?["responses"] as? [String: Any]
+        #expect(operation?["x-payment-info"] == nil)
+        #expect(responses?["402"] == nil)
+        #expect(responses?["200"] != nil)
     }
 
     // MARK: semantic validate
