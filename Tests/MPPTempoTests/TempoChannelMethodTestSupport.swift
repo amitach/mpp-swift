@@ -23,9 +23,32 @@ enum Fixture {
     static let deposit = "1000000"
     static let salt = Data(repeating: 0xAB, count: 32)
     static let txBytes = Data([0x76, 0x01, 0x02, 0x03])
+    static let topUpTxBytes = Data([0x76, 0x05, 0x06, 0x07])
 }
 
 enum StubError: Error { case boom }
+
+/// A ``TempoTopUpTxBuilder`` that returns canned bytes and records the channel id +
+/// additionalDeposit it was handed.
+actor StubTopUpTxBuilder: TempoTopUpTxBuilder {
+    private let transaction: Data
+    private(set) var calls: [(channelID: Data, additionalDeposit: String)] = []
+
+    init(transaction: Data = Fixture.topUpTxBytes) {
+        self.transaction = transaction
+    }
+
+    func buildTopUpTransaction(
+        escrow _: EthereumAddress,
+        token _: EthereumAddress,
+        channelID: Data,
+        additionalDeposit: String,
+        chainID _: UInt64
+    ) async throws -> Data {
+        calls.append((channelID, additionalDeposit))
+        return transaction
+    }
+}
 
 /// A ``TempoOpenTxBuilder`` that returns canned bytes (or fails) and records the
 /// parameters it was handed, so a test can assert how many opens ran and with what
@@ -78,7 +101,8 @@ func makeSigner() throws -> Secp256k1Signer {
 func makeMethod(
     depositPolicy: @escaping @Sendable (DepositContext) -> String? = { _ in Fixture.deposit },
     approval: TempoApprovalPolicy = .allowAll,
-    builder: StubOpenTxBuilder
+    builder: StubOpenTxBuilder,
+    topUpBuilder: (any TempoTopUpTxBuilder)? = nil
 ) throws -> TempoChannelMethod {
     let method = try TempoChannelMethod(
         signer: makeSigner(),
@@ -86,7 +110,8 @@ func makeMethod(
         defaultChainId: Fixture.chainId,
         depositPolicy: depositPolicy,
         approval: approval,
-        saltProvider: { Fixture.salt }
+        saltProvider: { Fixture.salt },
+        topUpBuilder: topUpBuilder
     )
     return try #require(method)
 }

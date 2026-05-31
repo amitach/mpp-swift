@@ -130,4 +130,19 @@ actor TempoChannelRegistry {
     private func clearSlot(_ key: ChannelKey) {
         opens[key] = nil
     }
+
+    /// The open channel's id + latest cumulative for `key`, or nil if none is open. Used by
+    /// topUp (it tops up the existing channel without changing the cumulative).
+    func openChannel(_ key: ChannelKey) -> (channelID: Data, cumulative: ChannelAmount)? {
+        entries[key].map { ($0.channelID, $0.cumulative) }
+    }
+
+    /// Removes and returns the open channel for `key`. Used by close: once the channel is
+    /// settled on-chain, a later charge to the same key must open a fresh channel rather than
+    /// voucher against the closed one.
+    func removeChannel(_ key: ChannelKey) -> (channelID: Data, cumulative: ChannelAmount)? {
+        guard let entry = entries[key] else { return nil }
+        entries[key] = nil
+        return (entry.channelID, entry.cumulative)
+    }
 }

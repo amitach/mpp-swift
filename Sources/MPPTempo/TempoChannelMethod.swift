@@ -27,6 +27,7 @@ public struct TempoChannelMethod: PaymentMethodClient {
     private let signer: Secp256k1Signer
     private let wallet: EthereumAddress
     private let openBuilder: any TempoOpenTxBuilder
+    private let topUpBuilder: (any TempoTopUpTxBuilder)?
     private let defaultChainId: UInt64
     private let depositPolicy: @Sendable (DepositContext) -> String?
     private let approval: TempoApprovalPolicy
@@ -49,6 +50,9 @@ public struct TempoChannelMethod: PaymentMethodClient {
     ///     ``TempoApprovalPolicy/allowAll``), run on every charge.
     ///   - saltProvider: supplies the 32-byte channel salt for a new channel (defaults to
     ///     secure-random; injected for deterministic tests).
+    ///   - topUpBuilder: builds the signed `topUp` `0x76` transaction; required only for
+    ///     ``buildTopUp(for:additionalDeposit:)`` (nil rejects a top-up). Open + voucher +
+    ///     close do not need it.
     /// - Returns: `nil` only if a valid address cannot be derived from the signer.
     public init?(
         signer: Secp256k1Signer,
@@ -58,7 +62,8 @@ public struct TempoChannelMethod: PaymentMethodClient {
         approval: TempoApprovalPolicy = .allowAll,
         saltProvider: @escaping @Sendable () -> Data = {
             Data((0 ..< 32).map { _ in UInt8.random(in: .min ... .max) })
-        }
+        },
+        topUpBuilder: (any TempoTopUpTxBuilder)? = nil
     ) {
         guard let wallet = EthereumAddress(uncompressedPublicKey: signer.publicKey) else {
             return nil
@@ -66,6 +71,7 @@ public struct TempoChannelMethod: PaymentMethodClient {
         self.signer = signer
         self.wallet = wallet
         self.openBuilder = openBuilder
+        self.topUpBuilder = topUpBuilder
         self.defaultChainId = defaultChainId
         self.depositPolicy = depositPolicy
         self.approval = approval
@@ -132,7 +138,91 @@ public struct TempoChannelMethod: PaymentMethodClient {
         )
     }
 
+    /// Builds a `topUp` credential for the channel already open for `challenge`'s
+    /// `(payee, token, escrow)`: a signed `[approve, topUp]` `0x76` transaction the server
+    /// relays. Client-initiated channel management, not a charge response.
+    ///
+    /// - Throws: ``TempoChannelMethodError`` for a wrong method/intent, a non-session or
+    ///   malformed request, no open channel for the key, a missing top-up builder, or a
+    ///   build failure.
+    public func buildTopUp(
+        for challenge: Challenge,
+        additionalDeposit: String
+    ) async throws -> Credential {
+        let (session, chainId) = try resolveForManagement(challenge)
+        guard let topUpBuilder else { throw TempoChannelMethodError.topUpUnsupported }
+        guard let open = await registry.openChannel(session.key(chainId: chainId)) else {
+            throw TempoChannelMethodError.noOpenChannel
+        }
+        let transaction: Data
+        do {
+            transaction = try await topUpBuilder.buildTopUpTransaction(
+                escrow: session.escrow, token: session.token, channelID: open.channelID,
+                additionalDeposit: additionalDeposit, chainID: chainId
+            )
+        } catch {
+            throw TempoChannelMethodError.topUpTransactionFailed(String(describing: error))
+        }
+        let payload: [String: JSONValue] = [
+            "action": .string("topUp"),
+            "type": .string("transaction"),
+            "channelId": .string(open.channelID.hexPrefixed),
+            "transaction": .string(transaction.hexPrefixed),
+            "additionalDeposit": .string(additionalDeposit),
+        ]
+        return credential(challenge, chainId: chainId, payload: payload)
+    }
+
+    /// Builds a `close` credential settling the channel open for `challenge`'s key at its
+    /// latest tracked cumulative (a signed voucher, no transaction: the server settles it
+    /// on-chain). Removes the channel from the registry, so a later charge opens a fresh one.
+    ///
+    /// - Throws: ``TempoChannelMethodError`` for a wrong method/intent, a non-session or
+    ///   malformed request, no open channel for the key, or a signing failure.
+    public func buildClose(for challenge: Challenge) async throws -> Credential {
+        let (session, chainId) = try resolveForManagement(challenge)
+        guard let open = await registry.removeChannel(session.key(chainId: chainId)) else {
+            throw TempoChannelMethodError.noOpenChannel
+        }
+        let signature = try signVoucher(
+            open.channelID, open.cumulative, escrow: session.escrow, chainId: chainId
+        )
+        let payload = voucherPayload("close", open.channelID, open.cumulative, signature)
+        return credential(challenge, chainId: chainId, payload: payload)
+    }
+
     // MARK: - Internals
+
+    /// Validates a management call (topUp/close) and resolves its session + chain.
+    private func resolveForManagement(
+        _ challenge: Challenge
+    ) throws -> (session: ResolvedSession, chainId: UInt64) {
+        guard challenge.method == TempoMethod.name, challenge.intent == .session else {
+            throw TempoChannelMethodError.wrongMethodOrIntent
+        }
+        let request: TempoChargeRequest
+        do {
+            request = try TempoChargeRequest(challenge: challenge)
+        } catch {
+            throw TempoChannelMethodError.malformedRequest(error)
+        }
+        guard let session = resolveSession(request) else {
+            throw TempoChannelMethodError.notASession
+        }
+        return (session, request.chainId ?? defaultChainId)
+    }
+
+    /// Wraps a payload as a `Credential` with the `did:pkh` source. Shared by the management
+    /// ops; the auto-charge path uses ``assembleCredential(_:chainId:escrow:outcome:)``.
+    private func credential(
+        _ challenge: Challenge, chainId: UInt64, payload: [String: JSONValue]
+    ) -> Credential {
+        Credential(
+            challenge: challenge,
+            source: ProofSource.did(address: wallet, chainId: chainId),
+            payload: payload
+        )
+    }
 
     /// The escrow / payee / token a session challenge resolves to, or `nil` if any is
     /// absent or not a valid address.
@@ -234,11 +324,7 @@ public struct TempoChannelMethod: PaymentMethodClient {
             open["authorizedSigner"] = .string(wallet.checksummed)
             payload = open
         }
-        return Credential(
-            challenge: challenge,
-            source: ProofSource.did(address: wallet, chainId: chainId),
-            payload: payload
-        )
+        return credential(challenge, chainId: chainId, payload: payload)
     }
 
     private func signVoucher(
@@ -280,67 +366,4 @@ public struct TempoChannelMethod: PaymentMethodClient {
         }
         return range
     }()
-}
-
-/// The facts a ``TempoChannelMethod`` deposit policy decides a new channel's deposit
-/// from: the channel's payee/token/escrow and chain, the per-request charge `amount`,
-/// and the server's optional `suggestedDeposit`. The deposit the policy returns is the
-/// channel deposit, never the charge amount.
-public struct DepositContext: Sendable, Hashable {
-    /// The channel payee.
-    public let payee: EthereumAddress
-    /// The channel token (currency).
-    public let token: EthereumAddress
-    /// The escrow contract.
-    public let escrow: EthereumAddress
-    /// The chain id the channel is on.
-    public let chainId: UInt64
-    /// The per-request charge amount (for sizing the deposit, not the deposit itself).
-    public let chargeAmount: Amount
-    /// The server-suggested deposit (the top-level `suggestedDeposit` request field), if any.
-    public let suggestedDeposit: String?
-
-    /// Creates the deposit facts. Public (like ``ChargeApproval``) so a consumer can
-    /// construct one to unit-test its deposit policy in isolation.
-    public init(
-        payee: EthereumAddress,
-        token: EthereumAddress,
-        escrow: EthereumAddress,
-        chainId: UInt64,
-        chargeAmount: Amount,
-        suggestedDeposit: String?
-    ) {
-        self.payee = payee
-        self.token = token
-        self.escrow = escrow
-        self.chainId = chainId
-        self.chargeAmount = chargeAmount
-        self.suggestedDeposit = suggestedDeposit
-    }
-}
-
-/// A reason ``TempoChannelMethod`` could not build a credential.
-public enum TempoChannelMethodError: Error, Sendable, Hashable {
-    /// The challenge is not a Tempo session (wrong `method` or `intent`).
-    case wrongMethodOrIntent
-    /// The challenge `request` could not be decoded.
-    case malformedRequest(TempoChargeRequest.DecodingFailure)
-    /// The request is not a session: it lacks a valid escrow, recipient, or currency.
-    case notASession
-    /// The charge amount does not fit a channel `uint128`.
-    case amountExceedsChannelRange
-    /// The deposit policy returned no deposit for a new channel.
-    case noDeposit
-    /// The deposit policy returned a value that is not a canonical `uint128`.
-    case invalidDeposit
-    /// The channel salt was not 32 bytes.
-    case invalidSalt
-    /// Adding the charge to the running cumulative would overflow `uint128`.
-    case cumulativeOverflow
-    /// The pre-sign approval policy rejected the charge.
-    case approvalDenied
-    /// The voucher could not be signed.
-    case signingFailed(Secp256k1Signer.SigningError)
-    /// Building the signed open transaction failed (carries the builder error's text).
-    case openTransactionFailed(String)
 }
