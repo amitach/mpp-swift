@@ -1,4 +1,8 @@
 // swift-tools-version: 6.2
+// swiftlint:disable file_length
+// The file_length rule enforces source-file discipline ("one type per file, split before a file
+// sprawls"); a package manifest has no types and cannot be split, and grows with the module list.
+// All other rules stay enforced here.
 import Foundation
 import PackageDescription
 
@@ -42,6 +46,8 @@ let package = Package(
         .library(name: "MPPTempo", targets: ["MPPTempo"]),
         .library(name: "MPPTempoServer", targets: ["MPPTempoServer"]),
         .library(name: "MPPMCP", targets: ["MPPMCP"]),
+        .library(name: "MPPProxy", targets: ["MPPProxy"]),
+        .library(name: "MPPHummingbird", targets: ["MPPHummingbird"]),
     ],
     dependencies: [
         // swift-crypto and CryptoSwift (below) do NOT overlap; neither replaces the
@@ -91,6 +97,14 @@ let package = Package(
         .package(
             url: "https://github.com/amitach/swift-sdk.git",
             revision: "fe4faf15a7e51888f945ae74481453b172276164"
+        ),
+        // Hummingbird 2: the live HTTP-server binding for MPPProxy. Built natively on
+        // swift-http-types (so the binding is a thin adapter; chosen over Vapor for that) and
+        // reachable only from MPPHummingbird, so no other consumer pulls swift-nio in. FLOOR range
+        // (Apple-package pinning policy); swift-nio is already in the graph via the MCP SDK.
+        .package(
+            url: "https://github.com/hummingbird-project/hummingbird.git",
+            "2.25.0" ..< "3.0.0"
         ),
     ],
     targets: [
@@ -159,6 +173,32 @@ let package = Package(
         .testTarget(
             name: "MPPDiscoveryTests",
             dependencies: ["MPPDiscovery", "MPPCore"]
+        ),
+        // MPPProxy: framework-neutral 402 reverse-proxy engine; no server dependency, zero Rust.
+        .target(
+            name: "MPPProxy",
+            dependencies: ["MPPServer", "MPPClient", "MPPCore", "MPPDiscovery"]
+        ),
+        .testTarget(
+            name: "MPPProxyTests",
+            dependencies: ["MPPProxy", "MPPServer", "MPPClient", "MPPCore", "MPPDiscovery"]
+        ),
+        // MPPHummingbird: live HTTP-server binding for MPPProxy; the only target linking Hummingbird
+        // / swift-nio; entry points @available macOS 14 (package platform stays 13).
+        .target(
+            name: "MPPHummingbird",
+            dependencies: [
+                "MPPProxy", "MPPServer", "MPPCore",
+                .product(name: "Hummingbird", package: "hummingbird"),
+            ]
+        ),
+        .testTarget(
+            name: "MPPHummingbirdTests",
+            dependencies: [
+                "MPPHummingbird", "MPPProxy", "MPPServer", "MPPClient", "MPPCore",
+                .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "HummingbirdTesting", package: "hummingbird"),
+            ]
         ),
         // MPPTempo: the Tempo charge payment method, CLIENT side. Ships the
         // zero-amount EIP-712 proof credential (no on-chain settlement, no FFI 0x76
@@ -232,11 +272,13 @@ let package = Package(
                 .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
-        // MPPConformanceServer: a dev-only HTTP listener (raw sockets, no new dep)
-        // that exposes MPPTempoServer's verifier so the mppx reference CLIENT can pay
-        // our server over a real socket (the reverse conformance direction). No
-        // `.executable` product is declared, so it is internal tooling (run via
-        // `swift run MPPConformanceServer`), never part of the shipped library surface.
+        // MPPConformanceServer: a dev-only HTTP listener (a Hummingbird server via MPPHummingbird's
+        // GatedResponder) that exposes MPPTempoServer's verifier so the mppx reference CLIENT can
+        // pay
+        // our server over a real socket (the reverse conformance direction). No `.executable`
+        // product
+        // is declared, so it is internal tooling (run via `swift run MPPConformanceServer`), never
+        // part of the shipped library surface.
         .executableTarget(
             name: "MPPConformanceServer",
             dependencies: [
@@ -244,11 +286,13 @@ let package = Package(
                 "MPPServer",
                 "MPPTempo",
                 "MPPTempoServer",
+                "MPPHummingbird",
                 // The reverse session route's deps (MPPClient/MPPEVM for live RPC + the
                 // operator key, MPPTempoFFI for the close builder) are added only under the
                 // FFI gate via conformanceServerFFIDeps, so the default proof-only server
                 // pulls none of them.
                 .product(name: "HTTPTypes", package: "swift-http-types"),
+                .product(name: "Hummingbird", package: "hummingbird"),
             ] + conformanceServerFFIDeps,
             swiftSettings: conformanceServerFFISettings
         ),
