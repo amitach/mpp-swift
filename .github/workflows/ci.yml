@@ -169,8 +169,14 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             rust/tempo-tx-ffi/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/tempo-tx-ffi/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          # Key is per-OS AND per-job. The Linux leg here and the linux-ffi job both
+          # resolve runner.os == Linux but build in different environments (bare VM vs
+          # swift container; different glibc/system libs), so their compiled target/ is
+          # not interchangeable. Cache keys are write-once, so a shared key would let one
+          # job win the save and force the other to recompile every time; distinct keys
+          # give each its own effective cache.
+          key: rust-ffi-${{ runner.os }}-cargo-${{ hashFiles('rust/tempo-tx-ffi/Cargo.lock') }}
+          restore-keys: rust-ffi-${{ runner.os }}-cargo-
       - name: Ensure rustc >= 1.93 (tempo-primitives MSRV)
         run: |
           rustup update stable && rustup default stable
@@ -253,15 +259,18 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Cache Cargo + crate target
-        # Same cargo cache as the rust-ffi job: the revm/tempo compile is the cost.
+        # Same shape as the rust-ffi job's cache (the revm/tempo compile is the cost),
+        # but a DISTINCT key prefix: this job builds in the swift container while
+        # rust-ffi's Linux leg builds on the bare VM, so their compiled target/ differs
+        # and must not share a (write-once) key. See the note in the rust-ffi job.
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             rust/tempo-tx-ffi/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/tempo-tx-ffi/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: linux-ffi-${{ runner.os }}-cargo-${{ hashFiles('rust/tempo-tx-ffi/Cargo.lock') }}
+          restore-keys: linux-ffi-${{ runner.os }}-cargo-
       - name: Install build tools + Rust (>= 1.93, tempo-primitives MSRV)
         run: |
           apt-get update -qq && apt-get install -y -qq curl ca-certificates build-essential
