@@ -167,6 +167,49 @@ PR-2 files (mirror TempoChargeRequest's `init(challenge:) throws(DecodingFailure
 - Cross-SDK conformance vs mppx subscription activation (both directions) - rides PR-2.5 like MPPMCP
   did (the hermetic activation round-trip through PaymentClient is already covered in PR-2).
 
+## PR-3 plan (SubscriptionStore + renewal engine) - peer-mined, primitive-mapped
+
+Peer (mppx, mined): `subscription/Store.ts`, `subscription/Types.ts`, `server/Subscription.ts`,
+`subscription/KeyAuthorization.ts`. Our primitive to MIRROR: `MPPTempoServer/ChannelStore.swift`
+(actor + `update(_:_: transform)` atomic CAS, the monotonic-guard-inside-update pattern from
+`SessionMethod.acceptVoucher`). Time = injected `@Sendable () -> Date` (the FileReplayStore pattern),
+NOT a global clock. On-chain transfer stays behind a seam (the open-builder seam pattern) so PR-3 is
+hermetic + RPC-free.
+
+PEER MODEL (faithful, idiomatic-Swift port):
+- `SubscriptionRecord` (Sendable, Hashable): economic params (amount, currency, recipient,
+  periodSeconds, expirySeconds) + identity (subscriptionId, lookupKey, externalId?) +
+  serialized keyAuthorization + payer{address,chainId} + charging state (billingAnchor,
+  lastChargedPeriod, reference, timestamp) + in-flight claim (inFlightPeriod?, inFlightReference?,
+  inFlightAttempt? token, inFlightStartedAt?) + terminal (canceledAt?, revokedAt?).
+- Period index = stateless: `max(0, floor((now - billingAnchor) / periodSeconds))`, `.infinity`
+  when `now >= expiry` (no more charges).
+- isActive = `canceledAt==nil && revokedAt==nil && now < expiry`.
+- lookupKey -> subscriptionId -> record double-indirection (clean supersession: a new sub for the
+  same lookupKey cancels the old).
+
+ENGINE (two-phase commit, the P0-2 atomic lesson):
+1. START (atomic update): already charged (`lastChargedPeriod >= periodIndex`) -> `.charged`;
+   in-flight and not stale (`now - inFlightStartedAt < renewalTimeout`) -> `.inFlight`; else stamp
+   inFlightPeriod + a fresh attempt UUID-equivalent (no Math.random in scripts; use an injected
+   `@Sendable () -> String` token provider, default secure-random, like saltProvider) +
+   `inFlightReference = "renewal:{subscriptionId}:{periodIndex}"` (stable idempotency key persisted
+   BEFORE the side effect) -> `.started`.
+2. SIDE EFFECT: call the injected `SubscriptionRenewer` seam with (record, inFlightReference) ->
+   it builds + submits the recurring transferWithMemo using the stored keyAuthorization; returns a
+   reference (tx hash). Re-check active before AND after (supersession/cancel races).
+3. COMMIT (atomic update): verify inFlightPeriod + attempt still match (stale attempts can't
+   overwrite a newer one), set `lastChargedPeriod = periodIndex`, clear in-flight, preserve terminal
+   states set during the callback -> `.renewed(result)`.
+- Timeout recovery: a stuck in-flight older than `renewalTimeout` (default 900s) can be taken over.
+
+PR-3 files (planned): `SubscriptionStore.swift` (protocol + InMemory actor, mirror ChannelStore),
+`SubscriptionRecord.swift` (model + period/isActive pure helpers), `SubscriptionEngine.swift`
+(the two-phase renew + the `SubscriptionRenewer` seam protocol), tests (hermetic: period math,
+already-charged/in-flight/renewed, concurrent renewals -> exactly one charges, timeout takeover,
+supersession, cancel/revoke during in-flight). The live transferWithMemo submission via the FFI 0x76
+builder either rides PR-3's seam impl or a follow-up; the hermetic engine is the PR-3 bar.
+
 ## Deviations / open
 
 - The tuple builder targets the subscription shape (always emits expiry+limits+calls). A fully
