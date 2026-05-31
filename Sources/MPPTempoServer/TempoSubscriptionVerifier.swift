@@ -59,6 +59,24 @@ public struct TempoSubscriptionVerifier: PaymentMethodServer {
     ///   reconstructs, the expiry is not strictly after the challenge deadline, or
     ///   the signature does not recover to the source wallet.
     public func verify(_ credential: Credential, now: Date) async throws(VerifyError) -> Receipt {
+        _ = try verified(credential, now: now)
+        let challenge = credential.challenge
+        return Receipt(
+            method: challenge.method, timestamp: RFC3339DateTime(date: now), reference: challenge.id
+        )
+    }
+
+    /// Verifies the signed key authorization carried by `credential` and returns the
+    /// activation it proves: the decoded ``SubscriptionRequest``, the recovered
+    /// `payer`, the serialized authorization bytes, and the bound chain.
+    ///
+    /// This is the verification ``verify(_:now:)`` performs, exposed so a server can
+    /// persist the activation (build a ``SubscriptionRecord`` and store it for renewal)
+    /// from the same checks rather than re-deriving them. ``verify(_:now:)`` calls this
+    /// and maps the result to its ``Receipt``, so the two share one verification path.
+    ///
+    /// - Throws: the same ``VerifyError`` cases, in the same order, as ``verify(_:now:)``.
+    public func verified(_ credential: Credential, now: Date) throws(VerifyError) -> Verified {
         let challenge = credential.challenge
         let request: SubscriptionRequest
         do {
@@ -97,9 +115,36 @@ public struct TempoSubscriptionVerifier: PaymentMethodServer {
         // The signer of the authorization must be the wallet the credential claims.
         guard payer == sourceWallet else { throw .signatureMismatch }
 
-        return Receipt(
-            method: challenge.method, timestamp: RFC3339DateTime(date: now), reference: challenge.id
+        return Verified(
+            request: request, payer: payer, serializedAuthorization: serialized, chainID: chainID
         )
+    }
+
+    /// A verified subscription activation: everything a server needs to persist a
+    /// ``SubscriptionRecord`` for renewal, proven from one credential.
+    public struct Verified: Sendable, Hashable {
+        /// The decoded, fully validated subscription terms from the challenge.
+        public let request: SubscriptionRequest
+        /// The payer (root) wallet recovered from the authorization signature; equal
+        /// to the credential's `did:pkh` source.
+        public let payer: EthereumAddress
+        /// The serialized signed ``TempoKeyAuthorization`` the renewal engine replays.
+        public let serializedAuthorization: Data
+        /// The chain the authorization is bound to (the request's, or the verifier's
+        /// default when the challenge omits it).
+        public let chainID: UInt64
+
+        public init(
+            request: SubscriptionRequest,
+            payer: EthereumAddress,
+            serializedAuthorization: Data,
+            chainID: UInt64
+        ) {
+            self.request = request
+            self.payer = payer
+            self.serializedAuthorization = serializedAuthorization
+            self.chainID = chainID
+        }
     }
 
     /// The serialized authorization and the source wallet a credential presents,
