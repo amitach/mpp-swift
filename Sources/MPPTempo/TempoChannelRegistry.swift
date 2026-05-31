@@ -137,6 +137,14 @@ actor TempoChannelRegistry {
         entries[key].map { ($0.channelID, $0.cumulative) }
     }
 
+    /// Attaches a recovered on-chain channel, seeding `cumulative` (the on-chain settled
+    /// amount, a safe floor for new vouchers). Idempotent: a no-op if an entry already exists
+    /// for the key, so it never clobbers an open channel.
+    func attach(_ key: ChannelKey, channelID: Data, cumulative: ChannelAmount) {
+        guard entries[key] == nil else { return }
+        entries[key] = Entry(channelID: channelID, cumulative: cumulative)
+    }
+
     /// Removes and returns the open channel for `key`. Used by close: once the channel is
     /// settled on-chain, a later charge to the same key must open a fresh channel rather than
     /// voucher against the closed one.

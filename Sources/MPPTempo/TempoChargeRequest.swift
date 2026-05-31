@@ -1,5 +1,6 @@
 import Foundation
 import MPPCore
+import MPPEVM
 
 /// The Tempo charge parameters decoded from a challenge's `request`, limited to
 /// the subset the zero-amount proof path needs plus the fields surfaced for
@@ -28,6 +29,10 @@ public struct TempoChargeRequest: Sendable, Hashable {
     /// `suggestedDeposit` request field (a sibling of `amount`, a decimal base-units string),
     /// if present. A client's deposit policy may use it as one input; never the charge amount.
     public let suggestedDeposit: String?
+    /// A channel the server suggests reusing, from `methodDetails.channelId` (a 32-byte
+    /// `0x`-hex id), if present and well-formed. A client may attach to it on-chain rather
+    /// than opening a fresh channel.
+    public let suggestedChannelID: Data?
 
     /// Whether this is a zero-amount charge (the EIP-712 proof path).
     ///
@@ -63,6 +68,7 @@ public struct TempoChargeRequest: Sendable, Hashable {
         currency = wire.currency
         escrowContract = wire.methodDetails?.escrowContract
         suggestedDeposit = wire.suggestedDeposit
+        suggestedChannelID = wire.methodDetails?.channelId.flatMap(Data.init(hexPrefixed:))
     }
 
     /// A reason a charge `request` could not be decoded.
@@ -91,9 +97,10 @@ private struct ChargeRequestWire: Decodable {
     let methodDetails: MethodDetails?
 }
 
-/// The `methodDetails` sub-object: `chainId` (proof + session) and the session's
-/// `escrowContract`.
+/// The `methodDetails` sub-object: `chainId` (proof + session), the session's
+/// `escrowContract`, and an optional `channelId` the server suggests reusing.
 private struct MethodDetails: Decodable {
     let chainId: UInt64?
     let escrowContract: String?
+    let channelId: String?
 }

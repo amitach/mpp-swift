@@ -24,6 +24,8 @@ enum Fixture {
     static let salt = Data(repeating: 0xAB, count: 32)
     static let txBytes = Data([0x76, 0x01, 0x02, 0x03])
     static let topUpTxBytes = Data([0x76, 0x05, 0x06, 0x07])
+    /// A 32-byte channel id a server suggests reusing (for recovery tests).
+    static let recoverChannelHex = "0x" + String(repeating: "cd", count: 32)
 }
 
 enum StubError: Error { case boom }
@@ -102,7 +104,8 @@ func makeMethod(
     depositPolicy: @escaping @Sendable (DepositContext) -> String? = { _ in Fixture.deposit },
     approval: TempoApprovalPolicy = .allowAll,
     builder: StubOpenTxBuilder,
-    topUpBuilder: (any TempoTopUpTxBuilder)? = nil
+    topUpBuilder: (any TempoTopUpTxBuilder)? = nil,
+    channelReader: (any ChannelStateReading)? = nil
 ) throws -> TempoChannelMethod {
     let method = try TempoChannelMethod(
         signer: makeSigner(),
@@ -111,9 +114,48 @@ func makeMethod(
         depositPolicy: depositPolicy,
         approval: approval,
         saltProvider: { Fixture.salt },
-        topUpBuilder: topUpBuilder
+        topUpBuilder: topUpBuilder,
+        channelReader: channelReader
     )
     return try #require(method)
+}
+
+/// A ``ChannelStateReading`` returning a fixed on-chain channel (or throwing), recording the
+/// channel ids it was asked to read.
+actor StubChannelReader: ChannelStateReading {
+    private let result: Result<OnChainChannel, any Error>
+    private(set) var reads: [Data] = []
+
+    init(_ channel: OnChainChannel) {
+        result = .success(channel)
+    }
+
+    init(failure: any Error) {
+        result = .failure(failure)
+    }
+
+    func onChainChannel(
+        channelID: Data, escrow _: EthereumAddress, chainID _: UInt64
+    ) async throws -> OnChainChannel {
+        reads.append(channelID)
+        return try result.get()
+    }
+}
+
+/// Builds a recoverable on-chain channel snapshot for the fixture wallet/payee/token/escrow.
+func recoverableChannel(
+    deposit: UInt64, settled: UInt64, finalized: Bool, wallet: EthereumAddress
+) throws -> OnChainChannel {
+    try OnChainChannel(
+        payer: wallet,
+        payee: #require(EthereumAddress(hex: Fixture.payeeHex)),
+        token: #require(EthereumAddress(hex: Fixture.tokenHex)),
+        authorizedSigner: wallet,
+        deposit: ChannelAmount(deposit),
+        settled: ChannelAmount(settled),
+        finalized: finalized,
+        closeRequestedAt: 0
+    )
 }
 
 /// A tempo/session challenge whose request carries the charge amount and the
@@ -124,6 +166,7 @@ func sessionChallenge(
     currency: String? = Fixture.tokenHex,
     escrow: String? = Fixture.escrowHex,
     suggestedDeposit: String? = nil,
+    channelId: String? = nil,
     chainId: UInt64? = Fixture.chainId,
     method: String = "tempo",
     intent: String = "session",
@@ -132,6 +175,7 @@ func sessionChallenge(
     var details: [String: JSONValue] = [:]
     if let chainId { details["chainId"] = .integer(Int64(chainId)) }
     if let escrow { details["escrowContract"] = .string(escrow) }
+    if let channelId { details["channelId"] = .string(channelId) }
     var members: [String: JSONValue] = ["amount": .string(amount)]
     if let recipient { members["recipient"] = .string(recipient) }
     if let currency { members["currency"] = .string(currency) }

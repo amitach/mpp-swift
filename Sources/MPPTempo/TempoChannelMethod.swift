@@ -28,6 +28,7 @@ public struct TempoChannelMethod: PaymentMethodClient {
     private let wallet: EthereumAddress
     private let openBuilder: any TempoOpenTxBuilder
     private let topUpBuilder: (any TempoTopUpTxBuilder)?
+    private let channelReader: (any ChannelStateReading)?
     private let defaultChainId: UInt64
     private let depositPolicy: @Sendable (DepositContext) -> String?
     private let approval: TempoApprovalPolicy
@@ -53,6 +54,9 @@ public struct TempoChannelMethod: PaymentMethodClient {
     ///   - topUpBuilder: builds the signed `topUp` `0x76` transaction; required only for
     ///     ``buildTopUp(for:additionalDeposit:)`` (nil rejects a top-up). Open + voucher +
     ///     close do not need it.
+    ///   - channelReader: reads on-chain channel state to attach to a server-suggested
+    ///     channel (`methodDetails.channelId`) instead of opening a fresh one; nil disables
+    ///     recovery (the default - the method always opens for a key it has not seen).
     /// - Returns: `nil` only if a valid address cannot be derived from the signer.
     public init?(
         signer: Secp256k1Signer,
@@ -63,7 +67,8 @@ public struct TempoChannelMethod: PaymentMethodClient {
         saltProvider: @escaping @Sendable () -> Data = {
             Data((0 ..< 32).map { _ in UInt8.random(in: .min ... .max) })
         },
-        topUpBuilder: (any TempoTopUpTxBuilder)? = nil
+        topUpBuilder: (any TempoTopUpTxBuilder)? = nil,
+        channelReader: (any ChannelStateReading)? = nil
     ) {
         guard let wallet = EthereumAddress(uncompressedPublicKey: signer.publicKey) else {
             return nil
@@ -72,6 +77,7 @@ public struct TempoChannelMethod: PaymentMethodClient {
         self.wallet = wallet
         self.openBuilder = openBuilder
         self.topUpBuilder = topUpBuilder
+        self.channelReader = channelReader
         self.defaultChainId = defaultChainId
         self.depositPolicy = depositPolicy
         self.approval = approval
@@ -127,6 +133,7 @@ public struct TempoChannelMethod: PaymentMethodClient {
         }
         let chainId = request.chainId ?? defaultChainId
         try await runApproval(challenge, request, chainId)
+        await recoverIfSuggested(session, chainId: chainId, request: request)
         let outcome = try await registry.charge(session.key(chainId: chainId), amount: amount) {
             try await openChannel(session, chainId: chainId, request: request)
         }
@@ -224,29 +231,22 @@ public struct TempoChannelMethod: PaymentMethodClient {
         )
     }
 
-    /// The escrow / payee / token a session challenge resolves to, or `nil` if any is
-    /// absent or not a valid address.
-    private struct ResolvedSession {
-        let escrow: EthereumAddress
-        let payee: EthereumAddress
-        let token: EthereumAddress
-        /// The registry key for this channel on `chainId`. `chainId` is part of the key
-        /// (unlike the reference client) because it binds the voucher's EIP-712 domain and
-        /// the on-chain channel id: without it, the same `(payee, token, escrow)` on two
-        /// chains would share one entry, and the second charge would voucher against the
-        /// first chain's channel with the wrong domain. The key is internal client state
-        /// (never on the wire), so this is a correctness fix with no protocol impact.
-        func key(chainId: UInt64) -> ChannelKey {
-            ChannelKey(payee: payee, token: token, escrow: escrow, chainId: chainId)
-        }
-    }
-
-    private func resolveSession(_ request: TempoChargeRequest) -> ResolvedSession? {
-        guard let escrowHex = request.escrowContract, let escrow = EthereumAddress(hex: escrowHex),
-              let payeeHex = request.recipient, let payee = EthereumAddress(hex: payeeHex),
-              let tokenHex = request.currency, let token = EthereumAddress(hex: tokenHex)
-        else { return nil }
-        return ResolvedSession(escrow: escrow, payee: payee, token: token)
+    /// If a `channelReader` is configured and the challenge suggests a `channelId` for a key
+    /// with no open channel, reads it on-chain and (when it has a positive deposit and is not
+    /// finalized) attaches it to the registry with the on-chain settled amount as the
+    /// cumulative floor, so the charge vouchers against it instead of opening fresh. A read
+    /// failure or an unusable channel is a no-op (the charge opens, matching the reference
+    /// client when there is no explicit channel to reuse).
+    private func recoverIfSuggested(
+        _ session: ResolvedSession, chainId: UInt64, request: TempoChargeRequest
+    ) async {
+        guard let channelReader, let suggested = request.suggestedChannelID else { return }
+        let key = session.key(chainId: chainId)
+        guard await registry.openChannel(key) == nil else { return }
+        guard let onChain = try? await channelReader.onChainChannel(
+            channelID: suggested, escrow: session.escrow, chainID: chainId
+        ), onChain.deposit > .zero, !onChain.finalized else { return }
+        await registry.attach(key, channelID: suggested, cumulative: onChain.settled)
     }
 
     /// Runs the approval gate over the charge facts; throws if it rejects (before any
@@ -366,4 +366,31 @@ public struct TempoChannelMethod: PaymentMethodClient {
         }
         return range
     }()
+}
+
+/// The escrow / payee / token a session challenge resolves to. File-scope (not nested in the
+/// method) so it does not count against the method's type-body length.
+private struct ResolvedSession {
+    let escrow: EthereumAddress
+    let payee: EthereumAddress
+    let token: EthereumAddress
+    /// The registry key for this channel on `chainId`. `chainId` is part of the key (unlike
+    /// the reference client) because it binds the voucher's EIP-712 domain and the on-chain
+    /// channel id: without it, the same `(payee, token, escrow)` on two chains would share one
+    /// entry, and the second charge would voucher against the first chain's channel with the
+    /// wrong domain. The key is internal client state (never on the wire), so this is a
+    /// correctness fix with no protocol impact.
+    func key(chainId: UInt64) -> ChannelKey {
+        ChannelKey(payee: payee, token: token, escrow: escrow, chainId: chainId)
+    }
+}
+
+/// Resolves the escrow / payee / token a session challenge names, or `nil` if any is absent
+/// or not a valid address.
+private func resolveSession(_ request: TempoChargeRequest) -> ResolvedSession? {
+    guard let escrowHex = request.escrowContract, let escrow = EthereumAddress(hex: escrowHex),
+          let payeeHex = request.recipient, let payee = EthereumAddress(hex: payeeHex),
+          let tokenHex = request.currency, let token = EthereumAddress(hex: tokenHex)
+    else { return nil }
+    return ResolvedSession(escrow: escrow, payee: payee, token: token)
 }
