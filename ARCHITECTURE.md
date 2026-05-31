@@ -14,12 +14,12 @@ actual SwiftPM dependencies (verified against `Package.swift`):
 |---|---|---|
 | `MPPCore` | (none) | wire/data types: Challenge, Credential, Receipt, JCS, Amount, ProblemDetails. No crypto, no network |
 | `MPPBodyDigest` | (none) | RFC 9530 Content-Digest (swift-crypto) |
-| `MPPEVM` | (none) | EVM message-signing (pure Swift): Keccak-256, secp256k1 signer, EIP-712 proof/voucher, channel id, 0x-hex |
+| `MPPEVM` | (none) | EVM message-signing (pure Swift): Keccak-256, secp256k1 signer, EIP-712 proof/voucher, channel id, 0x-hex; `TempoKeyAuthorization` (subscription key-auth) + a strict-canonical `RLP` codec, byte-verified vs the chain |
 | `MPPClient` | `MPPCore` | the 402 client flow + the `MPPHTTPTransport` seam + URLSession |
 | `MPPServer` | `MPPCore`, `MPPBodyDigest` | framework-agnostic 402 middleware: challenge mint/verify, replay, the verify pipeline |
 | `MPPDiscovery` | `MPPCore` | OpenAPI x-payment-info parse/emit |
-| `MPPTempo` | `MPPCore`, `MPPEVM`, `MPPClient` | Tempo rail: the proof charge method, the 402 channel-payment client `TempoChannelMethod` (open/voucher/topUp/close, deposit policy, recovery, access-key signer) + the `TempoOpenTxBuilder`/`TempoTopUpTxBuilder`/`TempoCloseTxBuilder` + `ChannelStateReading` seams, EVMRPC, TempoEscrow (getChannel read), ChannelAmount, OnChainChannel |
-| `MPPTempoServer` | `MPPTempo`, `MPPCore`, `MPPEVM`, `MPPServer` | Tempo SERVER side: proof verify, the 4-action SessionMethod (opts into `reusesChallenge`, so the session's one challenge is not consumed per voucher; the channel-store cumulative is the anti-replay), ChannelStore, RPCChannelStateProvider |
+| `MPPTempo` | `MPPCore`, `MPPEVM`, `MPPClient` | Tempo rail: the proof charge method, the 402 channel-payment client `TempoChannelMethod` (open/voucher/topUp/close, deposit policy, recovery, access-key signer) + the `TempoOpenTxBuilder`/`TempoTopUpTxBuilder`/`TempoCloseTxBuilder` + `ChannelStateReading` seams, EVMRPC, TempoEscrow (getChannel read), ChannelAmount, OnChainChannel; the subscription client `TempoSubscriptionMethod` + `SubscriptionRequest` (signs the `TempoKeyAuthorization`) |
+| `MPPTempoServer` | `MPPTempo`, `MPPCore`, `MPPEVM`, `MPPServer` | Tempo SERVER side: proof verify, the 4-action SessionMethod (opts into `reusesChallenge`, so the session's one challenge is not consumed per voucher; the channel-store cumulative is the anti-replay), ChannelStore, RPCChannelStateProvider; the subscription `TempoSubscriptionVerifier` (re-encode-and-compare) + `SubscriptionStore`/`SubscriptionEngine` (two-phase atomic renewal behind a `SubscriptionRenewer` seam); metered streaming `SessionStream` + `SessionStreamEvent` (SSE) + `SessionWebSocketFrame` (WS) |
 | `MPPMCP` | `MPPCore`, `MPPServer`, `MPPClient`, `MCP` | JSON-RPC / MCP payment binding (rail-agnostic): a server gate that reuses `MPPServerMiddleware` and maps its decision onto the `-32042`/`-32043` frame + `result._meta` receipt, and a client wrapper that pays transparently. Depends on the official MCP Swift SDK, which raises the package floor to Swift 6.2 |
 | `MPPProxy` | `MPPServer`, `MPPClient`, `MPPCore`, `MPPDiscovery` | framework-neutral 402 reverse-proxy engine: routes `/{service}/...` to upstream origins, gates each route with `MPPServerMiddleware`, scrubs credential/cookie/hop-by-hop headers both ways, forwards via the `MPPHTTPTransport` seam, and serves `/openapi.json` + `/llms.txt`. Pure request/response logic; no server dependency, no Rust |
 | `MPPHummingbird` | `MPPProxy`, `MPPServer`, `MPPCore` + `Hummingbird` | the live HTTP-server binding: bridges Hummingbird's `Request`/`Response` to the engine's `(HTTPRequest, Data)` and runs `MPPProxy` as a catch-all responder (or a single gated route via `GatedResponder`). The only product that links swift-nio; runtime entry points are `@available` macOS 14 / iOS 17 |
@@ -89,6 +89,33 @@ The blob-free Swift plumbing, all merged:
   injected **`TempoCloseTxBuilder`** and broadcasts the result.
 - **`SessionMethod`**: the server's 4-action session credential handler
   (open / topUp / voucher / close) over the `ChannelStore`.
+
+The **subscription rail** and **metered streaming** build on the same pieces:
+
+- **`TempoKeyAuthorization`** (in `MPPEVM`): the RLP-encoded, secp256k1-signed authorization a
+  payer grants so a server-held access key may make a recurring `transferWithMemo` up to a
+  per-period limit until expiry. The pure-Swift `RLP` codec is strict-canonical (rejects
+  non-canonical/overflowing lengths) and is **byte-verified against the chain's own
+  `tempo-primitives` codec** via a cargo differential test (no runtime Rust).
+- **`TempoSubscriptionMethod`** (client) signs that authorization from the `tempo`/`subscription`
+  402; **`TempoSubscriptionVerifier`** (server) verifies by **re-encode-and-compare**:
+  it rebuilds the authorization it expects purely from its own challenge and requires the
+  credential's to equal it byte-for-byte (a strict-canonical decode + unique canonical encoding),
+  so the client decode is never trusted; then recovers the payer and pins it to the `did:pkh` source.
+  `SubscriptionRequest.keyAuthorization(...)` is the single builder both sides derive from, so sign
+  and verify cannot drift.
+- **`SubscriptionStore`** + **`SubscriptionEngine`**: persistence (mirroring `ChannelStore`'s atomic
+  `update`) plus a two-phase atomic renewal: claim the due period under the serialized update with a
+  fresh ownership token, charge via the injected **`SubscriptionRenewer`** seam with a stable
+  idempotency reference, then commit only if this attempt still owns the claim (timeout takeover;
+  `lookupKey` supersession; cancel/revoke).
+- **`SessionStream`**: pay-as-you-go metered streaming. Each chunk draws one `tickCost` via the
+  channel store's atomic `deductFromChannel`; when the balance is short it emits a single
+  `payment-need-voucher` and polls until a client voucher raises the channel's highest cumulative,
+  then resumes, ending with the terminal receipt. It produces transport-neutral
+  **`SessionStreamEvent`**s; the **SSE** codec serializes them as `event:`/`data:` blocks and the
+  **`SessionWebSocketFrame`** codec as `{ "mpp": <type>, ... }` JSON; one metering loop, two
+  transports.
 
 The one seam the FFI fills:
 

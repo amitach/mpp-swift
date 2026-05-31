@@ -1,5 +1,12 @@
 # Subscriptions + metered streaming (WS-10 B6 + WS-9) - implementation notes
 
+> **Status: COMPLETE, all merged to `main`.** PRs #84 (protocol core), #85 (store + renewal engine),
+> #86 (SSE metered streaming), #88 (`.000Z` whole-second expiry interop fix), #89 (subscription
+> cross-conformance, forward + reverse, live-verified vs mppx), #90 (WebSocket frames + SSE/WS codec
+> conformance). Every Devin review thread resolved. Deferred follow-ups: a concrete on-chain
+> `SubscriptionRenewer`, wiring activation into the `SubscriptionStore`, a live SSE/WS metering
+> harness, and the real Stripe rail (WS-11).
+
 Combined, rail-neutral workstream. Plan: `~/.claude/plans/mpp-swift-subscriptions-streaming-plan.html`.
 Peer: mppx `tempo/subscription`, `tempo/session/{Sse,Ws}`, `stripe/` (sole peer; cite the spec in
 shipped code). Confirmed decisions: KeyAuthorization = pure Swift in MPPEVM (not FFI); full scope
