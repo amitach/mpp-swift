@@ -104,10 +104,13 @@ public enum SessionStreamEvent: Sendable, Hashable {
     }
 
     /// The value of an SSE field line (`name:` optionally followed by one space), or
-    /// `nil` if the line is not that field.
+    /// `nil` if the line is not that field. A trailing `\r` is stripped so `\r\n`-delimited
+    /// streams (the SSE spec permits `\r\n`, `\r`, or `\n`) parse the same as `\n`.
     private static func field(_ line: String, _ name: String) -> String? {
+        var line = Substring(line)
+        if line.last == "\r" { line = line.dropLast() }
         guard line.hasPrefix(name) else { return nil }
-        var value = Substring(line.dropFirst(name.count))
+        var value = line.dropFirst(name.count)
         if value.first == " " { value = value.dropFirst() }
         return String(value)
     }

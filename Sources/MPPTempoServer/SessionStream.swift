@@ -111,12 +111,16 @@ public enum SessionStream {
                         }
                         continuation.yield(.message(chunk))
                     }
-                    if let channel = await store.channel(target.channelID) {
-                        continuation.yield(.receipt(SessionReceipt.make(
-                            method: target.method, now: options.now(),
-                            challengeID: target.challengeID, channel: channel
-                        )))
+                    // Fail closed: the terminal receipt is the stream's proof-of-payment, so a
+                    // channel that vanished after the last charge must surface, not be skipped
+                    // (consistent with the module's other store.channel guards).
+                    guard let channel = await store.channel(target.channelID) else {
+                        throw StreamError.channelNotFound
                     }
+                    continuation.yield(.receipt(SessionReceipt.make(
+                        method: target.method, now: options.now(),
+                        challengeID: target.challengeID, channel: channel
+                    )))
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)

@@ -86,6 +86,11 @@ struct SessionStreamTests {
         #expect(encoded == "event: message\ndata: a\ndata: b\ndata: c\n\n")
     }
 
+    @Test("parsing tolerates CRLF line endings (the SSE spec permits them)")
+    func crlfLineEndings() {
+        #expect(SessionStreamEvent.parse("event: message\r\ndata: hi\r\n\r\n") == .message("hi"))
+    }
+
     @Test("an unknown event type parses to nil")
     func unknownEvent() {
         #expect(SessionStreamEvent.parse("event: other\ndata: x\n\n") == nil)
@@ -161,6 +166,26 @@ struct SessionStreamTests {
         }
         await #expect(throws: SessionStream.StreamError.channelClosed(reason: "closing")) {
             _ = try await collect(serve(store: store, chunks: ["a"]))
+        }
+    }
+
+    @Test("a channel removed before the stream ends fails closed with channelNotFound")
+    func channelGoneAtEnd() async throws {
+        let store = InMemoryChannelStore()
+        try await seed(store, highest: ChannelAmount(100), deposit: ChannelAmount(1000))
+        let target = try SessionStream.Target(
+            channelID: Self.channelID, method: tempo(), challengeID: "ch-1", tickCost: Self.tick
+        )
+        let options = SessionStream.Options(now: { Self.now }, sleep: { _ in })
+        let source = ChunkSource(["a"])
+        let stream = SessionStream.serve(store: store, target: target, options: options, next: {
+            if let chunk = await source.next() { return chunk }
+            // After the last chunk the channel vanishes; the terminal receipt must fail closed.
+            try await store.update(Self.channelID) { _ in nil }
+            return nil
+        })
+        await #expect(throws: SessionStream.StreamError.channelNotFound) {
+            _ = try await collect(stream)
         }
     }
 
