@@ -124,6 +124,49 @@ PR-2 files (mirror TempoChargeRequest's `init(challenge:) throws(DecodingFailure
    field-mismatch rejections (currency/amount/period/expiry/scope/recipient/chainId); + cross-SDK
    conformance vs mppx subscription activation (both directions) - may ride PR-2.5 like MPPMCP did.
 
+## PR-2 BUILT (branch feat/subscription-core, off ab0947f) - 3 files + tests, all green
+
+- `SubscriptionRequest.swift` (commit 7db5d19) - decode the wire request; periodSeconds (uint64,
+  overflow-checked), expirySeconds (whole-second ISO), accessKey?/chainId?. Plus the SHARED
+  `keyAuthorization(accessKey:chainId:)` builder (one per-period limit on currency, one
+  transferWithMemo 0x95777d59 scope to recipient): the single place client AND verifier derive the
+  authorization from, so the signed bytes and the verify-side re-encode cannot drift. 6 decode tests.
+- `TempoSubscriptionMethod.swift` (commit 97e73ff) - PaymentMethodClient mirroring TempoProofMethod:
+  failable init derives the payer wallet from the signer; supports = tempo/subscription + decodable;
+  buildCredential = decode -> resolve chainId (request ?? default) + accessKey (configured ??
+  request, else `noAccessKey`) -> approval gate -> `request.keyAuthorization(...)` ->
+  `signedSerialization(with: signer)` -> payload `{type:"keyAuthorization", signature: hexPrefixed}`,
+  source = did:pkh(payer, chainId). 15 tests, BYTE-REAL: the signed serialization recovers the wallet
+  and deserializes back to the request-reconstructed authorization (not merely well-formed).
+- `TempoSubscriptionVerifier.swift` (commit 1e35f44) - PaymentMethodServer, RE-ENCODE-AND-COMPARE:
+  rebuild EXPECTED auth from the verifier's own challenge request + `request.accessKey` (so the access
+  key is the one the SERVER issued, never the client's choice; a challenge with no accessKey =>
+  `noAccessKey`, cannot verify), `deserialize` the credential's serialized auth + `recover` the payer,
+  require `decoded == expected` (strict-canonical RLP decode + unique canonical encoding => this IS
+  byte-equality of the signed inner tuple), require expiry strictly after the challenge deadline
+  (challenge.expires ?? now), pin recovered payer == did:pkh source wallet. reusesChallenge=false
+  (one-shot activation). 11 tests: client round-trip + the full reject matrix. Payload preamble
+  extracted to `presentedAuthorization` to stay under the cyclomatic-complexity cap (the proof
+  verifier's `protocolCheck` lesson).
+
+### Gates / deviations (PR-2)
+
+- KEY DISTINCTION (got it right): the authorization's `.address` is the DELEGATE (access key); the
+  PAYER is the root signer, recovered from the signature. The verifier checks BOTH - `decoded ==
+  expected` pins the delegate/limits/scope, and `payer == source` pins the root - they are different
+  addresses and both must hold.
+- DEVIATION: the client approval gate reuses `ChargeApproval` (the existing pre-sign approval
+  primitive), which surfaces amount/currency/recipient/chain/challenge but NOT the recurring
+  period/expiry. Documented inline. Reused per subtract-before-add rather than inventing a parallel
+  `SubscriptionApproval`; revisit only if a policy needs to bound the period.
+- G3.5: code/tests cite the spec; peer reconciliation stays here in the devlog.
+- swiftformat + swiftlint --strict whole-repo clean; no em dashes; full suite 612 green.
+
+### Still open on PR-2
+
+- Cross-SDK conformance vs mppx subscription activation (both directions) - rides PR-2.5 like MPPMCP
+  did (the hermetic activation round-trip through PaymentClient is already covered in PR-2).
+
 ## Deviations / open
 
 - The tuple builder targets the subscription shape (always emits expiry+limits+calls). A fully
