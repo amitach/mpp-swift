@@ -63,7 +63,8 @@ public enum SessionStreamEvent: Sendable, Hashable {
     public func sseEncoded() throws -> String {
         let dataLines: [String] = switch self {
         case let .message(text):
-            // One data: line per line; preserve empty lines so the payload round-trips.
+            // One data: line per line, split on \n (matching the reference SDK's
+            // `formatMessageEvent`, which is \n-only); empty lines are preserved.
             text.components(separatedBy: "\n")
         case let .needVoucher(payload):
             try [CanonicalJSON.string(payload)]
@@ -83,15 +84,9 @@ public enum SessionStreamEvent: Sendable, Hashable {
     public static func parse(_ block: String) -> SessionStreamEvent? {
         var eventName: String?
         var dataLines: [String] = []
-        // Normalize line endings at the SCALAR level before splitting: `\r\n` is a single
-        // grapheme cluster, so splitting a `String` on `"\n"` is platform-dependent (Linux
-        // swift-corelibs-foundation and Darwin Foundation disagree). Mapping every `\r`
-        // scalar to `\n` breaks the cluster, so splitting is deterministic (SSE permits
-        // `\r\n`, `\r`, or `\n` line endings).
-        let normalized = String(String.UnicodeScalarView(
-            block.unicodeScalars.map { $0 == "\r" ? "\n" : $0 }
-        ))
-        for rawLine in normalized.components(separatedBy: "\n") {
+        // Split on \n only, matching the reference SDK's `parseEvent` (mppx is \n-only); the
+        // SSE the server emits and the peer emits are both \n-delimited.
+        for rawLine in block.components(separatedBy: "\n") {
             if let value = field(rawLine, "event:") {
                 eventName = value
             } else if let value = field(rawLine, "data:") {
@@ -112,8 +107,7 @@ public enum SessionStreamEvent: Sendable, Hashable {
     }
 
     /// The value of an SSE field line (`name:` optionally followed by one space), or
-    /// `nil` if the line is not that field. Line endings are normalized to `\n` before this
-    /// is reached, so no carriage return survives here.
+    /// `nil` if the line is not that field.
     private static func field(_ line: String, _ name: String) -> String? {
         guard line.hasPrefix(name) else { return nil }
         var value = Substring(line.dropFirst(name.count))

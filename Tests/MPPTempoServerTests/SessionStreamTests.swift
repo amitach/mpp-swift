@@ -86,11 +86,6 @@ struct SessionStreamTests {
         #expect(encoded == "event: message\ndata: a\ndata: b\ndata: c\n\n")
     }
 
-    @Test("parsing tolerates CRLF line endings (the SSE spec permits them)")
-    func crlfLineEndings() {
-        #expect(SessionStreamEvent.parse("event: message\r\ndata: hi\r\n\r\n") == .message("hi"))
-    }
-
     @Test("an unknown event type parses to nil")
     func unknownEvent() {
         #expect(SessionStreamEvent.parse("event: other\ndata: x\n\n") == nil)
