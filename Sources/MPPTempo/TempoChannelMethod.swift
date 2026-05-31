@@ -205,12 +205,17 @@ public struct TempoChannelMethod: PaymentMethodClient {
     ///   malformed request, no open channel for the key, or a signing failure.
     public func buildClose(for challenge: Challenge) async throws -> Credential {
         let (session, chainId) = try resolveForManagement(challenge)
-        guard let open = await registry.removeChannel(session.key(chainId: chainId)) else {
+        let key = session.key(chainId: chainId)
+        // Read first, sign, and only then remove: signing is fallible, and removing before it
+        // would lose the channel entry on a signing failure (the caller could neither retry the
+        // close nor settle the channel; the next charge would open a fresh one).
+        guard let open = await registry.openChannel(key) else {
             throw TempoChannelMethodError.noOpenChannel
         }
         let signature = try signVoucher(
             open.channelID, open.cumulative, escrow: session.escrow, chainId: chainId
         )
+        _ = await registry.removeChannel(key)
         let payload = channelVoucherPayload("close", open.channelID, open.cumulative, signature)
         return credential(challenge, chainId: chainId, payload: payload)
     }
@@ -249,11 +254,11 @@ public struct TempoChannelMethod: PaymentMethodClient {
     }
 
     /// If a `channelReader` is configured and the challenge suggests a `channelId` for a key
-    /// with no open channel, reads it on-chain and (when it has a positive deposit and is not
-    /// finalized) attaches it to the registry with the on-chain settled amount as the
-    /// cumulative floor, so the charge vouchers against it instead of opening fresh. A read
-    /// failure or an unusable channel is a no-op (the charge opens, matching the reference
-    /// client when there is no explicit channel to reuse).
+    /// with no open channel, reads it on-chain and (when it is drawable AND matches this
+    /// client's channel parameters) attaches it to the registry with the on-chain settled
+    /// amount as the cumulative floor, so the charge vouchers against it instead of opening
+    /// fresh. A read failure or any mismatch is a no-op (the charge opens, matching the
+    /// reference client when there is no explicit channel to reuse).
     private func recoverIfSuggested(
         _ session: ResolvedSession, chainId: UInt64, request: TempoChargeRequest
     ) async {
@@ -262,7 +267,9 @@ public struct TempoChannelMethod: PaymentMethodClient {
         guard await registry.openChannel(key) == nil else { return }
         guard let onChain = try? await channelReader.onChainChannel(
             channelID: suggested, escrow: session.escrow, chainID: chainId
-        ), onChain.deposit > .zero, !onChain.finalized else { return }
+        ), isRecoverable(
+            onChain, payer: wallet, session: session, authorizedSigner: authorizedSigner
+        ) else { return }
         await registry.attach(key, channelID: suggested, cumulative: onChain.settled)
     }
 

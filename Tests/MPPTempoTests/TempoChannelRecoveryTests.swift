@@ -70,6 +70,41 @@ struct TempoChannelRecoveryTests {
         #expect(await builder.parameters.count == 1)
     }
 
+    @Test("a close-requested suggested channel is not recovered: the charge opens fresh")
+    func closeRequestedNotRecovered() async throws {
+        let builder = StubOpenTxBuilder()
+        let reader = try StubChannelReader(
+            recoverableChannel(
+                deposit: 1000, settled: 0, finalized: false, wallet: walletAddress(),
+                closeRequestedAt: 123
+            )
+        )
+        let method = try makeMethod(builder: builder, channelReader: reader)
+        let credential = try await method.buildCredential(
+            for: sessionChallenge(channelId: Fixture.recoverChannelHex)
+        )
+        #expect(credential.payload["action"] == .string("open"))
+        #expect(await builder.parameters.count == 1)
+    }
+
+    @Test("a channel with mismatched parameters is not recovered: the charge opens fresh")
+    func mismatchedChannelNotRecovered() async throws {
+        let builder = StubOpenTxBuilder()
+        // On-chain payee is a different address than the challenge's recipient.
+        let reader = try StubChannelReader(
+            recoverableChannel(
+                deposit: 1000, settled: 0, finalized: false, wallet: walletAddress(),
+                payeeHex: Fixture.payee2Hex
+            )
+        )
+        let method = try makeMethod(builder: builder, channelReader: reader)
+        let credential = try await method.buildCredential(
+            for: sessionChallenge(channelId: Fixture.recoverChannelHex)
+        )
+        #expect(credential.payload["action"] == .string("open"))
+        #expect(await builder.parameters.count == 1)
+    }
+
     @Test("a read failure falls through to a normal open")
     func readFailureOpensFresh() async throws {
         let builder = StubOpenTxBuilder()

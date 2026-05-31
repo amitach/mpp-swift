@@ -146,19 +146,26 @@ actor StubChannelReader: ChannelStateReading {
     }
 }
 
-/// Builds a recoverable on-chain channel snapshot for the fixture wallet/payee/token/escrow.
+/// Builds an on-chain channel snapshot for the recovery tests. Defaults match the fixture
+/// wallet/payee/token (a recoverable channel); override to exercise the guard's mismatch and
+/// close-requested paths.
 func recoverableChannel(
-    deposit: UInt64, settled: UInt64, finalized: Bool, wallet: EthereumAddress
+    deposit: UInt64,
+    settled: UInt64,
+    finalized: Bool,
+    wallet: EthereumAddress,
+    closeRequestedAt: UInt64 = 0,
+    payeeHex: String = Fixture.payeeHex
 ) throws -> OnChainChannel {
     try OnChainChannel(
         payer: wallet,
-        payee: #require(EthereumAddress(hex: Fixture.payeeHex)),
+        payee: #require(EthereumAddress(hex: payeeHex)),
         token: #require(EthereumAddress(hex: Fixture.tokenHex)),
         authorizedSigner: wallet,
         deposit: ChannelAmount(deposit),
         settled: ChannelAmount(settled),
         finalized: finalized,
-        closeRequestedAt: 0
+        closeRequestedAt: closeRequestedAt
     )
 }
 

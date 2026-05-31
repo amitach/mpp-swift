@@ -97,3 +97,20 @@ func resolveSession(_ request: TempoChargeRequest) -> ResolvedSession? {
     else { return nil }
     return ResolvedSession(escrow: escrow, payee: payee, token: token)
 }
+
+/// Whether an on-chain channel is safe to recover (attach to): drawable (positive deposit,
+/// not finalized, no pending close) AND matching this client's channel parameters
+/// (payer/payee/token/authorizedSigner). Attaching to a mismatched or closing channel would
+/// trap every later charge for the key (the server rejects the voucher, but the registry
+/// entry persists), so recovery fails closed to a fresh open otherwise.
+func isRecoverable(
+    _ onChain: OnChainChannel,
+    payer: EthereumAddress,
+    session: ResolvedSession,
+    authorizedSigner: EthereumAddress
+) -> Bool {
+    onChain.deposit > .zero && !onChain.finalized && onChain.closeRequestedAt == 0
+        && onChain.payer == payer && onChain.payee == session.payee
+        && onChain.token == session.token
+        && onChain.effectiveAuthorizedSigner == authorizedSigner
+}
