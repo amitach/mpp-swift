@@ -26,7 +26,10 @@ jobs:
       # tools 6.2). macos-15 ships Xcode 26 (Swift 6.2) but defaults to 16.4 (6.1), so select the
       # newest Xcode 26. A shell select avoids a new pinned action dependency.
       - name: Use Swift 6.2 (Xcode 26)
-        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n1)"
+        run: |
+          xcode="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n1)"
+          test -n "$xcode" || { echo "::error::Xcode 26 (Swift 6.2) not found on the runner"; exit 1; }
+          sudo xcode-select -s "$xcode"
       # Cache the SwiftPM shared dependency-clone directory (NOT compiled artifacts,
       # which are not safely portable across commits). Keyed on Package.swift so a
       # dependency change invalidates it; restore-keys lets a stale key still seed the
@@ -108,7 +111,10 @@ jobs:
           key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift') }}
           restore-keys: ${{ runner.os }}-spm-
       - name: Use Swift 6.2 (Xcode 26)
-        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n1)"
+        run: |
+          xcode="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n1)"
+          test -n "$xcode" || { echo "::error::Xcode 26 (Swift 6.2) not found on the runner"; exit 1; }
+          sudo xcode-select -s "$xcode"
       # Forward: the Swift client pays a zero-amount Tempo proof 402 issued and verified
       # by the reference mppx (TypeScript) server, over real HTTP.
       - name: Cross-SDK conformance (Swift client -> mppx server, offline)
@@ -133,7 +139,10 @@ jobs:
         with:
           node-version: "20"
       - name: Use Swift 6.2 (Xcode 26)
-        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n1)"
+        run: |
+          xcode="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n1)"
+          test -n "$xcode" || { echo "::error::Xcode 26 (Swift 6.2) not found on the runner"; exit 1; }
+          sudo xcode-select -s "$xcode"
       - name: Cross-SDK conformance against live Moderato (chainId 42431)
         run: Scripts/conformance/run.sh --testnet
 
@@ -149,7 +158,10 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Use Swift 6.2 (Xcode 26)
-        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n1)"
+        run: |
+          xcode="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n1)"
+          test -n "$xcode" || { echo "::error::Xcode 26 (Swift 6.2) not found on the runner"; exit 1; }
+          sudo xcode-select -s "$xcode"
       - name: Live Moderato Swift tests
         env:
           MPP_MODERATO_E2E: "1"
@@ -173,7 +185,10 @@ jobs:
       - name: Use Swift 6.2 (Xcode 26)
         # The macOS leg runs `swift test` (the package needs Swift 6.2); the Linux leg is Rust-only.
         if: matrix.os == 'macos-15'
-        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n1)"
+        run: |
+          xcode="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n1)"
+          test -n "$xcode" || { echo "::error::Xcode 26 (Swift 6.2) not found on the runner"; exit 1; }
+          sudo xcode-select -s "$xcode"
       # Cache the Cargo registry/git clones + the crate's build dir, keyed on Cargo.lock
       # (per OS leg). The dominant cost here is compiling the large revm/tempo tree; this
       # turns a clean ~4-5 min compile into an incremental one on a cache hit.

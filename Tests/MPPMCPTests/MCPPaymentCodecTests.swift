@@ -123,6 +123,28 @@ struct MCPPaymentCodecTests {
         }
     }
 
+    @Test("an opaque string round-trips verbatim (it binds into the challenge id)")
+    func opaqueStringRoundTrips() throws {
+        let base = try sampleChallenge()
+        let challenge = Challenge(
+            id: base.id, realm: base.realm, method: base.method, intent: base.intent,
+            request: base.request, opaque: EncodedJSON("c2VydmVyLW9wYXF1ZQ")
+        )
+        let value = try MCPPaymentCodec.value(for: challenge)
+        #expect(value.objectValue?["opaque"] == .string("c2VydmVyLW9wYXF1ZQ"))
+        let parsed = try MCPPaymentCodec.challenge(from: value)
+        #expect(parsed.opaque?.rawValue == "c2VydmVyLW9wYXF1ZQ")
+    }
+
+    @Test("a non-string opaque fails closed (never silently dropped)")
+    func nonStringOpaqueRejected() throws {
+        var object = try #require(MCPPaymentCodec.value(for: sampleChallenge()).objectValue)
+        object["opaque"] = .object(["unexpected": .string("native")])
+        #expect(throws: MCPPaymentCodec.CodecError.invalidField("opaque")) {
+            try MCPPaymentCodec.challenge(from: .object(object))
+        }
+    }
+
     // MARK: credential round-trip
 
     @Test("credential round-trips with its echoed challenge and payload")

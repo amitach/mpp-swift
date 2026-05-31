@@ -66,6 +66,19 @@ enum MCPPaymentCodec {
             expires = nil
         }
 
+        // `opaque` is emitted as its verbatim wire string (it binds into the challenge id). If a
+        // peer sends it as a non-string, FAIL CLOSED rather than silently drop it: dropping would
+        // change the binding input and surface as an opaque verification failure later.
+        let opaque: EncodedJSON?
+        if let opaqueValue = object["opaque"] {
+            guard let opaqueString = opaqueValue.stringValue else {
+                throw CodecError.invalidField("opaque")
+            }
+            opaque = EncodedJSON(opaqueString)
+        } else {
+            opaque = nil
+        }
+
         return try Challenge(
             id: id,
             realm: realm,
@@ -75,7 +88,7 @@ enum MCPPaymentCodec {
             digest: object["digest"]?.stringValue,
             expires: expires,
             description: object["description"]?.stringValue,
-            opaque: object["opaque"]?.stringValue.map(EncodedJSON.init)
+            opaque: opaque
         )
     }
 
