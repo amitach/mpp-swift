@@ -84,10 +84,12 @@ public struct SubscriptionRequest: Sendable, Hashable {
         count: String,
         unit: String
     ) throws(DecodingFailure) -> UInt64 {
-        // Canonical positive integer: a leading digit 1-9 then digits (matches the spec's grammar,
-        // so "0" and leading-zero forms are rejected).
-        guard let first = count.first, first >= "1", first <= "9",
-              count.dropFirst().allSatisfy(\.isNumber), let value = UInt64(count)
+        // Canonical positive integer per the spec grammar `[1-9][0-9]*`: an ASCII leading digit
+        // 1-9 then ASCII digits (so "0", leading-zero, and non-ASCII-digit forms are rejected).
+        // Scalar-range checks mirror `Amount.validate`, precise rather than `Character.isNumber`.
+        guard let first = count.unicodeScalars.first, (0x31 ... 0x39).contains(first.value),
+              count.unicodeScalars.dropFirst().allSatisfy({ (0x30 ... 0x39).contains($0.value) }),
+              let value = UInt64(count)
         else { throw .invalidPeriod }
         let unitSeconds: UInt64
         switch unit {
@@ -109,7 +111,9 @@ public struct SubscriptionRequest: Sendable, Hashable {
         let parsed = formatter.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
         guard let date = parsed else { throw .invalidExpiry }
         let seconds = date.timeIntervalSince1970
-        guard seconds > 0, seconds <= Double(UInt64.max),
+        // Strict `<`: `Double(UInt64.max)` rounds UP to `2^64`, so `<=` would let `UInt64(seconds)`
+        // trap at the boundary. The largest Double below it is well within `UInt64`.
+        guard seconds > 0, seconds < Double(UInt64.max),
               seconds.rounded() == seconds
         else { throw .invalidExpiry }
         return UInt64(seconds)

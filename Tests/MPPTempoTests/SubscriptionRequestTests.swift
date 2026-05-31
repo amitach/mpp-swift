@@ -84,7 +84,8 @@ struct SubscriptionRequestTests {
 
     @Test("a non-canonical or zero period count is rejected")
     func rejectsBadPeriodCount() throws {
-        for bad in ["0", "01", "x"] {
+        // "٢" is an Arabic-Indic 2: a Unicode digit the strict ASCII grammar rejects.
+        for bad in ["0", "01", "x", "٢"] {
             #expect(throws: SubscriptionRequest.DecodingFailure.invalidPeriod) {
                 try SubscriptionRequest(challenge: challenge(request(periodCount: bad)))
             }
