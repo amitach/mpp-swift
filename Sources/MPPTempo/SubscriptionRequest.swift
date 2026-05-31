@@ -106,11 +106,20 @@ public struct SubscriptionRequest: Sendable, Hashable {
     /// The whole-second Unix timestamp of an ISO-8601 `subscriptionExpires`, rejecting a malformed
     /// or sub-second value (a key authorization's expiry is whole seconds).
     private static func expirySeconds(_ iso: String) throws(DecodingFailure) -> UInt64 {
-        // Whole seconds only, checked at the string level: `.` appears in an RFC-3339
-        // date-time only in the fractional-seconds field, so rejecting it here means a
-        // sub-second value can never survive Double rounding and slip past as whole.
-        guard !iso.contains(".") else { throw .invalidExpiry }
-        guard let date = ISO8601DateFormatter().date(from: iso) else { throw .invalidExpiry }
+        // Whole seconds only, checked at the STRING level so Double precision can never
+        // round a sub-second value to whole. A fractional-seconds field is allowed only if
+        // it is all zeros: `Date.toISOString()` (and the reference SDK's serializer) emit a
+        // whole second as `...:02.000Z`, which must be accepted, while `.5` is sub-second
+        // and rejected. (The fractional field is the only place `.` appears in an RFC-3339
+        // date-time; the timezone uses `Z`/`+`/`-`/`:`.)
+        if let dot = iso.firstIndex(of: ".") {
+            let fraction = iso[iso.index(after: dot)...].prefix { $0.isNumber }
+            guard fraction.allSatisfy({ $0 == "0" }) else { throw .invalidExpiry }
+        }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = formatter.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+        guard let date else { throw .invalidExpiry }
         let seconds = date.timeIntervalSince1970
         // Strict `<`: `Double(UInt64.max)` rounds UP to `2^64`, so `<=` would let `UInt64(seconds)`
         // trap at the boundary. The largest Double below it is well within `UInt64`.
