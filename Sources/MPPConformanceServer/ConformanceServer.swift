@@ -77,6 +77,54 @@ private func makeMiddleware() throws -> MPPServerMiddleware {
     }
 }
 
+// Reverse subscription conformance: the mppx CLIENT signs a TempoKeyAuthorization delegating
+// the access key OUR 402 issued, and OUR TempoSubscriptionVerifier verifies it. Offline (no
+// chain), so it is un-gated and always registered. The whole-second `.000Z` expiry is the form
+// `Date.toISOString()` emits, exercising the interop-tolerant parse in the reverse direction too.
+private let subscriptionAccessKeyHex = "0xf1f6619b38a98d6de0800f1defc0a6399eb6d30c"
+private let subscriptionCurrencyHex = "0x20c0000000000000000000000000000000000001"
+private let subscriptionRecipientHex = "0x1111111111111111111111111111111111111111"
+
+private func makeSubscriptionMiddleware() throws -> MPPServerMiddleware {
+    let signer = ChallengeSigner(secret: secret)
+    let binding = try RouteBinding(
+        realm: "127.0.0.1", method: MethodName("tempo"), intent: .subscription
+    )
+    let request = EncodedJSON(json: .object([
+        "amount": .string("1000000"),
+        "currency": .string(subscriptionCurrencyHex),
+        "recipient": .string(subscriptionRecipientHex),
+        "periodCount": .string("30"),
+        "periodUnit": .string("day"),
+        "subscriptionExpires": .string("2030-01-01T00:00:00.000Z"),
+        "methodDetails": .object([
+            "accessKey": .object([
+                "accessKeyAddress": .string(subscriptionAccessKeyHex),
+                "keyType": .string("secp256k1"),
+            ]),
+            "chainId": .integer(Int64(chainId)),
+        ]),
+    ]))
+    return MPPServerMiddleware(
+        minter: ChallengeMinter(signer: signer),
+        verifier: PaymentVerifier(
+            signer: signer, replayStore: InMemoryReplayStore(),
+            methods: [TempoSubscriptionVerifier(defaultChainID: chainId)]
+        ),
+        binding: binding,
+        request: request
+    ) { event in
+        switch event {
+        case let .challengeIssued(challenge):
+            log("[server] issued 402 (subscription) id=\(challenge.id)")
+        case let .paymentVerified(verified):
+            log("[server] VERIFIED (subscription) source=\(verified.credential.source ?? "nil")")
+        case let .paymentRejected(rejection):
+            log("[server] rejected (subscription) \(rejection)")
+        }
+    }
+}
+
 #if MPP_TEMPO_FFI_ENABLED
     // Reverse session conformance (live on Moderato). The mppx CLIENT opens a channel to
     // our recipient, vouchers, and closes; our SessionMethod relays the open, accepts the
@@ -193,6 +241,13 @@ enum ConformanceServer {
         // Registered for GET and POST so a client using either verb is served (the old raw-socket
         // server was method-agnostic).
         register(proofResponder, on: router, path: "proof")
+
+        // Subscription reverse conformance is offline, so it is always available.
+        let subscriptionGate = try makeSubscriptionMiddleware()
+        let subscriptionResponder = GatedResponder<BasicRequestContext>(
+            gate: subscriptionGate, handler: paidBody
+        )
+        register(subscriptionResponder, on: router, path: "subscription")
 
         #if MPP_TEMPO_FFI_ENABLED
             if let sessionGate = try await makeSessionMiddleware() {
