@@ -122,30 +122,34 @@ public struct SessionMethod: PaymentMethodServer {
         guard let channel = await store.channel(fields.channelID) else {
             throw SessionError.channelNotFound
         }
-        if cumulative < channel.highestVoucherAmount { throw SessionError.belowHighestVoucher }
+        // `authorizedSigner` is immutable per channel, so verifying the signature against the
+        // pre-read value is race-free; the monotonic decision below is the part that must be
+        // atomic.
         try verifySignature(fields, expectedSigner: channel.authorizedSigner, context)
 
-        // Advance the highest atomically: the delta gate re-reads the live highest
-        // inside the store's serialization (TOCTOU-safe), so a concurrent voucher
-        // cannot let a sub-`minVoucherDelta` increase slip through. Advance only when
-        // strictly greater; an equal-cumulative replay does not advance but still
-        // charges below, so it is bounded by the channel balance, never free.
+        // The ENTIRE monotonic decision (reject below-or-equal, enforce the min delta, advance the
+        // highest) runs inside the store's serialized update, so a voucher that lost a race to a
+        // concurrent higher one is rejected here rather than falling through and still charging.
+        // Only a voucher that STRICTLY advances the channel commits; the charge below is reached
+        // only then, so a stale or equal-cumulative (replay) voucher is rejected, never charged.
         try await store.update(fields.channelID) { current in
-            guard var channel = current else { return current }
-            // Reject a voucher racing a close: a closing/finalized channel must not
-            // advance the highest (consistent with deductFromChannel's guard), so the
-            // off-chain record cannot drift above what gets settled.
+            guard var channel = current else { throw SessionError.channelNotFound }
+            // Reject a voucher racing a close: a closing/finalized channel must not advance the
+            // highest (consistent with deductFromChannel's guard).
             if channel.finalized { throw SessionError.channelClosed(reason: "finalized") }
             if channel.closing { throw SessionError.channelClosed(reason: "closing") }
-            if cumulative > channel.highestVoucherAmount {
-                guard let delta = cumulative.subtracting(channel.highestVoucherAmount),
-                      delta >= minVoucherDelta
-                else { throw SessionError.deltaTooSmall }
-                channel.highestVoucherAmount = cumulative
-                channel.highestVoucherSignature = fields.signature
+            guard cumulative > channel.highestVoucherAmount else {
+                throw SessionError.belowHighestVoucher
             }
+            guard let delta = cumulative.subtracting(channel.highestVoucherAmount),
+                  delta >= minVoucherDelta
+            else { throw SessionError.deltaTooSmall }
+            channel.highestVoucherAmount = cumulative
+            channel.highestVoucherSignature = fields.signature
             return channel
         }
+        // Reached only after a strictly-advancing voucher committed atomically: charge exactly
+        // once.
         let charged = try await chargeRequest(fields.channelID, context)
         return receipt(charged, context)
     }
