@@ -20,6 +20,7 @@ actual SwiftPM dependencies (verified against `Package.swift`):
 | `MPPDiscovery` | `MPPCore` | OpenAPI x-payment-info parse/emit |
 | `MPPTempo` | `MPPCore`, `MPPEVM`, `MPPClient` | Tempo rail: the proof charge method, the 402 channel-payment client `TempoChannelMethod` (open/voucher/topUp/close, deposit policy, recovery, access-key signer) + the `TempoOpenTxBuilder`/`TempoTopUpTxBuilder`/`TempoCloseTxBuilder` + `ChannelStateReading` seams, EVMRPC, TempoEscrow (getChannel read), ChannelAmount, OnChainChannel |
 | `MPPTempoServer` | `MPPTempo`, `MPPCore`, `MPPEVM`, `MPPServer` | Tempo SERVER side: proof verify, the 4-action SessionMethod (opts into `reusesChallenge`, so the session's one challenge is not consumed per voucher; the channel-store cumulative is the anti-replay), ChannelStore, RPCChannelStateProvider |
+| `MPPMCP` | `MPPCore`, `MPPServer`, `MPPClient`, `MCP` | JSON-RPC / MCP payment binding (rail-agnostic): a server gate that reuses `MPPServerMiddleware` and maps its decision onto the `-32042`/`-32043` frame + `result._meta` receipt, and a client wrapper that pays transparently. Depends on the official MCP Swift SDK, which raises the package floor to Swift 6.2 |
 
 `MPPCore`, `MPPBodyDigest`, and `MPPEVM` are **independent roots** (no inter-MPP
 dependencies); `MPPEVM` in particular is standalone EVM crypto and does not depend on
