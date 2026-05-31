@@ -129,6 +129,10 @@ jobs:
       # receipt in result._meta). Offline + deterministic (zero-amount proof).
       - name: Cross-SDK MCP conformance (mppx mcp-sdk client -> our Swift MCP server, stdio)
         run: Scripts/conformance/run-mcp.sh
+      # Reverse MCP: OUR Swift MCP client pays the mppx mcp-sdk SERVER over stdio (we read mppx's
+      # -32042, build the credential, read its receipt). The symmetric direction; both now live.
+      - name: Cross-SDK MCP conformance reverse (our Swift client -> mppx mcp-sdk server, stdio)
+        run: Scripts/conformance/run-mcp-reverse.sh
 
   conformance-testnet:
     name: Conformance (testnet)

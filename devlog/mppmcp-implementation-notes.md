@@ -88,6 +88,10 @@ cross-client follow-up, not an MCP-only patch.
   our server verifies + mints a receipt into `result._meta`, mppx reads it. PASSES live
   (`Scripts/conformance/run-mcp.sh` + `mcp-client.mjs`); wired into the `conformance` CI job.
   Added `@modelcontextprotocol/sdk` (>=1.25.0) to the dev-only harness (npm ci --ignore-scripts).
-- TODO (follow-up): the REVERSE live direction (our Swift MCP client pays an mppx `mcp-sdk` server).
-  The forward run + the hermetic suite (real-frame parse, byte-proven JCS parity, in-process e2e)
-  already prove both the wire frame and the flow; reverse is the symmetric belt-and-suspenders.
+- DONE (live cross-SDK conformance, REVERSE): OUR Swift MCP client (`MPPMCPConformanceClient`)
+  spawns the reference mppx `mcp-sdk` SERVER (`mcp-server.mjs`, McpServer + Transport.mcpSdk() +
+  StdioServerTransport) over a real stdio transport and pays its gated tool. Our client reads
+  mppx's -32042, builds the Tempo proof credential, sends it in `params._meta`, mppx verifies +
+  mints a receipt, our client reads it. PASSES live (`run-mcp-reverse.sh`); wired into the
+  `conformance` CI job. BOTH directions now proven live against the real peer, in CI.
+  The Swift client wires `MCP.StdioTransport` to the spawned server's pipes (Process + custom FDs).
