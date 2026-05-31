@@ -51,19 +51,21 @@ public struct MPPProxy: Sendable {
         title: String? = nil,
         description: String = "Paid API proxy powered by the Machine Payments Protocol."
     ) throws {
-        self.services = Dictionary(
-            services.map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
+        // Deduplicate by service id (first wins) preserving declaration order, then build routing,
+        // /openapi.json, and /llms.txt all from that one list so they describe an identical set of
+        // services (a duplicate id otherwise routes to the first but could be advertised twice).
+        var seenIDs: Set<String> = []
+        let uniqueServices = services.filter { seenIDs.insert($0.id).inserted }
+        self.services = Dictionary(uniqueKeysWithValues: uniqueServices.map { ($0.id, $0) })
         self.basePath = basePath
         self.transport = transport
         openAPIData = try ProxyDiscovery.openAPIJSON(
-            services: services,
+            services: uniqueServices,
             info: info,
             basePath: basePath
         )
         llmsText = ProxyDiscovery.llmsTxt(
-            services: services, title: title ?? info.title, description: description,
+            services: uniqueServices, title: title ?? info.title, description: description,
             basePath: basePath
         )
     }

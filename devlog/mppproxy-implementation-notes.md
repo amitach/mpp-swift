@@ -1,4 +1,4 @@
-# MPPProxy — implementation notes (running log)
+# MPPProxy - implementation notes (running log)
 
 Branch: `feat/mppproxy` off `origin/main` @ 5d0de54 (includes #80 discovery generate/validate).
 Peer: `mppx/proxy` (`Proxy`, `Service`, `custom`/`openai`/`anthropic`/`stripe`).
@@ -45,9 +45,9 @@ analogue of what `MCPPaymentServer.gated` does for MCP, and it reuses the exact 
    chose to also serve `/llms.txt`. `/openapi.json` reuses `DiscoveryGenerator.generate` (#80);
    `/llms.txt` is a human/agent index (cited as peer-parity, draft has no llms.txt surface).
 
-## Architecture / reuse (G0 — right primitives, do NOT reinvent)
+## Architecture / reuse (G0 - right primitives, do NOT reinvent)
 
-- **Gate** = `MPPServerMiddleware.handle(request, body, now) { handler }` — already does
+- **Gate** = `MPPServerMiddleware.handle(request, body, now) { handler }` - already does
   mint-or-402 / verify / `Cache-Control` floor / `Payment-Receipt` attach over HTTPRequest/Response.
   One middleware instance per paid route (exactly how a real server app wires routes). The proxy's
   forwarding closure is the `handler`.
@@ -59,21 +59,21 @@ analogue of what `MCPPaymentServer.gated` does for MCP, and it reuses the exact 
 
 ## New code (the small surface that is genuinely new)
 
-- `Sources/MPPProxy/MPPProxy.swift` — the `handle` entrypoint + dispatch.
-- `Sources/MPPProxy/ProxyService.swift` — `ProxyService { id, baseURL, routes: [RoutePattern: Endpoint], rewriteRequest? }`;
+- `Sources/MPPProxy/MPPProxy.swift` - the `handle` entrypoint + dispatch.
+- `Sources/MPPProxy/ProxyService.swift` - `ProxyService { id, baseURL, routes: [RoutePattern: Endpoint], rewriteRequest? }`;
   `Endpoint = .free | .paid(middleware:, discovery: PaymentInfo)`.
   DESIGN NOTE: a paid route carries its discovery `PaymentInfo` EXPLICITLY alongside the middleware,
   rather than reaching into the middleware's private binding/challengeRequest. Keeps the gate's
   internals private and the discovery contract declarative.
-- `Sources/MPPProxy/RoutePattern.swift` — the segment matcher (literal / `{param}` / `/**`).
-- `Sources/MPPProxy/ProxyHeaders.swift` — request `scrub` + response `scrubResponse`. SECURITY CORE,
+- `Sources/MPPProxy/RoutePattern.swift` - the segment matcher (literal / `{param}` / `/**`).
+- `Sources/MPPProxy/ProxyHeaders.swift` - request `scrub` + response `scrubResponse`. SECURITY CORE,
   faithful port of the peer's set: request drops `authorization`, `cookie`, `content-length`,
   `accept-encoding`, hop-by-hop (`connection`/`keep-alive`/`transfer-encoding`/`upgrade`/
   `proxy-authenticate`/`proxy-authorization`/`te`/`trailer`), `x-forwarded-*`; response drops
   `set-cookie` (a paid proxy must never let an upstream set cookies under the proxy origin -> a
   compromised upstream's `Set-Cookie; Domain=.proxy` would become a session-fixation primitive),
   `content-encoding`, `content-length` (re-streaming). Cited to defensive-proxy reasoning, not peer.
-- `Sources/MPPProxy/ProxyDiscovery.swift` — build `[DiscoveryRoute]` from the service tables ->
+- `Sources/MPPProxy/ProxyDiscovery.swift` - build `[DiscoveryRoute]` from the service tables ->
   `/openapi.json`; render `/llms.txt`.
 
 ## Open / start-of-work TODO (to resolve as I implement)
@@ -83,7 +83,7 @@ analogue of what `MCPPaymentServer.gated` does for MCP, and it reuses the exact 
   scrub, BEFORE forward, so injected upstream creds are never confused with the client's Payment.
 - basePath stripping + `/{serviceId}/upstreamPath` parse (peer `Route.pathname`/`parse`).
 - 404 (no service / no route), 405 fallback semantics (peer falls back to path-only match for
-  management POSTs that carry a credential) — decide how much of that to port vs. defer; record here.
+  management POSTs that carry a credential) - decide how much of that to port vs. defer; record here.
 
 ## Verification plan
 
@@ -91,7 +91,7 @@ analogue of what `MCPPaymentServer.gated` does for MCP, and it reuses the exact 
 - `swiftformat .` then `swiftformat --lint .` + `swiftlint --strict` WHOLE-repo (CI Lint runs both).
 - No em dashes (CI-gated). No `Co-Authored-By` trailer.
 - Cross-SDK conformance vs `mppx/proxy` (a Swift client paying our proxy, and/or our proxy fronting
-  a stub upstream) — scope after the hermetic bar; may ride a PR-2 like MPPMCP did.
+  a stub upstream) - scope after the hermetic bar; may ride a PR-2 like MPPMCP did.
 
 ## Peer reconciliation (G3.5) + test-parity matrix (G7.5)
 
@@ -108,17 +108,17 @@ PORT (covered by the engine + a Swift test):
 - paid routes emit server events (assert via the middleware `onEvent` sink).
 - Service.from: id/baseUrl, bearer, headers (one + many), mutate, no-auth => no rewrite, `custom` alias.
 
-PORT (covered BY DESIGN — add explicit tests to prove it):
+PORT (covered BY DESIGN - add explicit tests to prove it):
 - "auto-injects proxy route scope and blocks same-economics replay across routes": in our design each
   paid route owns its OWN `MPPServerMiddleware` with its OWN `RouteBinding`, so a credential minted
   for route A is structurally rejected on route B (verify pins binding). TEST: mint on A, replay on
-  B => 402 binding-mismatch. ("manual scope overrides" is N/A as a mechanism — the per-route
+  B => 402 binding-mismatch. ("manual scope overrides" is N/A as a mechanism - the per-route
   middleware's binding IS the explicit scope; the caller chooses it.)
 - "attaches receipts to proxied ERROR responses": our middleware attaches `Payment-Receipt`
   regardless of the handler's status, so a 4xx/5xx upstream still carries the receipt. TEST it.
-- replay rejection (same credential/voucher reused) — the verifier's replay store. TEST it.
+- replay rejection (same credential/voucher reused) - the verifier's replay store. TEST it.
 
-DEFER (explicit scope decision, follow-up — recorded so it is not a silent gap):
+DEFER (explicit scope decision, follow-up - recorded so it is not a silent gap):
 - **Management-POST method fallback** (peer tests: "management POST falls back to paid route with
   different method", "...uses credential method binding to disambiguate same-path paid routes",
   "exact-match management POST does not forward upstream", "paid GET fallback does not forward POST
@@ -182,5 +182,5 @@ DONE (sweep part 2 + deep cleanup, 2026-05-31):
 
 - Engine self-dispatches (vs. delegating to Hummingbird's trie router) so routing lives in one place
   the discovery doc is generated from; the HB binding mounts the engine as a catch-all. Recorded as a
-  deliberate divergence from "use the framework router" — keeps the engine framework-neutral + the
+  deliberate divergence from "use the framework router" - keeps the engine framework-neutral + the
   Vapor path open, at the cost of not using HB's optimized trie (fine for a modest proxy route table).

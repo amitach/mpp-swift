@@ -128,6 +128,40 @@ struct MPPProxyRoutingTests {
         await #expect(transport.lastRequest?.path == "/v1/models?limit=10&order=desc")
     }
 
+    @Test("a duplicate service id is deduplicated (first wins) for routing and discovery alike")
+    func duplicateServiceIDDeduped() async throws {
+        let first = try ProxyService(
+            id: "svc", baseURL: proxyURL("https://first.example"),
+            routes: [ProxyRoute(method: .get, pattern: RoutePattern("/a"), endpoint: .free)]
+        )
+        let second = try ProxyService(
+            id: "svc", baseURL: proxyURL("https://second.example"),
+            routes: [ProxyRoute(method: .get, pattern: RoutePattern("/b"), endpoint: .free)]
+        )
+        let transport = RecordingTransport()
+        let proxy = try MPPProxy(
+            services: [first, second], info: .init(title: "P", version: "1"), transport: transport
+        )
+        // Routing uses the first service: /svc/a forwards (to first.example), /svc/b 404s.
+        _ = await proxy.handle(makeRequest(.get, "/svc/a"), body: Data(), now: proxyNow)
+        await #expect(transport.lastRequest?.authority == "first.example")
+        let (notFound, _) = await proxy.handle(
+            makeRequest(.get, "/svc/b"),
+            body: Data(),
+            now: proxyNow
+        )
+        #expect(notFound.status.code == 404)
+        // Discovery advertises the same (first) set: /svc/a present, /svc/b absent.
+        let (_, body) = await proxy.handle(
+            makeRequest(.get, "/openapi.json"),
+            body: Data(),
+            now: proxyNow
+        )
+        let doc = try JSONDecoder().decode(DiscoveryDocument.self, from: body)
+        #expect(doc.paths["/svc/a"] != nil)
+        #expect(doc.paths["/svc/b"] == nil)
+    }
+
     @Test("a transport failure surfaces as 502 Bad Gateway")
     func badGateway() async throws {
         let proxy = try standardProxy(transport: ThrowingTransport())
@@ -167,21 +201,29 @@ struct MPPProxyGatingTests {
         await #expect(transport.lastRequest?.headerFields[.authorization] == nil)
     }
 
-    @Test("safe headers survive forwarding while a cookie is dropped")
-    func preservesSafeHeadersDropsCookie() async throws {
+    @Test("safe headers survive forwarding while cookie, Host, and hop-by-hop are dropped")
+    func preservesSafeHeadersDropsUnsafe() async throws {
         let transport = RecordingTransport()
         let proxy = try standardProxy(transport: transport)
         let trace = try #require(HTTPField.Name("X-Trace"))
+        let host = try #require(HTTPField.Name("Host"))
         _ = await proxy.handle(
             makeRequest(
                 .get, "/openai/v1/models",
-                headers: [.accept: "application/json", .cookie: "s=1", trace: "abc"]
+                headers: [
+                    .accept: "application/json", .cookie: "s=1", trace: "abc",
+                    host: "client.example", .connection: "keep-alive",
+                ]
             ),
             body: Data(), now: proxyNow
         )
         await #expect(transport.lastRequest?.headerFields[.accept] == "application/json")
         await #expect(transport.lastRequest?.headerFields[trace] == "abc")
         await #expect(transport.lastRequest?.headerFields[.cookie] == nil)
+        // Host is dropped so the upstream sees only the authority the proxy targets; a hop-by-hop
+        // header (Connection) must not be relayed onto the upstream connection (RFC 9110 §7.6.1).
+        await #expect(transport.lastRequest?.headerFields[host] == nil)
+        await #expect(transport.lastRequest?.headerFields[.connection] == nil)
     }
 
     @Test("a bearer-configured service injects Authorization upstream, even on a free route")
@@ -223,10 +265,11 @@ struct MPPProxyGatingTests {
         await #expect(transport.lastRequest?.headerFields[key] == "k123")
     }
 
-    @Test("Set-Cookie is stripped from the upstream response while a safe header survives")
-    func scrubsResponseSetCookie() async throws {
+    @Test("Set-Cookie and hop-by-hop are stripped from the upstream response; safe headers survive")
+    func scrubsResponseUnsafeHeaders() async throws {
         var upstream = HTTPResponse(status: .ok)
         upstream.headerFields[.setCookie] = "session=evil; Domain=.proxy.example"
+        upstream.headerFields[.connection] = "close"
         let safe = try #require(HTTPField.Name("X-Upstream"))
         upstream.headerFields[safe] = "kept"
         let transport = RecordingTransport((upstream, Data("ok".utf8)))
@@ -237,6 +280,8 @@ struct MPPProxyGatingTests {
             now: proxyNow
         )
         #expect(response.headerFields[.setCookie] == nil)
+        // Hop-by-hop headers govern the upstream connection and must not reach the client (§7.6.1).
+        #expect(response.headerFields[.connection] == nil)
         #expect(response.headerFields[safe] == "kept")
     }
 

@@ -25,6 +25,9 @@ enum ProxyHeaders {
     /// sends.
     /// - `accept-encoding` is dropped so the upstream returns an unencoded body the proxy can relay
     ///   without having to decode it.
+    /// - `host` is dropped so the upstream sees only the authority the proxy targets (the forwarded
+    ///   request sets `authority` from the service `baseURL`); a leaked client `Host` would
+    ///   otherwise enable Host-header confusion against the origin.
     /// - `x-forwarded-*` headers are dropped so a client cannot spoof its apparent origin to the
     ///   upstream through the proxy.
     static func scrub(_ headers: HTTPFields) -> HTTPFields {
@@ -32,7 +35,7 @@ enum ProxyHeaders {
         for field in headers {
             let name = field.name.canonicalName
             if name == "authorization" || name == "accept-encoding"
-                || name == "content-length" || name == "cookie"
+                || name == "content-length" || name == "cookie" || name == "host"
                 || hopByHop.contains(name) || name.hasPrefix("x-forwarded-") {
                 continue
             }
@@ -56,11 +59,14 @@ enum ProxyHeaders {
     ///   the surrounding deployment into a session-fixation primitive. Proxied services
     /// authenticate
     ///   via bearer tokens / signed payloads, never cookies, so dropping it is purely defensive.
+    /// - hop-by-hop headers (RFC 9110 §7.6.1) are dropped in this direction too: they govern the
+    ///   upstream connection and must not be relayed onto the proxy's own connection to the client.
     static func scrubResponse(_ headers: HTTPFields) -> HTTPFields {
         var scrubbed = HTTPFields()
         for field in headers {
             let name = field.name.canonicalName
-            if name == "content-encoding" || name == "content-length" || name == "set-cookie" {
+            if name == "content-encoding" || name == "content-length" || name == "set-cookie"
+                || hopByHop.contains(name) {
                 continue
             }
             scrubbed.append(field)
