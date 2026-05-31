@@ -10,5 +10,8 @@
   "dependencies": {
     "mppx": "0.6.28",
     "viem": "2.51.3"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
   }
 }

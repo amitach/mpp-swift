@@ -81,7 +81,13 @@ cross-client follow-up, not an MCP-only patch.
   swiftlint --strict clean; no em dashes.
 - DONE: full graph + 26 MPPMCP tests build/pass on swift:6.2 Linux (6.2.4) and macOS (local 6.3.2).
 - DONE: README/ARCHITECTURE updated (Swift 6.2 floor, MPPMCP module rows); CI migrated to 6.2.
-- TODO (PR-2, deferred): live cross-SDK conformance vs mppx mcp-sdk (forward + reverse) + a CI job.
-  Current cross-SDK fidelity is covered hermetically: the codec parses a real captured mppx frame,
-  JCS canonicalization parity vs mppx (ox) is byte-proven, and the in-process e2e runs a real
-  MCP.Client <-> MCP.Server through the gate. The live mppx-process harness is the remaining proof.
+- DONE (live cross-SDK conformance, FORWARD): the reference mppx `mcp-sdk` CLIENT pays OUR Swift
+  MCP server (`MPPMCPConformanceServer`, an MCP.Server over stdio gating a `premium` tool via the
+  MPPMCP gate + TempoProofVerifier), which the Node client spawns over a real stdio transport.
+  mppx reads our -32042 challenge, builds the Tempo proof credential, sends it in `params._meta`,
+  our server verifies + mints a receipt into `result._meta`, mppx reads it. PASSES live
+  (`Scripts/conformance/run-mcp.sh` + `mcp-client.mjs`); wired into the `conformance` CI job.
+  Added `@modelcontextprotocol/sdk` (>=1.25.0) to the dev-only harness (npm ci --ignore-scripts).
+- TODO (follow-up): the REVERSE live direction (our Swift MCP client pays an mppx `mcp-sdk` server).
+  The forward run + the hermetic suite (real-frame parse, byte-proven JCS parity, in-process e2e)
+  already prove both the wire frame and the flow; reverse is the symmetric belt-and-suspenders.

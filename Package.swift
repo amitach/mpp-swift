@@ -252,6 +252,20 @@ let package = Package(
             ] + conformanceServerFFIDeps,
             swiftSettings: conformanceServerFFISettings
         ),
+        // MPPMCPConformanceServer: a dev-only MCP server over stdio (no product) that gates a
+        // `premium` tool behind a zero-amount Tempo proof via MPPMCP. The reference mppx
+        // `mcp-sdk` CLIENT spawns it and pays it, proving the JSON-RPC / MCP payment binding
+        // interoperates with the real peer over a real transport (run via the conformance scripts).
+        .executableTarget(
+            name: "MPPMCPConformanceServer",
+            dependencies: [
+                "MPPCore",
+                "MPPServer",
+                "MPPTempoServer",
+                "MPPMCP",
+                .product(name: "MCP", package: "swift-sdk"),
+            ]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )

@@ -123,6 +123,12 @@ jobs:
       # + TempoProofVerifier) over real HTTP.
       - name: Cross-SDK conformance (mppx client -> our server, offline)
         run: Scripts/conformance/run-reverse.sh
+      # MCP: the reference mppx mcp-sdk CLIENT pays OUR Swift MCP server (MPPMCPConformanceServer
+      # + MPPMCP gate) over a real stdio transport. Proves the JSON-RPC / MCP payment binding
+      # interoperates with the live peer (the -32042 frame, the credential in params._meta, the
+      # receipt in result._meta). Offline + deterministic (zero-amount proof).
+      - name: Cross-SDK MCP conformance (mppx mcp-sdk client -> our Swift MCP server, stdio)
+        run: Scripts/conformance/run-mcp.sh
 
   conformance-testnet:
     name: Conformance (testnet)
