@@ -58,7 +58,7 @@ public enum FFITempoTxError: Error, Sendable, Equatable {
 /// side reads it over JSON-RPC; tests inject a stub). The signing key is held only for
 /// the lifetime of this value; the FFI zeroizes its own copy of the key bytes on every
 /// path (see the Rust crate).
-public struct FFITempoTxBuilder: TempoCloseTxBuilder, TempoOpenTxBuilder {
+public struct FFITempoTxBuilder: TempoCloseTxBuilder, TempoOpenTxBuilder, TempoTopUpTxBuilder {
     private let signingKey: Data
     private let fee: TempoFeeParameters
     private let nonceProvider: @Sendable (EthereumAddress) async throws -> UInt64

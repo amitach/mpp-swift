@@ -72,7 +72,7 @@ struct TempoChannelSessionTests {
         await #expect(throws: TempoChannelSessionError.voucherExceedsDeposit) {
             _ = try await session.voucher(cumulativeAmount: "2000")
         }
-        let state = try await session.state()
+        let state = await session.state()
         #expect(state.cumulativeAmount == ChannelAmount(700)) // unchanged by the rejects
     }
 
@@ -121,8 +121,33 @@ struct TempoChannelSessionTests {
             _ = try await session.open(deposit: "1000")
         }
         // The op did not take effect; the channel is still openable (no poison).
-        let state = try await session.state()
+        let state = await session.state()
         #expect(!state.isOpen)
+    }
+
+    @Test("close with no prior voucher settles a zero-amount voucher and finalizes")
+    func closeWithoutVoucher() async throws {
+        let session = try makeSession(stub: StubRPC())
+        _ = try await session.open(deposit: "1000")
+        // No voucher issued: close settles a zero-amount voucher (the safe default).
+        let closed = try await session.close()
+        #expect(closed.isFinalized)
+        #expect(closed.cumulativeAmount == .zero)
+    }
+
+    @Test("a reverted op leaves the channel usable: a retry of the same op succeeds")
+    func retryAfterRevert() async throws {
+        let session = try makeSession(stub: StubRPC(revertFirst: 1))
+        let revertedHash = "0x" + String(repeating: "a", count: 64)
+        // First open reverts: no state change, no poison.
+        await #expect(throws: TempoChannelSessionError.transactionReverted(revertedHash)) {
+            _ = try await session.open(deposit: "1000")
+        }
+        #expect(await !(session.state()).isOpen)
+        // Retry: the second broadcast succeeds (the builder reads the pending nonce afresh).
+        let state = try await session.open(deposit: "1000")
+        #expect(state.isOpen)
+        #expect(state.deposit == ChannelAmount(1000))
     }
 
     @Test("a concurrent operation is rejected while one is in flight")
@@ -163,12 +188,16 @@ struct TempoChannelSessionTests {
 /// parks the first send (for the reentrancy test).
 private final class StubRPC: MPPHTTPTransport, @unchecked Sendable {
     private let reverts: Bool
+    /// Reverts the first N broadcasts, then succeeds (for the retry-after-revert test). The
+    /// sends are sequential per session (the in-flight guard), so a plain counter is safe.
+    private var revertFirst: Int
     private let gate: SendGate?
     private let fakeHash = "0x" + String(repeating: "a", count: 64)
 
-    init(reverts: Bool = false, gate: SendGate? = nil) {
+    init(reverts: Bool = false, gate: SendGate? = nil, revertFirst: Int = 0) {
         self.reverts = reverts
         self.gate = gate
+        self.revertFirst = revertFirst
     }
 
     func send(_: HTTPRequest, body: Data) async throws -> (HTTPResponse, Data) {
@@ -182,7 +211,16 @@ private final class StubRPC: MPPHTTPTransport, @unchecked Sendable {
         switch method {
         case "eth_getTransactionCount": return ok(rawResult: "\"0x0\"")
         case "eth_sendRawTransactionSync":
-            let status = reverts ? "0x0" : "0x1"
+            let shouldRevert: Bool
+            if reverts {
+                shouldRevert = true
+            } else if revertFirst > 0 {
+                revertFirst -= 1
+                shouldRevert = true
+            } else {
+                shouldRevert = false
+            }
+            let status = shouldRevert ? "0x0" : "0x1"
             let head = #"{"status":"\#(status)","transactionHash":"\#(fakeHash)""#
             return ok(rawResult: head + #","blockNumber":"0x1"}"#)
         default: return ok(rawResult: "\"0x0\"")

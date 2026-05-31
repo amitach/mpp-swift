@@ -16,6 +16,8 @@ import Testing
 enum Fixture {
     static let chainId: UInt64 = 1
     static let key = Data([UInt8](repeating: 0, count: 31) + [1])
+    /// A distinct access key (for the separate-authorizedSigner tests).
+    static let accessKey = Data([UInt8](repeating: 0, count: 31) + [2])
     static let escrowHex = "0x000000000000000000000000000000000000eeee"
     static let payeeHex = "0x1111111111111111111111111111111111111111"
     static let payee2Hex = "0x2222222222222222222222222222222222222222"
@@ -23,9 +25,34 @@ enum Fixture {
     static let deposit = "1000000"
     static let salt = Data(repeating: 0xAB, count: 32)
     static let txBytes = Data([0x76, 0x01, 0x02, 0x03])
+    static let topUpTxBytes = Data([0x76, 0x05, 0x06, 0x07])
+    /// A 32-byte channel id a server suggests reusing (for recovery tests).
+    static let recoverChannelHex = "0x" + String(repeating: "cd", count: 32)
 }
 
 enum StubError: Error { case boom }
+
+/// A ``TempoTopUpTxBuilder`` that returns canned bytes and records the channel id +
+/// additionalDeposit it was handed.
+actor StubTopUpTxBuilder: TempoTopUpTxBuilder {
+    private let transaction: Data
+    private(set) var calls: [(channelID: Data, additionalDeposit: String)] = []
+
+    init(transaction: Data = Fixture.topUpTxBytes) {
+        self.transaction = transaction
+    }
+
+    func buildTopUpTransaction(
+        escrow _: EthereumAddress,
+        token _: EthereumAddress,
+        channelID: Data,
+        additionalDeposit: String,
+        chainID _: UInt64
+    ) async throws -> Data {
+        calls.append((channelID, additionalDeposit))
+        return transaction
+    }
+}
 
 /// A ``TempoOpenTxBuilder`` that returns canned bytes (or fails) and records the
 /// parameters it was handed, so a test can assert how many opens ran and with what
@@ -78,7 +105,10 @@ func makeSigner() throws -> Secp256k1Signer {
 func makeMethod(
     depositPolicy: @escaping @Sendable (DepositContext) -> String? = { _ in Fixture.deposit },
     approval: TempoApprovalPolicy = .allowAll,
-    builder: StubOpenTxBuilder
+    builder: StubOpenTxBuilder,
+    topUpBuilder: (any TempoTopUpTxBuilder)? = nil,
+    channelReader: (any ChannelStateReading)? = nil,
+    voucherSigner: Secp256k1Signer? = nil
 ) throws -> TempoChannelMethod {
     let method = try TempoChannelMethod(
         signer: makeSigner(),
@@ -86,9 +116,57 @@ func makeMethod(
         defaultChainId: Fixture.chainId,
         depositPolicy: depositPolicy,
         approval: approval,
-        saltProvider: { Fixture.salt }
+        saltProvider: { Fixture.salt },
+        topUpBuilder: topUpBuilder,
+        channelReader: channelReader,
+        voucherSigner: voucherSigner
     )
     return try #require(method)
+}
+
+/// A ``ChannelStateReading`` returning a fixed on-chain channel (or throwing), recording the
+/// channel ids it was asked to read.
+actor StubChannelReader: ChannelStateReading {
+    private let result: Result<OnChainChannel, any Error>
+    private(set) var reads: [Data] = []
+
+    init(_ channel: OnChainChannel) {
+        result = .success(channel)
+    }
+
+    init(failure: any Error) {
+        result = .failure(failure)
+    }
+
+    func onChainChannel(
+        channelID: Data, escrow _: EthereumAddress, chainID _: UInt64
+    ) async throws -> OnChainChannel {
+        reads.append(channelID)
+        return try result.get()
+    }
+}
+
+/// Builds an on-chain channel snapshot for the recovery tests. Defaults match the fixture
+/// wallet/payee/token (a recoverable channel); override to exercise the guard's mismatch and
+/// close-requested paths.
+func recoverableChannel(
+    deposit: UInt64,
+    settled: UInt64,
+    finalized: Bool,
+    wallet: EthereumAddress,
+    closeRequestedAt: UInt64 = 0,
+    payeeHex: String = Fixture.payeeHex
+) throws -> OnChainChannel {
+    try OnChainChannel(
+        payer: wallet,
+        payee: #require(EthereumAddress(hex: payeeHex)),
+        token: #require(EthereumAddress(hex: Fixture.tokenHex)),
+        authorizedSigner: wallet,
+        deposit: ChannelAmount(deposit),
+        settled: ChannelAmount(settled),
+        finalized: finalized,
+        closeRequestedAt: closeRequestedAt
+    )
 }
 
 /// A tempo/session challenge whose request carries the charge amount and the
@@ -99,6 +177,7 @@ func sessionChallenge(
     currency: String? = Fixture.tokenHex,
     escrow: String? = Fixture.escrowHex,
     suggestedDeposit: String? = nil,
+    channelId: String? = nil,
     chainId: UInt64? = Fixture.chainId,
     method: String = "tempo",
     intent: String = "session",
@@ -107,6 +186,7 @@ func sessionChallenge(
     var details: [String: JSONValue] = [:]
     if let chainId { details["chainId"] = .integer(Int64(chainId)) }
     if let escrow { details["escrowContract"] = .string(escrow) }
+    if let channelId { details["channelId"] = .string(channelId) }
     var members: [String: JSONValue] = ["amount": .string(amount)]
     if let recipient { members["recipient"] = .string(recipient) }
     if let currency { members["currency"] = .string(currency) }
@@ -124,15 +204,18 @@ func sessionChallenge(
     )
 }
 
-/// The channel id the client should derive for a payee, with the fixed salt and the
-/// wallet as both payer and authorized signer.
-func expectedChannelID(payeeHex: String, wallet: EthereumAddress) throws -> Data {
+/// The channel id the client should derive for a payee, with the fixed salt and `wallet` as
+/// payer. `authorizedSigner` defaults to `wallet` (no separate access key).
+func expectedChannelID(
+    payeeHex: String, wallet: EthereumAddress, authorizedSigner: EthereumAddress? = nil
+) throws -> Data {
     let payee = try #require(EthereumAddress(hex: payeeHex))
     let token = try #require(EthereumAddress(hex: Fixture.tokenHex))
     let escrow = try #require(EthereumAddress(hex: Fixture.escrowHex))
     let parameters = try #require(Channel.Parameters(
         payer: wallet, payee: payee, token: token, salt: Fixture.salt,
-        authorizedSigner: wallet, escrowContract: escrow, chainId: Fixture.chainId
+        authorizedSigner: authorizedSigner ?? wallet, escrowContract: escrow,
+        chainId: Fixture.chainId
     ))
     return Channel.id(parameters)
 }

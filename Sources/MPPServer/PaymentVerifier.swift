@@ -78,13 +78,9 @@ public struct PaymentVerifier: Sendable {
             return .rejected(.expired)
         }
 
-        if let digest = challenge.digest {
-            // A malformed digest in our own signed challenge, or a body mismatch,
-            // both reject (fail closed).
-            guard (try? ContentDigest.verify(body, matches: digest)) == true else {
-                return .rejected(.digestMismatch)
-            }
-        }
+        // A malformed digest in our own signed challenge, or a body mismatch, both reject
+        // (fail closed); no digest is a pass.
+        guard digestMatches(challenge, body: body) else { return .rejected(.digestMismatch) }
 
         // Method-specific settlement verify, BEFORE consume: a credential rejected
         // here must not burn a legitimate payer's challenge id (so a corrected
@@ -93,10 +89,15 @@ public struct PaymentVerifier: Sendable {
         // that otherwise bound to this route, fail closed rather than grant access
         // on the protocol checks alone.
         var receipt: Receipt?
+        // Default to one-time consumption; a matched method that reuses its challenge (a
+        // session: anti-replay is its own monotonic cumulative, not the challenge id) clears
+        // this so the same challenge can be presented again for the next voucher.
+        var reusesChallenge = false
         if !methods.isEmpty {
             guard let method = methods.first(where: { $0.supports(challenge) }) else {
                 return .rejected(.noSupportingMethod)
             }
+            reusesChallenge = method.reusesChallenge
             // The method mints its own receipt (base fields plus any method extras),
             // stamped with the injected `now`. The verifier only carries it.
             do {
@@ -106,9 +107,21 @@ public struct PaymentVerifier: Sendable {
             }
         }
 
-        guard await replayStore.consume(challenge.id) else { return .rejected(.replayed) }
+        // Single-use consume, UNLESS the matched method reuses its challenge: a one-shot
+        // proof/charge burns the challenge id here; a session does not (that would reject
+        // every voucher after the open), relying on the method's own anti-replay instead.
+        if !reusesChallenge {
+            guard await replayStore.consume(challenge.id) else { return .rejected(.replayed) }
+        }
 
         return .verified(MPPVerified(credential: credential, receipt: receipt))
+    }
+
+    /// Whether `body` satisfies the challenge's Content-Digest: `true` when the challenge
+    /// carries no digest, otherwise the body must match (a malformed digest fails closed).
+    private func digestMatches(_ challenge: Challenge, body: Data) -> Bool {
+        guard let digest = challenge.digest else { return true }
+        return (try? ContentDigest.verify(body, matches: digest)) == true
     }
 
     /// The result of verifying a credential.

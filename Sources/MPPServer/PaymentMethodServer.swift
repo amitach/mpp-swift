@@ -40,4 +40,20 @@ public protocol PaymentMethodServer: Sendable {
     /// zero-amount proof is pure local recovery, but a settled transfer confirms
     /// the transaction on-chain over an RPC.
     func verify(_ credential: Credential, now: Date) async throws -> Receipt
+
+    /// Whether this method's challenge may be presented more than once. Defaults to
+    /// `false`: the verifier consumes the challenge id exactly once (the one-shot
+    /// proof / charge model). A session method returns `true`: one challenge is reused
+    /// across the channel lifecycle (open, vouchers, close) and the method enforces
+    /// anti-replay itself (the monotonic cumulative recorded per channel), so one-time
+    /// challenge consumption would wrongly reject every payment after the first.
+    var reusesChallenge: Bool { get }
+}
+
+public extension PaymentMethodServer {
+    /// One-shot by default: the verifier consumes the challenge id exactly once. A method
+    /// that reuses its challenge (a session) overrides this to `true`.
+    var reusesChallenge: Bool {
+        false
+    }
 }

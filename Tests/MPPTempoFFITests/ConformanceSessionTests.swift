@@ -71,59 +71,29 @@ struct ConformanceSessionTests {
         let onChain = try await TempoEscrow.readChannel(channelID, escrow: escrow, via: rpc)
         #expect(onChain.deposit > .zero)
 
-        // Close: our client has no close action yet (a deferred follow-up), so build the
-        // close credential directly from the latest voucher and let the mppx server settle
-        // it on-chain with its operator. Reuses Voucher.sign + Credential.
-        try await close(
-            latest: latest,
-            escrow: escrow,
-            payer: payer,
-            transport: transport,
-            request: request
-        )
+        // Close via the client's own buildClose (FU-2): it settles the channel's latest
+        // tracked cumulative; the mppx server settles it on-chain with its operator.
+        try await close(method: method, transport: transport, request: request)
 
         // The reference server settled OUR voucher: the channel is finalized on-chain.
         let settled = try await TempoEscrow.readChannel(channelID, escrow: escrow, via: rpc)
         #expect(settled.finalized)
     }
 
-    /// Sends a `close` session credential (signed over the latest voucher) so the mppx
-    /// server settles it on-chain. Drives the 402 by hand (the close is client-initiated,
-    /// not a charge the method handles): GET the endpoint, take the session challenge,
-    /// attach the close credential, expect acceptance.
+    /// Closes the channel via the client's own `buildClose` (FU-2) so the mppx server settles
+    /// it on-chain. The close is client-initiated (not a charge the 402 flow handles): GET the
+    /// endpoint for a fresh session challenge, build the close credential, attach it, expect
+    /// acceptance.
     private func close(
-        latest: Credential,
-        escrow: EthereumAddress,
-        payer: ModeratoKit.Account,
+        method: TempoChannelMethod,
         transport: URLSessionTransport,
         request: HTTPRequest
     ) async throws {
-        let channelID = try #require(hex(latest.payload["channelId"]))
-        let cumulative = try #require(string(latest.payload["cumulativeAmount"]))
         let (challengeResponse, _) = try await transport.send(request, body: Data())
         #expect(challengeResponse.status.code == 402)
         let header = try #require(challengeResponse.headerFields[values: .wwwAuthenticate].first)
         let challenge = try #require(Challenge.challenges(inHeaderValue: header).first)
-        let chainID = (try? TempoChargeRequest(challenge: challenge))?.chainId ?? ModeratoKit
-            .chainID
-
-        let voucher = try #require(Voucher(channelID: channelID, cumulativeAmount: cumulative))
-        let signature = try voucher.sign(
-            escrowContract: escrow,
-            chainId: chainID,
-            with: payer.signer
-        )
-        let payload: [String: JSONValue] = [
-            "action": .string("close"),
-            "channelId": .string(channelID.hexPrefixed),
-            "cumulativeAmount": .string(cumulative),
-            "signature": .string(signature.hexPrefixed),
-        ]
-        let credential = Credential(
-            challenge: challenge,
-            source: ProofSource.did(address: payer.address, chainId: chainID),
-            payload: payload
-        )
+        let credential = try await method.buildClose(for: challenge)
         var retry = request
         retry.headerFields[.authorization] = try credential.headerValue
         let (closeResponse, _) = try await transport.send(retry, body: Data())

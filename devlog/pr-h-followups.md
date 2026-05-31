@@ -7,6 +7,23 @@ peer, in shipped code. References below are to the mppx source for the implement
 
 Status legend: TODO / IN PROGRESS / DONE.
 
+## ALL DONE (branch feat/ws10-channel-followups, stacked on PR #74)
+
+- **FU-1 DONE** tryRecoverChannel: `ChannelStateReading` read seam + `EVMChannelReader`,
+  `methodDetails.channelId` decode, registry `attach`, `recoverIfSuggested`. 5 hermetic tests.
+- **FU-2 DONE** client topUp/close: `TempoTopUpTxBuilder` seam, `buildTopUp`/`buildClose`,
+  registry `openChannel`/`removeChannel`. 6 hermetic tests + the forward conformance now closes
+  via `buildClose` (re-verified live on Moderato).
+- **FU-3 DONE** access-key authorizedSigner: optional `voucherSigner`; the access key is the
+  channel's authorizedSigner + voucher signer, the wallet funds + is the source. 1 hermetic test.
+- **FU-4 DONE** session replay policy: `PaymentMethodServer.reusesChallenge` (default false);
+  `PaymentVerifier` skips the one-time consume for session methods; `SessionMethod` opts in; the
+  conformance `ReusableReplayStore` workaround removed. 1 hermetic test.
+- **PR-G gaps DONE**: `TempoChannelSession` close-with-no-prior-voucher + retry-after-revert
+  tests (StubRPC `revertFirst`). 
+
+The original specs below are retained for reference.
+
 ---
 
 ## FU-1: tryRecoverChannel (attach to an existing on-chain channel) - TODO
