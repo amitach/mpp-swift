@@ -130,6 +130,34 @@ public struct SubscriptionRequest: Sendable, Hashable {
         return AccessKey(address: address, keyType: keyType)
     }
 
+    /// The TIP-20 `transferWithMemo(address,uint256,bytes32)` 4-byte selector the subscription
+    /// authorization scopes the access key to.
+    public static let transferWithMemoSelector = Data([0x95, 0x77, 0x7D, 0x59])
+
+    /// The ``TempoKeyAuthorization`` this request authorizes for `accessKey` on `chainId`: a single
+    /// per-period `limit` on `currency` and one `transferWithMemo` scope to `recipient`, expiring
+    /// at
+    /// ``expirySeconds``. The client signs exactly this; the server reconstructs it to verify, so
+    /// both sides derive the authorization from one place (no drift between sign and verify).
+    public func keyAuthorization(
+        accessKey: AccessKey, chainId: UInt64
+    ) -> TempoKeyAuthorization {
+        TempoKeyAuthorization(
+            address: accessKey.address,
+            chainID: chainId,
+            expiry: expirySeconds,
+            keyType: accessKey.keyType,
+            limits: [.init(token: currency, limit: amount.rawValue, period: periodSeconds)],
+            scopes: [
+                .init(
+                    address: currency,
+                    selector: Self.transferWithMemoSelector,
+                    recipients: [recipient],
+                ),
+            ]
+        )
+    }
+
     /// A reason a subscription `request` could not be decoded.
     public enum DecodingFailure: Error, Sendable, Hashable {
         /// The `request` value was not unpadded base64url.
