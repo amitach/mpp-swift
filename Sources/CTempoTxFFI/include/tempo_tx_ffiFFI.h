@@ -253,6 +253,11 @@ RustBuffer uniffi_tempo_tx_ffi_fn_func_build_close_transaction(uint64_t chain_id
 RustBuffer uniffi_tempo_tx_ffi_fn_func_build_open_transaction(uint64_t chain_id, uint64_t nonce, RustBuffer max_fee_per_gas, RustBuffer max_priority_fee_per_gas, uint64_t gas_limit, RustBuffer fee_token, RustBuffer private_key, RustBuffer escrow, RustBuffer token, RustBuffer payee, RustBuffer deposit, RustBuffer salt, RustBuffer authorized_signer, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_FN_FUNC_BUILD_SUBSCRIPTION_CHARGE_TRANSACTION
+#define UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_FN_FUNC_BUILD_SUBSCRIPTION_CHARGE_TRANSACTION
+RustBuffer uniffi_tempo_tx_ffi_fn_func_build_subscription_charge_transaction(uint64_t chain_id, uint64_t nonce, RustBuffer max_fee_per_gas, RustBuffer max_priority_fee_per_gas, uint64_t gas_limit, RustBuffer fee_token, RustBuffer private_key, RustBuffer currency, RustBuffer recipient, RustBuffer amount, RustBuffer memo, RustBuffer key_authorization, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_FN_FUNC_BUILD_TOP_UP_TRANSACTION
 #define UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_FN_FUNC_BUILD_TOP_UP_TRANSACTION
 RustBuffer uniffi_tempo_tx_ffi_fn_func_build_top_up_transaction(uint64_t chain_id, uint64_t nonce, RustBuffer max_fee_per_gas, RustBuffer max_priority_fee_per_gas, uint64_t gas_limit, RustBuffer fee_token, RustBuffer private_key, RustBuffer escrow, RustBuffer token, RustBuffer channel_id, RustBuffer additional_deposit, RustCallStatus *_Nonnull out_status
@@ -527,6 +532,12 @@ uint16_t uniffi_tempo_tx_ffi_checksum_func_build_close_transaction(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_CHECKSUM_FUNC_BUILD_OPEN_TRANSACTION
 #define UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_CHECKSUM_FUNC_BUILD_OPEN_TRANSACTION
 uint16_t uniffi_tempo_tx_ffi_checksum_func_build_open_transaction(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_CHECKSUM_FUNC_BUILD_SUBSCRIPTION_CHARGE_TRANSACTION
+#define UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_CHECKSUM_FUNC_BUILD_SUBSCRIPTION_CHARGE_TRANSACTION
+uint16_t uniffi_tempo_tx_ffi_checksum_func_build_subscription_charge_transaction(void
     
 );
 #endif
