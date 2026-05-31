@@ -57,5 +57,4 @@ cross-SDK conformance-proven against the reference SDK in both directions, live 
 ## Pending (not channel-blocking)
 
 Subscription sub-layer (RLP key-auth + VoucherStore + SSE), Stripe rail, framework adapters,
-CLI, MCP, proxy, WebSocket, discovery PR-2, and the CI-optimization chore. See the overall
-status map (`~/.claude/plans/mpp-swift-overall-status.html`).
+CLI, MCP, proxy, WebSocket, discovery PR-2, and the CI-optimization chore.
