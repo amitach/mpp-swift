@@ -183,4 +183,20 @@ struct TempoKeyAuthorizationTests {
         #expect(try TempoKeyAuthorization.deserialize(serialized).authorization
             .keyType == .secp256k1)
     }
+
+    @Test("a non-decimal limit amount is rejected as invalidAmount")
+    func invalidAmountRejected() throws {
+        var bad = try fixture()
+        bad.limits = [.init(token: bad.limits[0].token, limit: "not-a-number", period: 604_800)]
+        #expect(throws: TempoKeyAuthorization.AuthorizationError.self) { try bad.serialize() }
+    }
+
+    @Test("a structurally malformed serialization is rejected")
+    func malformedDeserializeRejected() {
+        // A 3-element outer list is neither [tuple] nor [tuple, signature].
+        let malformed = RLP.encode(.list([.bytes(Data([1])), .bytes(Data([2])), .bytes(Data([3]))]))
+        #expect(throws: TempoKeyAuthorization.AuthorizationError.self) {
+            try TempoKeyAuthorization.deserialize(malformed)
+        }
+    }
 }

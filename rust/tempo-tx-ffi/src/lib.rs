@@ -665,12 +665,6 @@ mod tests {
         }
     }
 
-    fn decode_hex(hex: &str) -> Vec<u8> {
-        (0..hex.len() / 2)
-            .map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).expect("hex"))
-            .collect()
-    }
-
     /// The chain's RLP of the key authorization is byte-identical to MPP-swift's inner tuple, so
     /// keccak256 of it is the same sign payload both sides compute.
     #[test]
@@ -687,7 +681,7 @@ mod tests {
     fn chain_round_trips_mpp_swift_canonical_bytes() {
         use alloy_rlp::Decodable;
         use tempo_primitives::transaction::key_authorization::KeyAuthorization;
-        let bytes = decode_hex(INNER_TUPLE);
+        let bytes = alloy_primitives::hex::decode(INNER_TUPLE).expect("hex");
         let decoded =
             KeyAuthorization::decode(&mut bytes.as_slice()).expect("chain decodes our bytes");
         assert_eq!(decoded, mpp_swift_golden_key_authorization());

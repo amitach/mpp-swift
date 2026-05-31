@@ -180,8 +180,12 @@ public struct TempoKeyAuthorization: Sendable, Hashable {
 
     // MARK: - Signing
 
-    /// Signs the authorization with `signer`, returning the 65-byte secp256k1 envelope `r ‖ s ‖ v`.
-    public func sign(with signer: Secp256k1Signer) throws(AuthorizationError) -> Data {
+    /// Signs the sign payload with `signer`, returning the 65-byte secp256k1 envelope `r ‖ s ‖ v`.
+    /// Private: the public local-signer entry point is ``signedSerialization(with:)``; a caller
+    /// using
+    /// an external signer takes ``signPayload()`` and passes the result to
+    /// ``serialize(signature:)``.
+    private func sign(with signer: Secp256k1Signer) throws(AuthorizationError) -> Data {
         let payload = try signPayload()
         guard let recoverable = try? signer.sign(hash: payload) else { throw .signingFailed }
         return recoverable.compact + Data([recoverable.recoveryID + 27])
