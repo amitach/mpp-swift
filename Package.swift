@@ -266,6 +266,21 @@ let package = Package(
                 .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
+        // MPPMCPConformanceClient: the reverse direction. A dev-only MCP CLIENT (no product) that
+        // spawns the reference mppx mcp-sdk SERVER over stdio and pays its payment-gated tool via
+        // MPPMCP's MCPPaymentClient + the Tempo zero-amount proof. Proves our client interoperates
+        // with the real peer's MCP server (run via the conformance scripts).
+        .executableTarget(
+            name: "MPPMCPConformanceClient",
+            dependencies: [
+                "MPPCore",
+                "MPPClient",
+                "MPPEVM",
+                "MPPTempo",
+                "MPPMCP",
+                .product(name: "MCP", package: "swift-sdk"),
+            ]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )
