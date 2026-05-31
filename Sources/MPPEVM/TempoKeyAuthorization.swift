@@ -253,7 +253,7 @@ public struct TempoKeyAuthorization: Sendable, Hashable {
         for group in scopeGroups {
             try scopes.append(contentsOf: parseScopeGroup(group))
         }
-        return TempoKeyAuthorization(
+        return try TempoKeyAuthorization(
             address: address,
             chainID: Self.uint64(chainID),
             expiry: Self.uint64(expiry),
@@ -271,7 +271,7 @@ public struct TempoKeyAuthorization: Sendable, Hashable {
         var period: UInt64 = 0
         if fields.count == 3 {
             guard case let .bytes(periodBytes) = fields[2] else { throw .malformedSerialization }
-            period = uint64(periodBytes)
+            period = try uint64(periodBytes)
         }
         return Limit(token: address, limit: decimalString(fromBigEndian: amount), period: period)
     }
@@ -313,9 +313,11 @@ public struct TempoKeyAuthorization: Sendable, Hashable {
         Data([UInt8](bytes).drop { $0 == 0 })
     }
 
-    /// A big-endian byte string (<= 8 significant bytes) as a `UInt64`.
-    private static func uint64(_ bytes: Data) -> UInt64 {
-        [UInt8](bytes).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+    /// A big-endian byte string as a `UInt64`, rejecting more than 8 bytes (which would silently
+    /// truncate an attacker-supplied chainId / expiry / period).
+    private static func uint64(_ bytes: Data) throws(AuthorizationError) -> UInt64 {
+        guard bytes.count <= 8 else { throw .malformedSerialization }
+        return [UInt8](bytes).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
     }
 
     /// A big-endian byte string as a base-10 integer string (the inverse of

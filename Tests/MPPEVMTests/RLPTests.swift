@@ -68,4 +68,19 @@ struct RLPTests {
         // A valid item followed by a stray trailing byte.
         #expect(throws: RLP.DecodingError.trailingBytes) { try RLP.decode(data("0x80ff")) }
     }
+
+    @Test("decoding rejects non-canonical encodings (strict, no malleability)")
+    func rejectsNonCanonicalEncodings() throws {
+        // A single byte < 0x80 wrapped in a length prefix must be encoded as itself.
+        #expect(throws: RLP.DecodingError.nonCanonicalEncoding) { try RLP.decode(data("0x8100")) }
+        #expect(throws: RLP.DecodingError.nonCanonicalEncoding) { try RLP.decode(data("0x817f")) }
+        // 0x8180 IS canonical: 0x80 >= 0x80 so it cannot be encoded bare.
+        #expect(try RLP.decode(data("0x8180")) == .bytes(Data([0x80])))
+        // Long form used for a length <= 55 must use the short form instead.
+        #expect(throws: RLP.DecodingError.nonCanonicalLength) {
+            try RLP.decode(data("0xb80548656c6c6f"))
+        }
+        // A list child whose length crosses the list's declared payload bound.
+        #expect(throws: RLP.DecodingError.truncated) { try RLP.decode(data("0xc1820506")) }
+    }
 }

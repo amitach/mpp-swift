@@ -31,11 +31,19 @@ public enum RLP {
     }
 
     /// A reason an RLP byte string could not be decoded.
+    ///
+    /// Decoding is strict: because a serialized key authorization is signed and compared, a
+    /// non-canonical encoding (a different byte string that decodes to the same value) would be a
+    /// malleability hole, so every non-canonical form is rejected rather than tolerated.
     public enum DecodingError: Error, Sendable, Hashable {
-        /// The input ended before a declared length was satisfied.
+        /// The input ended before a declared length was satisfied, or a list item overshot its
+        /// parent list's declared payload bound.
         case truncated
-        /// A multi-byte length had a leading zero, more than 8 length bytes, or overflowed.
+        /// A multi-byte length had a leading zero, used the long form for a length <= 55, more than
+        /// 8 length bytes, or overflowed.
         case nonCanonicalLength
+        /// A single byte < 0x80 was wrapped in a length prefix instead of encoded as itself.
+        case nonCanonicalEncoding
         /// Nested lists exceeded ``maxDepth`` (a stack-exhaustion guard on untrusted input).
         case tooDeep
         /// Bytes remained after the single top-level item was decoded.
@@ -95,7 +103,10 @@ public enum RLP {
         }
         if prefix <= 0xB7 {
             let length = Int(prefix - 0x80)
-            return try (.bytes(slice(bytes, from: index + 1, count: length)), 1 + length)
+            let value = try slice(bytes, from: index + 1, count: length)
+            // A single byte < 0x80 must be encoded as itself, not wrapped in a 0x81 prefix.
+            if length == 1, value[value.startIndex] < 0x80 { throw .nonCanonicalEncoding }
+            return (.bytes(value), 1 + length)
         }
         if prefix <= 0xBF {
             let (length, headerSize) = try readLength(bytes, at: index, base: 0xB7)
@@ -131,6 +142,8 @@ public enum RLP {
             length = (length << 8) | Int(bytes[index + 1 + offset])
         }
         guard length >= 0 else { throw .nonCanonicalLength }
+        // The long form is only canonical for lengths > 55; anything <= 55 must use the short form.
+        guard length > 55 else { throw .nonCanonicalLength }
         return (length, 1 + byteCount)
     }
 
@@ -144,6 +157,9 @@ public enum RLP {
         let end = start + payload
         while cursor < end {
             let (item, consumed) = try parse(bytes, at: cursor, depth: depth + 1)
+            // A child must lie entirely within this list's declared payload: a child whose length
+            // crosses `end` into sibling/trailing bytes is a malformed (inconsistent) length.
+            guard cursor + consumed <= end else { throw .truncated }
             items.append(item)
             cursor += consumed
         }

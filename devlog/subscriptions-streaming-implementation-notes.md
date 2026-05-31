@@ -63,6 +63,34 @@ So PR-1's only genuinely-new code is a pure-Swift RLP codec + the KeyAuthorizati
 - **G1:** macOS green locally; pure Foundation + existing MPPEVM, no Darwin-only API, so Linux is
   expected green on CI (the required matrix will confirm before merge).
 
+### Peer validation against the chain's own codec (tempo-primitives 1.8.0)
+
+To "be sure" without hand-chasing canonicality (and without runtime Rust), the pure-Swift RLP +
+KeyAuthorization is differential-tested against `tempo-primitives` (the chain's own alloy-strict
+codec) as a TEST ORACLE, in `rust/tempo-tx-ffi` (cargo, already in CI macOS+Linux):
+- `key_authorization_encoding_matches_mpp_swift`: the chain's `KeyAuthorization` RLP is
+  byte-identical to our Swift inner tuple (so keccak256 of it is the same sign payload).
+- `chain_round_trips_mpp_swift_canonical_bytes`: the chain's strict decoder accepts our canonical
+  bytes and recovers the same fields.
+- Both PASS => a 3-way agreement (MPP-swift == ox == chain) for the subscription key-auth.
+- FINDING (G3.5): tempo-primitives 1.8.0 added `is_admin: bool` + `account: Option<Address>` to
+  `KeyAuthorization` (admin-key replay protection), after `witness`. They are NOT `rlp(skip)`, but
+  with `#[rlp(trailing(canonical))]` they (and a None `witness`) trailing-omit for the subscription
+  shape, collapsing to the same 6-field tuple as ox. A non-subscription / admin key-auth WOULD
+  differ; our encoder deliberately targets the subscription shape only. Also: ox omits a
+  `period == 0` limit field while the chain's `TokenLimit.period` is non-optional, but subscriptions
+  always have period > 0, so it never bites. Only the subscription shape is validated.
+- Dev-dep `alloy-rlp = 0.3.15` added to `rust/tempo-tx-ffi` (test-only).
+
+### Devin round on #82 (RLP decoder hardening, all fixed + cross-validated)
+
+Devin flagged the pure-Swift decoder was too lenient (a malleability hole, since the serialized
+key-auth is signed/compared): 🔴 a list child could overshoot the list payload bound; 🚩 accepted
+non-canonical short-form (a byte < 0x80 wrapped in a prefix); 🚩 accepted long-form lengths <= 55;
+📝 `uint64` truncated > 8-byte integers. All fixed in `RLP.swift` (strict-canonical decode +
+child-within-parent-bound) + the `uint64` guard, with adversarial tests in `RLPTests`. The
+cross-validation above confirms our strict decode matches the chain's.
+
 ## Deviations / open
 
 - The tuple builder targets the subscription shape (always emits expiry+limits+calls). A fully
