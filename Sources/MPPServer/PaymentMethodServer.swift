@@ -32,9 +32,17 @@ public protocol PaymentMethodServer: Sendable {
     /// - Throws: to reject. The credential parsed and bound to a server-issued
     ///   challenge, but its method payload did not prove settlement (for a proof,
     ///   the signature did not recover to the credential's `source` wallet, or the
-    ///   payload was the wrong shape). The verifier runs this BEFORE consuming the
-    ///   challenge id, so a credential rejected here does not burn a legitimate
-    ///   payer's challenge.
+    ///   payload was the wrong shape).
+    ///
+    /// **Side-effect ordering (security).** The verifier consumes the single-use
+    /// challenge id BEFORE calling this, so any side effect a method performs here (a
+    /// session broadcasts/charges) is gated by the replay consume: a replayed
+    /// credential is rejected before it can act. A method that opts into
+    /// ``reusesChallenge`` (a session) skips the one-time consume and MUST therefore
+    /// enforce its own atomic anti-replay so its side effects cannot run twice (the
+    /// monotonic channel cumulative, decided inside the channel store's serialized
+    /// update). The cost of consuming first is that a credential rejected here burns
+    /// its challenge id; the client retries on a fresh `402`.
     ///
     /// `async` because a settlement check may consult an external service: a
     /// zero-amount proof is pure local recovery, but a settled transfer confirms

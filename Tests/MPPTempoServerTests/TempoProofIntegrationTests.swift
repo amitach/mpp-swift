@@ -7,10 +7,11 @@ import MPPTempoServer
 import Testing
 
 // TempoProofVerifier wired through PaymentVerifier / MPPServerMiddleware: replay
-// ordering (an invalid proof must not burn the challenge id, Decision A), fail
-// closed when no registered method supports the challenge (Decision B), and a full
-// mint -> pay -> verify round-trip. Shares the file-scope fixtures in
-// TempoProofVerifierTests (method/challenge/request/withSignature/realm).
+// ordering (the challenge is consumed BEFORE settlement, so a reused challenge is
+// rejected as replayed and side effects never run on a replay), fail closed when no
+// registered method supports the challenge, and a full mint -> pay -> verify
+// round-trip. Shares the file-scope fixtures in TempoProofVerifierTests
+// (method/challenge/request/withSignature/realm).
 @Suite("TempoProofVerifier integration")
 struct TempoProofIntegrationTests {
     private let secret = Data("conformance-fixed-secret-key-0123456789".utf8)
@@ -19,8 +20,8 @@ struct TempoProofIntegrationTests {
         try RouteBinding(realm: realm, method: MethodName("tempo"), intent: .charge)
     }
 
-    @Test("an invalid proof does not consume the challenge id; a later valid one succeeds")
-    func invalidProofDoesNotConsume() async throws {
+    @Test("the challenge is consumed before settlement, so a reused challenge is rejected")
+    func challengeConsumedBeforeSettlement() async throws {
         let minter = ChallengeMinter(signer: ChallengeSigner(secret: secret))
         let verifier = PaymentVerifier(
             signer: ChallengeSigner(secret: secret),
@@ -35,19 +36,21 @@ struct TempoProofIntegrationTests {
             var chars = Array(hex); chars[5] = chars[5] == "a" ? "b" : "a"; return String(chars)
         }
 
-        // The bad proof is rejected on settlement, NOT consumed.
+        // The challenge is consumed before the method settles, so a credential that loses its
+        // settlement check still burns the challenge id (the client retries on a fresh 402). This
+        // ordering is what prevents a replayed credential from reaching a side-effecting method.
         let first = try await verifier.verify(
             authorization: bad.headerValue, body: Data(), now: now, expecting: route
         )
         guard case .rejected(.settlementUnverified) = first else {
             Issue.record("expected settlementUnverified, got \(first)"); return
         }
-        // The same challenge id is still spendable: the good proof verifies.
+        // The same challenge id is now spent: even a valid proof on it is rejected as replayed.
         let second = try await verifier.verify(
             authorization: good.headerValue, body: Data(), now: now, expecting: route
         )
-        guard case .verified = second else {
-            Issue.record("expected verified, got \(second)"); return
+        guard case .rejected(.replayed) = second else {
+            Issue.record("expected replayed, got \(second)"); return
         }
     }
 

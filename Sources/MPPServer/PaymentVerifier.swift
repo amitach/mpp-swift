@@ -10,17 +10,19 @@ import MPPCore
 /// is one this server signed (HMAC, via ``ChallengeSigner``); confirm the
 /// challenge's realm/method/intent match the route's ``RouteBinding``; confirm
 /// it has not expired; confirm the request body matches the challenge digest
-/// (when the challenge carries one); verify the method-specific settlement (when
-/// ``PaymentMethodServer`` verifiers are registered); and finally consume the
-/// challenge id exactly once (``ReplayStore``).
+/// (when the challenge carries one); consume the single-use challenge id
+/// (``ReplayStore``); then run the method-specific settlement (when
+/// ``PaymentMethodServer`` verifiers are registered).
 ///
-/// Consume is LAST on purpose: an invalid credential (including one whose
-/// settlement check fails) must never burn a legitimate payer's challenge id, and
-/// the consume must precede any side effect the caller performs (it returns inside
-/// `verify`, before the handler runs). Consume also fails closed: if first use
-/// cannot be confirmed, the credential is rejected. The settlement step runs just
-/// before consume for the same reason, and fails closed too: with verifiers
-/// registered, a challenge no verifier supports is rejected.
+/// Consume runs BEFORE method settlement on purpose: a method's settlement may
+/// perform side effects (a session broadcasts a transaction and charges), so a
+/// replayed credential must be rejected at the single-use consume before any side
+/// effect can run, not after. Consume fails closed (if first use cannot be
+/// confirmed, reject), so a rejected one-shot credential burns its challenge id and
+/// the client retries on a fresh `402`. A method that reuses its challenge (a
+/// session) skips the one-time consume and enforces its own atomic anti-replay (the
+/// monotonic channel cumulative). With verifiers registered, a challenge no verifier
+/// supports is rejected (fail closed).
 public struct PaymentVerifier: Sendable {
     private let signer: ChallengeSigner
     private let replayStore: any ReplayStore
@@ -62,59 +64,73 @@ public struct PaymentVerifier: Sendable {
         now: Date,
         expecting: RouteBinding
     ) async -> Outcome {
+        let credential: Credential
+        switch protocolCheck(
+            authorization: authorization,
+            body: body,
+            now: now,
+            expecting: expecting
+        ) {
+        case let .rejected(rejection): return .rejected(rejection)
+        case let .valid(checked): credential = checked
+        }
+        let challenge = credential.challenge
+
+        // Resolve the settling method: with verifiers registered, the matching one must accept;
+        // none supporting a route-bound challenge is fail-closed.
+        let method = methods.first { $0.supports(challenge) }
+        if method == nil, !methods.isEmpty { return .rejected(.noSupportingMethod) }
+
+        // Consume the single-use challenge BEFORE running the method, so a replayed credential is
+        // rejected before any method side effect (a method's `verify` may broadcast or charge: the
+        // consume must gate the side effect, not follow it). A method that reuses its challenge (a
+        // session) skips this and enforces its own atomic anti-replay (the monotonic cumulative);
+        // one-time consumption would otherwise reject every voucher after the open.
+        if !(method?.reusesChallenge ?? false) {
+            guard await replayStore.consume(challenge.id) else { return .rejected(.replayed) }
+        }
+
+        // The method mints its own receipt (base fields plus any method extras), stamped with the
+        // injected `now`. The verifier only carries it.
+        guard let method else {
+            return .verified(MPPVerified(credential: credential, receipt: nil))
+        }
+        do {
+            let receipt = try await method.verify(credential, now: now)
+            return .verified(MPPVerified(credential: credential, receipt: receipt))
+        } catch {
+            return .rejected(.settlementUnverified(reason: String(describing: error)))
+        }
+    }
+
+    /// The outcome of the protocol-level checks: the parsed credential, or the rejection. A private
+    /// result type (`Result`'s `Failure` must be `Error`, which `Rejection` is deliberately not).
+    private enum ProtocolCheck {
+        case valid(Credential)
+        case rejected(Rejection)
+    }
+
+    /// The protocol-level checks (parse, HMAC challenge binding, route pin, expiry, body digest)
+    /// that gate every credential before settlement; returns the parsed credential or a rejection.
+    private func protocolCheck(
+        authorization: String, body: Data, now: Date, expecting: RouteBinding
+    ) -> ProtocolCheck {
         guard let credential = try? Credential(headerValue: authorization) else {
             return .rejected(.malformedCredential)
         }
         let challenge = credential.challenge
-
-        // The id is an HMAC over the challenge's binding input; this proves the
-        // server issued exactly these (unmodified) challenge parameters.
+        // The id is an HMAC over the challenge's binding input; this proves the server issued
+        // exactly these (unmodified) challenge parameters.
         guard signer.verify(challenge) else { return .rejected(.invalidChallenge) }
-
         // ...but not that they are this route's parameters: pin them.
         guard expecting.matches(challenge) else { return .rejected(.bindingMismatch) }
-
         if let expires = challenge.expires, expires.isExpired(at: now) {
             return .rejected(.expired)
         }
-
-        // A malformed digest in our own signed challenge, or a body mismatch, both reject
-        // (fail closed); no digest is a pass.
+        // A malformed digest in our own signed challenge, or a body mismatch, both reject (fail
+        // closed); no digest is a pass.
         guard digestMatches(challenge, body: body) else { return .rejected(.digestMismatch) }
-
-        // Method-specific settlement verify, BEFORE consume: a credential rejected
-        // here must not burn a legitimate payer's challenge id (so a corrected
-        // credential for the same challenge can still succeed). When verifiers are
-        // registered, the matching one must accept; if none supports a challenge
-        // that otherwise bound to this route, fail closed rather than grant access
-        // on the protocol checks alone.
-        var receipt: Receipt?
-        // Default to one-time consumption; a matched method that reuses its challenge (a
-        // session: anti-replay is its own monotonic cumulative, not the challenge id) clears
-        // this so the same challenge can be presented again for the next voucher.
-        var reusesChallenge = false
-        if !methods.isEmpty {
-            guard let method = methods.first(where: { $0.supports(challenge) }) else {
-                return .rejected(.noSupportingMethod)
-            }
-            reusesChallenge = method.reusesChallenge
-            // The method mints its own receipt (base fields plus any method extras),
-            // stamped with the injected `now`. The verifier only carries it.
-            do {
-                receipt = try await method.verify(credential, now: now)
-            } catch {
-                return .rejected(.settlementUnverified(reason: String(describing: error)))
-            }
-        }
-
-        // Single-use consume, UNLESS the matched method reuses its challenge: a one-shot
-        // proof/charge burns the challenge id here; a session does not (that would reject
-        // every voucher after the open), relying on the method's own anti-replay instead.
-        if !reusesChallenge {
-            guard await replayStore.consume(challenge.id) else { return .rejected(.replayed) }
-        }
-
-        return .verified(MPPVerified(credential: credential, receipt: receipt))
+        return .valid(credential)
     }
 
     /// Whether `body` satisfies the challenge's Content-Digest: `true` when the challenge

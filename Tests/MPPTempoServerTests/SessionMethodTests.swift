@@ -7,11 +7,13 @@ import Testing
 @testable import MPPTempoServer
 
 // SessionMethod over an injected stub provider + in-memory store, matching the
-// reference SDK's session-server cases: voucher accept / idempotent-still-charges /
-// strictly-increasing / below-settled / exceeds-deposit / bad-signature / closed /
-// insufficient-balance, plus open (validate + create), topUp, and close (settle).
-// The StubProvider/Flag doubles and the shared session fixtures (escrow, seedStore,
-// voucherCredential, sessionMethod, ...) live in TempoServerTestSupport.swift.
+// reference SDK's session-server cases: voucher accept / equal-cumulative-rejected /
+// concurrent-single-charge / strictly-increasing / below-settled / exceeds-deposit /
+// bad-signature / closed / insufficient-balance, plus open (validate + create), topUp,
+// and close (settle). The voucher monotonic decision is atomic: an equal-cumulative
+// replay is rejected, not charged. The StubProvider/Flag doubles and the shared session
+// fixtures (escrow, seedStore, voucherCredential, sessionMethod, ...) live in
+// TempoServerTestSupport.swift.
 
 @Suite("SessionMethod")
 struct SessionMethodTests {
@@ -43,17 +45,38 @@ struct SessionMethodTests {
         #expect(channel?.highestVoucherAmount == ChannelAmount(100))
     }
 
-    @Test("an equal-cumulative replay does not advance the highest but still charges")
-    func voucherIdempotentStillCharges() async throws {
+    @Test("an equal-cumulative replay is rejected and not charged")
+    func voucherEqualCumulativeRejected() async throws {
         let store = try await seedStore(highest: 100, spent: 0)
         let session = sessionMethod(store, StubProvider(onChainChannel(deposit: 1000)))
-        let receipt = try await session.verify(
-            voucherCredential(cumulative: "100", amount: "5"),
-            now: now
+        // A voucher that does not strictly advance the highest is a replay: it must reject (the
+        // monotonic decision is atomic inside the store update), never charge.
+        await #expect(throws: SessionMethod.SessionError.belowHighestVoucher) {
+            try await session.verify(voucherCredential(cumulative: "100", amount: "5"), now: now)
+        }
+        let channel = await store.channel(channelID)
+        #expect(channel?.highestVoucherAmount == ChannelAmount(100))
+        #expect(channel?.spent == ChannelAmount(0))
+    }
+
+    @Test("concurrent equal vouchers advance and charge exactly once (atomic monotonic)")
+    func voucherConcurrentSingleCharge() async throws {
+        let store = try await seedStore(highest: 0, spent: 0)
+        let session = sessionMethod(store, StubProvider(onChainChannel(deposit: 1000)))
+        // Two vouchers race to advance 0 -> 100: the store serializes the monotonic update, so
+        // exactly one wins (advances + charges) and the other rejects as below-highest. The loser
+        // must NOT also charge (the pre-fix bug let a non-advancing voucher charge anyway).
+        async let first = try? await session.verify(
+            voucherCredential(cumulative: "100", amount: "10"), now: now
         )
-        #expect(receipt.extras["acceptedCumulative"] == .string("100")) // unchanged
-        #expect(receipt.extras["spent"] == .string("5")) // still charged
-        #expect(receipt.extras["units"] == .uint(1))
+        async let second = try? await session.verify(
+            voucherCredential(cumulative: "100", amount: "10"), now: now
+        )
+        let succeeded = await [first, second].compactMap(\.self)
+        #expect(succeeded.count == 1)
+        let channel = await store.channel(channelID)
+        #expect(channel?.highestVoucherAmount == ChannelAmount(100))
+        #expect(channel?.spent == ChannelAmount(10)) // charged once, not twice
     }
 
     @Test("a charge amount that overflows uint128 is rejected, not charged as zero")
@@ -139,11 +162,13 @@ struct SessionMethodTests {
 
     @Test("a request that overdraws the available balance is rejected")
     func voucherInsufficientBalance() async throws {
-        // highest 100, already spent 100 -> available 0; a charge of 10 overdraws.
+        // highest 100, already spent 100; a voucher advancing to 110 grants only 10 of headroom,
+        // so a charge of 20 overdraws (the voucher strictly advances, so it clears the monotonic
+        // gate and the overdraw is caught at charge time).
         let store = try await seedStore(highest: 100, spent: 100)
         let session = sessionMethod(store, StubProvider(onChainChannel(deposit: 1000)))
         await #expect(throws: SessionMethod.SessionError.insufficientBalance) {
-            try await session.verify(voucherCredential(cumulative: "100", amount: "10"), now: now)
+            try await session.verify(voucherCredential(cumulative: "110", amount: "20"), now: now)
         }
     }
 
