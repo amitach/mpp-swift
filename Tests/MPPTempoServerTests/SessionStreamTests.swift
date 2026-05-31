@@ -86,6 +86,15 @@ struct SessionStreamTests {
         #expect(encoded == "event: message\ndata: a\ndata: b\ndata: c\n\n")
     }
 
+    @Test("parsing folds CRLF/CR line terminators to LF (WHATWG EventSource spec)")
+    func crlfLineEndings() {
+        // \r\n, lone \r, and \n are all line terminators; a multi-line data field rejoins
+        // with \n. Each form parses to the same event.
+        #expect(SessionStreamEvent.parse("event: message\r\ndata: hi\r\n\r\n") == .message("hi"))
+        #expect(SessionStreamEvent.parse("event: message\rdata: a\rdata: b\r\r")
+            == .message("a\nb"))
+    }
+
     @Test("an unknown event type parses to nil")
     func unknownEvent() {
         #expect(SessionStreamEvent.parse("event: other\ndata: x\n\n") == nil)
