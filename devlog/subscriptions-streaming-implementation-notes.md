@@ -91,6 +91,125 @@ non-canonical short-form (a byte < 0x80 wrapped in a prefix); 🚩 accepted long
 child-within-parent-bound) + the `uint64` guard, with adversarial tests in `RLPTests`. The
 cross-validation above confirms our strict decode matches the chain's.
 
+## PR-2 spec (subscription protocol core) - branch feat/subscription-core (off main ab0947f, has #82+#83)
+
+Exact `tempo/subscription` Method (from mppx Methods.ts:289), the build target:
+- **Credential payload**: `{ type: "keyAuthorization", signature: <hex serialized RLP TempoKeyAuthorization> }`.
+- **Wire request** (post-transform, what the 402 challenge carries; `decimals` is consumed client-side,
+  `amount` is already base-units): `{ amount: <base-units string>, currency: <addr>, recipient: <addr>,
+  periodCount: <uint64 string>, periodUnit: dev_second|day|week, subscriptionExpires: <ISO8601>,
+  description?: string, externalId?: string, methodDetails?: { accessKey?: {accessKeyAddress, keyType:
+  p256|secp256k1|webAuthn}, chainId?: number } }`.
+- period units: dev_second=1, day=86400, week=604800 (period seconds = periodCount * unit, uint64-bounded).
+- subscriptionExpires must be whole seconds; expiry (key-auth) = its unix-seconds; MUST be strictly later
+  than the challenge expiry (a verify-side check).
+
+PR-2 files (mirror TempoChargeRequest's `init(challenge:) throws(DecodingFailure)` via
+`challenge.request.decodedData()` + a Codable wire struct):
+1. `Sources/MPPTempo/SubscriptionRequest.swift` - decode the wire request; expose periodSeconds (uint64,
+   overflow-checked), expiry unix-seconds (parse ISO via RFC3339DateTime), accessKey?, chainId?.
+2. `Sources/MPPTempo/TempoSubscriptionMethod.swift` - `PaymentMethodClient`: resolve accessKey
+   (context/params/request.methodDetails) + chainId; build TempoKeyAuthorization {address=accessKey,
+   chainId, expiry, limits=[{token=currency, limit=amount, period=periodSeconds}], scopes=[{currency,
+   transferWithMemo 0x95777d59, [recipient]}]}; sign (root Secp256k1Signer) -> signedSerialization ->
+   payload {type:"keyAuthorization", signature: hexPrefixed}; source = did:pkh(payer, chainId).
+3. `Sources/MPPTempoServer/TempoSubscriptionVerifier.swift` - `PaymentMethodServer`: decode
+   SubscriptionRequest; **re-encode-and-compare** = rebuild the EXPECTED TempoKeyAuthorization from the
+   request + accessKey, `serialize()` it, require the credential's inner-tuple bytes == expected (so we
+   never trust client decode; non-canonical/mismatched rejects); recover the payer via
+   `TempoKeyAuthorization.recover(serialized:)`; assert expiry > challenge expiry. reusesChallenge=FALSE
+   (activation is one-shot; renewals are server-driven in PR-3, which self-guards per the P0-1 invariant).
+   No store/renewal/side-effects in PR-2 (PR-3).
+4. Tests: hermetic activation round-trip through PaymentClient (402 -> key-auth credential -> verified);
+   field-mismatch rejections (currency/amount/period/expiry/scope/recipient/chainId); + cross-SDK
+   conformance vs mppx subscription activation (both directions) - may ride PR-2.5 like MPPMCP did.
+
+## PR-2 BUILT (branch feat/subscription-core, off ab0947f) - 3 files + tests, all green
+
+- `SubscriptionRequest.swift` (commit 7db5d19) - decode the wire request; periodSeconds (uint64,
+  overflow-checked), expirySeconds (whole-second ISO), accessKey?/chainId?. Plus the SHARED
+  `keyAuthorization(accessKey:chainId:)` builder (one per-period limit on currency, one
+  transferWithMemo 0x95777d59 scope to recipient): the single place client AND verifier derive the
+  authorization from, so the signed bytes and the verify-side re-encode cannot drift. 6 decode tests.
+- `TempoSubscriptionMethod.swift` (commit 97e73ff) - PaymentMethodClient mirroring TempoProofMethod:
+  failable init derives the payer wallet from the signer; supports = tempo/subscription + decodable;
+  buildCredential = decode -> resolve chainId (request ?? default) + accessKey (configured ??
+  request, else `noAccessKey`) -> approval gate -> `request.keyAuthorization(...)` ->
+  `signedSerialization(with: signer)` -> payload `{type:"keyAuthorization", signature: hexPrefixed}`,
+  source = did:pkh(payer, chainId). 15 tests, BYTE-REAL: the signed serialization recovers the wallet
+  and deserializes back to the request-reconstructed authorization (not merely well-formed).
+- `TempoSubscriptionVerifier.swift` (commit 1e35f44) - PaymentMethodServer, RE-ENCODE-AND-COMPARE:
+  rebuild EXPECTED auth from the verifier's own challenge request + `request.accessKey` (so the access
+  key is the one the SERVER issued, never the client's choice; a challenge with no accessKey =>
+  `noAccessKey`, cannot verify), `deserialize` the credential's serialized auth + `recover` the payer,
+  require `decoded == expected` (strict-canonical RLP decode + unique canonical encoding => this IS
+  byte-equality of the signed inner tuple), require expiry strictly after the challenge deadline
+  (challenge.expires ?? now), pin recovered payer == did:pkh source wallet. reusesChallenge=false
+  (one-shot activation). 11 tests: client round-trip + the full reject matrix. Payload preamble
+  extracted to `presentedAuthorization` to stay under the cyclomatic-complexity cap (the proof
+  verifier's `protocolCheck` lesson).
+
+### Gates / deviations (PR-2)
+
+- KEY DISTINCTION (got it right): the authorization's `.address` is the DELEGATE (access key); the
+  PAYER is the root signer, recovered from the signature. The verifier checks BOTH - `decoded ==
+  expected` pins the delegate/limits/scope, and `payer == source` pins the root - they are different
+  addresses and both must hold.
+- DEVIATION: the client approval gate reuses `ChargeApproval` (the existing pre-sign approval
+  primitive), which surfaces amount/currency/recipient/chain/challenge but NOT the recurring
+  period/expiry. Documented inline. Reused per subtract-before-add rather than inventing a parallel
+  `SubscriptionApproval`; revisit only if a policy needs to bound the period.
+- G3.5: code/tests cite the spec; peer reconciliation stays here in the devlog.
+- swiftformat + swiftlint --strict whole-repo clean; no em dashes; full suite 612 green.
+
+### Still open on PR-2
+
+- Cross-SDK conformance vs mppx subscription activation (both directions) - rides PR-2.5 like MPPMCP
+  did (the hermetic activation round-trip through PaymentClient is already covered in PR-2).
+
+## PR-3 plan (SubscriptionStore + renewal engine) - peer-mined, primitive-mapped
+
+Peer (mppx, mined): `subscription/Store.ts`, `subscription/Types.ts`, `server/Subscription.ts`,
+`subscription/KeyAuthorization.ts`. Our primitive to MIRROR: `MPPTempoServer/ChannelStore.swift`
+(actor + `update(_:_: transform)` atomic CAS, the monotonic-guard-inside-update pattern from
+`SessionMethod.acceptVoucher`). Time = injected `@Sendable () -> Date` (the FileReplayStore pattern),
+NOT a global clock. On-chain transfer stays behind a seam (the open-builder seam pattern) so PR-3 is
+hermetic + RPC-free.
+
+PEER MODEL (faithful, idiomatic-Swift port):
+- `SubscriptionRecord` (Sendable, Hashable): economic params (amount, currency, recipient,
+  periodSeconds, expirySeconds) + identity (subscriptionId, lookupKey, externalId?) +
+  serialized keyAuthorization + payer{address,chainId} + charging state (billingAnchor,
+  lastChargedPeriod, reference, timestamp) + in-flight claim (inFlightPeriod?, inFlightReference?,
+  inFlightAttempt? token, inFlightStartedAt?) + terminal (canceledAt?, revokedAt?).
+- Period index = stateless: `max(0, floor((now - billingAnchor) / periodSeconds))`, `.infinity`
+  when `now >= expiry` (no more charges).
+- isActive = `canceledAt==nil && revokedAt==nil && now < expiry`.
+- lookupKey -> subscriptionId -> record double-indirection (clean supersession: a new sub for the
+  same lookupKey cancels the old).
+
+ENGINE (two-phase commit, the P0-2 atomic lesson):
+1. START (atomic update): already charged (`lastChargedPeriod >= periodIndex`) -> `.charged`;
+   in-flight and not stale (`now - inFlightStartedAt < renewalTimeout`) -> `.inFlight`; else stamp
+   inFlightPeriod + a fresh attempt UUID-equivalent (no Math.random in scripts; use an injected
+   `@Sendable () -> String` token provider, default secure-random, like saltProvider) +
+   `inFlightReference = "renewal:{subscriptionId}:{periodIndex}"` (stable idempotency key persisted
+   BEFORE the side effect) -> `.started`.
+2. SIDE EFFECT: call the injected `SubscriptionRenewer` seam with (record, inFlightReference) ->
+   it builds + submits the recurring transferWithMemo using the stored keyAuthorization; returns a
+   reference (tx hash). Re-check active before AND after (supersession/cancel races).
+3. COMMIT (atomic update): verify inFlightPeriod + attempt still match (stale attempts can't
+   overwrite a newer one), set `lastChargedPeriod = periodIndex`, clear in-flight, preserve terminal
+   states set during the callback -> `.renewed(result)`.
+- Timeout recovery: a stuck in-flight older than `renewalTimeout` (default 900s) can be taken over.
+
+PR-3 files (planned): `SubscriptionStore.swift` (protocol + InMemory actor, mirror ChannelStore),
+`SubscriptionRecord.swift` (model + period/isActive pure helpers), `SubscriptionEngine.swift`
+(the two-phase renew + the `SubscriptionRenewer` seam protocol), tests (hermetic: period math,
+already-charged/in-flight/renewed, concurrent renewals -> exactly one charges, timeout takeover,
+supersession, cancel/revoke during in-flight). The live transferWithMemo submission via the FFI 0x76
+builder either rides PR-3's seam impl or a follow-up; the hermetic engine is the PR-3 bar.
+
 ## Deviations / open
 
 - The tuple builder targets the subscription shape (always emits expiry+limits+calls). A fully
