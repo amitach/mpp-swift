@@ -66,9 +66,9 @@ public enum SessionStreamEvent: Sendable, Hashable {
             // One data: line per line; preserve empty lines so the payload round-trips.
             text.components(separatedBy: "\n")
         case let .needVoucher(payload):
-            try [Self.json(payload)]
+            try [CanonicalJSON.string(payload)]
         case let .receipt(receipt):
-            try [Self.json(receipt)]
+            try [CanonicalJSON.string(receipt)]
         }
         var block = "event: \(eventName)\n"
         for line in dataLines {
@@ -110,18 +110,6 @@ public enum SessionStreamEvent: Sendable, Hashable {
         var value = Substring(line.dropFirst(name.count))
         if value.first == " " { value = value.dropFirst() }
         return String(value)
-    }
-
-    private static func json(_ value: some Encodable) throws -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        let data = try encoder.encode(value)
-        guard let string = String(bytes: data, encoding: .utf8) else {
-            throw EncodingError.invalidValue(value, .init(
-                codingPath: [], debugDescription: "JSON encoding was not valid UTF-8"
-            ))
-        }
-        return string
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, _ payload: String) -> T? {
