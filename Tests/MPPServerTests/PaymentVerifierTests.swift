@@ -6,7 +6,9 @@ import Testing
 
 // Spec: draft-httpauth-payment-00 §5.1.2 (id binding) + §11.3/§11.5 (single use).
 // The verifier runs parse -> HMAC-verify -> binding-pin -> expiry -> digest ->
-// consume(last).
+// consume -> method settlement: consume precedes settlement so a replayed credential
+// is rejected before any method side effect (a protocol-check rejection, before
+// consume, does not burn the challenge).
 /// A method that accepts any challenge and mints a receipt with a fixed settlement
 /// reference, to exercise receipt minting (MPPServer ships no concrete method).
 /// Internal so the middleware suite in this target can reuse it.
@@ -264,7 +266,7 @@ struct PaymentVerifierTests {
         #expect(verified(second) != nil)
     }
 
-    @Test("an invalid credential does not burn the challenge id (consume is last)")
+    @Test("a credential rejected at a protocol check (before consume) does not burn the challenge")
     func invalidCredentialDoesNotConsume() async throws {
         let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
         let body = Data("body".utf8)

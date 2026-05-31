@@ -8,9 +8,9 @@ import Testing
 
 // Server-side proof verification, the counterpart to TempoProofMethodTests: the
 // credentials our client mints (all three variants) verify, the reject matrix
-// holds, an invalid proof does not burn the challenge id (it is rejected before
-// the replay consume), an unsupported challenge fails closed, and a full
-// mint -> pay -> verify round-trip proceeds.
+// holds, an unsupported challenge fails closed, and a full mint -> pay -> verify
+// round-trip proceeds. (The challenge-consume ordering is an integration concern,
+// covered in TempoProofIntegrationTests.)
 // File-scope fixtures (kept out of the suite body so it stays under the type-length
 // cap; one home for the shared helpers).
 let chainId: UInt64 = 1
