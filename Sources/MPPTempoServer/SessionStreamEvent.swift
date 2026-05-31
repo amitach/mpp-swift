@@ -83,7 +83,15 @@ public enum SessionStreamEvent: Sendable, Hashable {
     public static func parse(_ block: String) -> SessionStreamEvent? {
         var eventName: String?
         var dataLines: [String] = []
-        for rawLine in block.components(separatedBy: "\n") {
+        // Normalize line endings at the SCALAR level before splitting: `\r\n` is a single
+        // grapheme cluster, so splitting a `String` on `"\n"` is platform-dependent (Linux
+        // swift-corelibs-foundation and Darwin Foundation disagree). Mapping every `\r`
+        // scalar to `\n` breaks the cluster, so splitting is deterministic (SSE permits
+        // `\r\n`, `\r`, or `\n` line endings).
+        let normalized = String(String.UnicodeScalarView(
+            block.unicodeScalars.map { $0 == "\r" ? "\n" : $0 }
+        ))
+        for rawLine in normalized.components(separatedBy: "\n") {
             if let value = field(rawLine, "event:") {
                 eventName = value
             } else if let value = field(rawLine, "data:") {
@@ -104,13 +112,11 @@ public enum SessionStreamEvent: Sendable, Hashable {
     }
 
     /// The value of an SSE field line (`name:` optionally followed by one space), or
-    /// `nil` if the line is not that field. A trailing `\r` is stripped so `\r\n`-delimited
-    /// streams (the SSE spec permits `\r\n`, `\r`, or `\n`) parse the same as `\n`.
+    /// `nil` if the line is not that field. Line endings are normalized to `\n` before this
+    /// is reached, so no carriage return survives here.
     private static func field(_ line: String, _ name: String) -> String? {
-        var line = Substring(line)
-        if line.last == "\r" { line = line.dropLast() }
         guard line.hasPrefix(name) else { return nil }
-        var value = line.dropFirst(name.count)
+        var value = Substring(line.dropFirst(name.count))
         if value.first == " " { value = value.dropFirst() }
         return String(value)
     }
