@@ -365,13 +365,27 @@ fn decode_key_authorization(bytes: Vec<u8>) -> Result<SignedKeyAuthorization, Ff
             "key_authorization: not an RLP list".into(),
         ));
     }
-    let authorization = KeyAuthorization::decode(&mut slice)
-        .map_err(|_| FfiError::InvalidInput("key_authorization: bad authorization tuple".into()))?;
-    let signature_bytes = Bytes::decode(&mut slice)
-        .map_err(|_| FfiError::InvalidInput("key_authorization: missing signature".into()))?;
-    if !slice.is_empty() {
+    // Bound inner decoding to exactly the list's declared payload (the canonical alloy-rlp
+    // pattern): decode the items from a sub-slice of `payload_length` bytes and reject any
+    // bytes trailing the list, so a header that over- or under-declares its length fails.
+    if slice.len() < header.payload_length {
         return Err(FfiError::InvalidInput(
-            "key_authorization: trailing bytes".into(),
+            "key_authorization: truncated list".into(),
+        ));
+    }
+    let (mut payload, rest) = slice.split_at(header.payload_length);
+    if !rest.is_empty() {
+        return Err(FfiError::InvalidInput(
+            "key_authorization: trailing bytes after list".into(),
+        ));
+    }
+    let authorization = KeyAuthorization::decode(&mut payload)
+        .map_err(|_| FfiError::InvalidInput("key_authorization: bad authorization tuple".into()))?;
+    let signature_bytes = Bytes::decode(&mut payload)
+        .map_err(|_| FfiError::InvalidInput("key_authorization: missing signature".into()))?;
+    if !payload.is_empty() {
+        return Err(FfiError::InvalidInput(
+            "key_authorization: trailing bytes in list".into(),
         ));
     }
     let signature = Signature::try_from(signature_bytes.as_ref())
@@ -841,6 +855,15 @@ mod tests {
         assert_eq!(*signed, mpp_swift_golden_key_authorization());
         let root = signed.recover_signer().expect("recovers the signer");
         assert_eq!(root, address!("7e5f4552091a69125d5dfcb7b8c2659029395bdf"));
+    }
+
+    /// A stray byte after a well-formed authorization list is rejected: inner decoding is
+    /// bound to the list's declared payload, so trailing bytes do not pass silently.
+    #[test]
+    fn decode_rejects_trailing_bytes_after_the_authorization() {
+        let mut bytes = alloy_primitives::hex::decode(PEER_GOLDEN_SIGNED_AUTH).expect("hex");
+        bytes.push(0x00);
+        assert!(decode_key_authorization(bytes).is_err());
     }
 
     /// The provisioning charge attaches the key authorization (bytes grow, content differs);
