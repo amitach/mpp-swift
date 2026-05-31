@@ -2641,6 +2641,7 @@ name = "tempo-tx-ffi"
 version = "0.0.0"
 dependencies = [
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-sol-types",
  "k256",
  "tempo-primitives",

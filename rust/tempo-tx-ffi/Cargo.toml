@@ -20,6 +20,12 @@ zeroize = "1"
 uniffi = { version = "0.31.1", features = ["cli"] }
 thiserror = "2.0.18"
 
+# Test-only: the canonical RLP codec, used to differential-check that the MPP-swift
+# pure-Swift KeyAuthorization encoding is byte-identical to the chain's own
+# (tempo-primitives) encoding and that the chain round-trips our canonical bytes.
+[dev-dependencies]
+alloy-rlp = "0.3.15"
+
 [lib]
 # staticlib for the xcframework, cdylib for UniFFI binding generation, rlib for the
 # in-crate tests.
