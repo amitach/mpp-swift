@@ -2,7 +2,7 @@
 
 The Swift SDK for the [Machine Payments Protocol (MPP)](https://mpp.dev): pay for, and charge for, machine-to-machine API calls over HTTP 402.
 
-[![Swift 6.0+](https://img.shields.io/badge/Swift-6.0%2B-orange.svg)](https://swift.org)
+[![Swift 6.2+](https://img.shields.io/badge/Swift-6.2%2B-orange.svg)](https://swift.org)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%2013%20%7C%20iOS%2016%20%7C%20tvOS%2016%20%7C%20watchOS%209%20%7C%20visionOS%201%20%7C%20Linux-lightgrey.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
@@ -42,7 +42,7 @@ Rust toolchain). Every other product links zero Rust.
 | `MPPTempo` | available | Tempo rail: zero-amount proof charge; the **402 channel-payment client `TempoChannelMethod`** (auto open + accumulating vouchers, client-initiated topUp/close, an injected deposit policy, on-chain channel recovery, optional access-key signer) behind the `TempoOpenTxBuilder` / `TempoTopUpTxBuilder` / `TempoCloseTxBuilder` seams; the `EVMRPC` JSON-RPC client; the escrow `getChannel` read (`TempoEscrow` → `OnChainChannel`); `ChannelAmount`. The `0x76` builders are the `rust/tempo-tx-ffi` FFI (below); the `TempoChannelSession` actor (in `MPPTempoFFI`) is the direct-wallet lifecycle. Cross-SDK conformance-proven both directions, live |
 | `MPPTempoServer` | available | Tempo SERVER side: zero-amount proof verify, the 4-action `SessionMethod` (open/topUp/voucher/close), `ChannelStore`, and `RPCChannelStateProvider` (reads + relays signed txs + settle via the seam). A session reuses one challenge across its lifecycle, so the verifier honours `PaymentMethodServer.reusesChallenge` (the channel-store cumulative is the anti-replay) |
 | `MPPDiscovery` | in progress | OpenAPI `x-payment-info` discovery (parser + emitter done) |
-| `MPPMCP` | planned | JSON-RPC / Model Context Protocol binding |
+| `MPPMCP` | in progress | JSON-RPC / Model Context Protocol payment binding (over the official MCP Swift SDK): a server gate (`tools/call` → 402 challenge / verify / receipt) and a client wrapper that pays transparently. Requires Swift 6.2 (the MCP SDK's transitive graph) |
 | `MPPProxy` / `MPPWebSocket` | planned | 402-protected reverse proxy; WebSocket transport |
 | `MPPStripe` | planned | Stripe rail (Shared Payment Token charge) |
 | `MPPVapor` / `MPPHummingbird` | planned | Server framework adapters |
@@ -51,7 +51,7 @@ The bespoke Tempo `0x76` transaction (channel open/topUp/close) is the one piece
 
 ## Development (running locally)
 
-**Prerequisites:** a Swift 6 toolchain (Xcode 16+ on macOS, or the Swift 6 toolchain on Linux). The Rust FFI crate additionally needs a Rust toolchain `>= 1.93` (`rustup update stable`), but only if you build *that* crate - the Swift package builds and tests with no Rust.
+**Prerequisites:** a Swift 6.2 toolchain (Xcode 26+ on macOS, or the Swift 6.2 toolchain on Linux). The 6.2 floor comes from `MPPMCP`'s dependency on the official MCP Swift SDK, whose transitive graph (swift-log 1.13) requires tools 6.2. The Rust FFI crate additionally needs a Rust toolchain `>= 1.93` (`rustup update stable`), but only if you build *that* crate - the Swift package builds and tests with no Rust.
 
 ```sh
 git clone https://github.com/amitach/mpp-swift && cd mpp-swift

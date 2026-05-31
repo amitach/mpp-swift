@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import Foundation
 import PackageDescription
 
@@ -41,6 +41,7 @@ let package = Package(
         .library(name: "MPPDiscovery", targets: ["MPPDiscovery"]),
         .library(name: "MPPTempo", targets: ["MPPTempo"]),
         .library(name: "MPPTempoServer", targets: ["MPPTempoServer"]),
+        .library(name: "MPPMCP", targets: ["MPPMCP"]),
     ],
     dependencies: [
         // swift-crypto and CryptoSwift (below) do NOT overlap; neither replaces the
@@ -63,18 +64,34 @@ let package = Package(
         // EVM secp256k1 signing. Pinned EXACT (not a range) so a future release cannot
         // auto-pull; source-vetted 2026-05-29 (thin wrapper over Bitcoin Core's
         // libsecp256k1; the package's dev deps are reachable only from its own
-        // plugins/tests and are pruned for downstream consumers). 0.21.1 is the last
-        // release on swift-tools 6.0; >= 0.22.0 requires tools 6.1, which would drop our
-        // declared Swift 6.0 support (the libsecp256k1 C product and the recoverable
-        // module we use are identical).
+        // plugins/tests and are pruned for downstream consumers). Kept at 0.21.1 (the
+        // source-vetted pin); the libsecp256k1 C product and the recoverable module we use are
+        // unchanged in later releases, so there is no reason to bump it (the Swift floor is now
+        // 6.2 regardless, so the old "stay on tools 6.0" constraint no longer applies).
         .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1.git", exact: "0.21.1"),
         // Keccak-256 (the Ethereum hash; swift-crypto ships only NIST SHA-3, which uses
         // different padding). AGENTS.md forbids hand-rolled cryptography, so this is the
         // vetted provider: CryptoSwift is the established pure-Swift hash library (no C,
         // no build plugins, zero external package dependencies, tools 5.6 so it resolves
-        // on our Swift 6.0 CI). Pinned EXACT; source-vetted 2026-05-29; we use only its
+        // on our Swift 6.2 CI). Pinned EXACT; source-vetted 2026-05-29; we use only its
         // SHA3(.keccak256), wrapped behind MPPEVM's own Keccak256 type.
         .package(url: "https://github.com/krzyzanowskim/CryptoSwift.git", exact: "1.10.0"),
+        // The official Model Context Protocol Swift SDK (module `MCP`), used by MPPMCP to bind
+        // the 402 flow to JSON-RPC / MCP. Pinned to an IMMUTABLE commit on our fork
+        // (amitach/swift-sdk) because the stock SDK cannot carry the MPP payment error frame:
+        // `MCPError` has no `data` and hardwires -32042 to URL elicitation. The fork adds an
+        // additive `MCPError.paymentRequired(code:message:data:)` case (the decoder disambiguates
+        // by payload, so existing behavior is unchanged). The identical patch is upstream as
+        // modelcontextprotocol/swift-sdk#229; swap this to a tagged upstream release once it
+        // merges.
+        // The SDK's own manifest supports Swift 6.0, but its transitive graph does not: swift-log
+        // 1.13.x needs tools 6.2, swift-nio 2.100 + eventsource need 6.1. Pulling `MCP` therefore
+        // raises this package's floor to Swift 6.2 (see the tools-version above). Package identity
+        // is `swift-sdk` for both the fork and upstream URLs.
+        .package(
+            url: "https://github.com/amitach/swift-sdk.git",
+            revision: "fe4faf15a7e51888f945ae74481453b172276164"
+        ),
     ],
     targets: [
         .target(name: "MPPCore"),
@@ -187,6 +204,34 @@ let package = Package(
                 .product(name: "HTTPTypes", package: "swift-http-types"),
             ]
         ),
+        // MPPMCP: binds the 402 flow to JSON-RPC / Model Context Protocol on the official MCP
+        // SDK (module `MCP`). Rail-agnostic: it composes MPPServer's mint/verify pipeline and
+        // MPPClient's method seam, so it depends on neither MPPTempo nor any Rust. The payment
+        // method (e.g. the Tempo zero-amount proof) is injected by the consumer / tests.
+        .target(
+            name: "MPPMCP",
+            dependencies: [
+                "MPPCore",
+                "MPPServer",
+                "MPPClient",
+                .product(name: "MCP", package: "swift-sdk"),
+            ]
+        ),
+        .testTarget(
+            name: "MPPMCPTests",
+            dependencies: [
+                "MPPMCP",
+                "MPPCore",
+                "MPPServer",
+                "MPPClient",
+                // The Tempo zero-amount proof method is the payment method exercised end to end
+                // (client builds it, server verifies it); MPPEVM provides the Secp256k1Signer.
+                "MPPTempo",
+                "MPPTempoServer",
+                "MPPEVM",
+                .product(name: "MCP", package: "swift-sdk"),
+            ]
+        ),
         // MPPConformanceServer: a dev-only HTTP listener (raw sockets, no new dep)
         // that exposes MPPTempoServer's verifier so the mppx reference CLIENT can pay
         // our server over a real socket (the reverse conformance direction). No
@@ -206,6 +251,20 @@ let package = Package(
                 .product(name: "HTTPTypes", package: "swift-http-types"),
             ] + conformanceServerFFIDeps,
             swiftSettings: conformanceServerFFISettings
+        ),
+        // MPPMCPConformanceServer: a dev-only MCP server over stdio (no product) that gates a
+        // `premium` tool behind a zero-amount Tempo proof via MPPMCP. The reference mppx
+        // `mcp-sdk` CLIENT spawns it and pays it, proving the JSON-RPC / MCP payment binding
+        // interoperates with the real peer over a real transport (run via the conformance scripts).
+        .executableTarget(
+            name: "MPPMCPConformanceServer",
+            dependencies: [
+                "MPPCore",
+                "MPPServer",
+                "MPPTempoServer",
+                "MPPMCP",
+                .product(name: "MCP", package: "swift-sdk"),
+            ]
         ),
     ],
     swiftLanguageModes: [.v6]

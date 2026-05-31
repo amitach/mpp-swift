@@ -84,7 +84,7 @@ public struct PaymentClient: Sendable {
             onEvent(.paymentFailed(.malformedChallenge))
             throw PaymentClientError.malformedChallenge
         }
-        guard let selection = select(from: challenges) else {
+        guard let selection = selectPaymentMethod(for: challenges, from: methods) else {
             onEvent(.paymentFailed(.noSupportedMethod))
             throw PaymentClientError.noSupportedMethod
         }
@@ -101,19 +101,6 @@ public struct PaymentClient: Sendable {
             .flatMap { try? Receipt(headerValue: $0) }
         onEvent(.paymentResponse(receipt: receipt))
         return (paidResponse, paidBody)
-    }
-
-    /// The first offered challenge a registered method supports, with that method.
-    /// (Challenges are tried in offered order; q-value ranking is a later refinement.)
-    private func select(
-        from challenges: [Challenge]
-    ) -> (method: any PaymentMethodClient, challenge: Challenge)? {
-        for challenge in challenges {
-            if let method = methods.first(where: { $0.supports(challenge) }) {
-                return (method, challenge)
-            }
-        }
-        return nil
     }
 
     private func guardTransportSecurity(scheme: String?, url: URL?) throws {
