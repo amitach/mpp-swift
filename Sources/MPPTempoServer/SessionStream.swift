@@ -82,6 +82,8 @@ public enum SessionStream {
         case channelClosed(reason: String)
         /// The client did not raise the voucher within the wait budget.
         case voucherTimeout
+        /// The required cumulative (`spent + tickCost`) overflowed the channel amount.
+        case amountOverflow
     }
 
     /// Serves a metered SSE stream pulling chunks from `next` until it returns `nil`.
@@ -168,7 +170,12 @@ public enum SessionStream {
     ) async throws -> SessionStreamEvent.NeedVoucher {
         guard let channel = await store.channel(target.channelID)
         else { throw StreamError.channelNotFound }
-        let required = channel.spent.adding(target.tickCost) ?? channel.spent
+        // Fail closed: never understate the requirement. A silent fallback to `spent`
+        // would tell the client to authorize what it has already paid, so its voucher
+        // would never suffice and the stream would hang until the voucher timeout.
+        guard let required = channel.spent.adding(target.tickCost) else {
+            throw StreamError.amountOverflow
+        }
         return SessionStreamEvent.NeedVoucher(
             channelId: SessionReceipt.channelHex(target.channelID),
             requiredCumulative: required.decimalString,
