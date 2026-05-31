@@ -113,6 +113,12 @@ struct SubscriptionRequestTests {
         #expect(throws: SubscriptionRequest.DecodingFailure.invalidExpiry) {
             try SubscriptionRequest(challenge: challenge(request(expires: "not-a-date")))
         }
+        // A fractional-seconds expiry is rejected: the key-auth expiry is whole seconds.
+        #expect(throws: SubscriptionRequest.DecodingFailure.invalidExpiry) {
+            try SubscriptionRequest(
+                challenge: challenge(request(expires: "2030-01-01T00:00:00.5Z"))
+            )
+        }
         #expect(throws: SubscriptionRequest.DecodingFailure.invalidAccessKey) {
             try SubscriptionRequest(challenge: challenge(request(methodDetails: .object([
                 "accessKey": .object([

@@ -106,16 +106,15 @@ public struct SubscriptionRequest: Sendable, Hashable {
     /// The whole-second Unix timestamp of an ISO-8601 `subscriptionExpires`, rejecting a malformed
     /// or sub-second value (a key authorization's expiry is whole seconds).
     private static func expirySeconds(_ iso: String) throws(DecodingFailure) -> UInt64 {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let parsed = formatter.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
-        guard let date = parsed else { throw .invalidExpiry }
+        // Whole seconds only, checked at the string level: `.` appears in an RFC-3339
+        // date-time only in the fractional-seconds field, so rejecting it here means a
+        // sub-second value can never survive Double rounding and slip past as whole.
+        guard !iso.contains(".") else { throw .invalidExpiry }
+        guard let date = ISO8601DateFormatter().date(from: iso) else { throw .invalidExpiry }
         let seconds = date.timeIntervalSince1970
         // Strict `<`: `Double(UInt64.max)` rounds UP to `2^64`, so `<=` would let `UInt64(seconds)`
         // trap at the boundary. The largest Double below it is well within `UInt64`.
-        guard seconds > 0, seconds < Double(UInt64.max),
-              seconds.rounded() == seconds
-        else { throw .invalidExpiry }
+        guard seconds > 0, seconds < Double(UInt64.max) else { throw .invalidExpiry }
         return UInt64(seconds)
     }
 
