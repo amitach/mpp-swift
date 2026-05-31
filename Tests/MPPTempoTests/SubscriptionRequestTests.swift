@@ -64,6 +64,19 @@ struct SubscriptionRequestTests {
         #expect(parsed.chainId == 42431)
     }
 
+    @Test("a whole-second expiry with a zero fractional (.000Z) is accepted")
+    func acceptsZeroFractionalExpiry() throws {
+        // Date.toISOString() and the reference SDK emit a whole second as `...:00.000Z`;
+        // it must parse to the same epoch as the plain form (cross-SDK interop).
+        let parsed = try SubscriptionRequest(
+            challenge: challenge(request(expires: "2030-01-01T00:00:00.000Z"))
+        )
+        let plain = try SubscriptionRequest(
+            challenge: challenge(request(expires: "2030-01-01T00:00:00Z"))
+        )
+        #expect(parsed.expirySeconds == plain.expirySeconds)
+    }
+
     @Test("period units resolve to their second counts")
     func periodUnits() throws {
         #expect(try SubscriptionRequest(challenge: challenge(request(
