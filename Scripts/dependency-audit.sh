@@ -34,17 +34,38 @@ if [ -z "$pins" ]; then
   exit 2
 fi
 # A branch/revision pin has no semantic version, so OSV cannot range-match it.
-# Fail CLOSED rather than silently skip it (an un-scanned dependency must never
-# pass the gate unnoticed).
+# Fail CLOSED on any UNEXPECTED revision pin (an un-scanned third-party dependency
+# must never pass the gate unnoticed). A small allowlist accepts intentional pins to
+# our OWN reviewed code, which OSV does not track. Each accepted entry is a documented,
+# temporary exception; its TRANSITIVE deps still appear as versioned pins below and are
+# scanned.
+#
+# Accepted:
+#  - github.com/amitach/swift-sdk: our fork of the official MCP Swift SDK, carrying the
+#    36-line additive MCPError.paymentRequired patch (upstreamed as
+#    modelcontextprotocol/swift-sdk#229). Remove this entry and pin a tagged upstream
+#    release once #229 merges.
+accepted_revision_pins=(
+  "https://github.com/amitach/swift-sdk.git"
+)
 revpins="$(jq -r '.pins[] | select(.state.version == null) | .location' "$resolved")" || {
   echo "::error::could not parse $resolved for revision pins; failing closed"
   exit 2
 }
-if [ -n "$revpins" ]; then
-  echo "::error::revision/branch-pinned dependencies cannot be OSV version-scanned: $revpins"
-  echo "::error::pin them to a released version, or scan them out of band; failing closed"
-  exit 2
-fi
+while IFS= read -r loc; do
+  [ -n "$loc" ] || continue
+  accepted=0
+  for allowed in "${accepted_revision_pins[@]}"; do
+    [ "$loc" = "$allowed" ] && accepted=1 && break
+  done
+  if [ "$accepted" -eq 1 ]; then
+    echo "::warning::accepted revision pin (self-authored, not OSV-scannable): $loc"
+  else
+    echo "::error::revision/branch-pinned dependency cannot be OSV version-scanned: $loc"
+    echo "::error::pin it to a released version, or add it to accepted_revision_pins with justification; failing closed"
+    exit 2
+  fi
+done <<< "$revpins"
 
 # Query OSV for one (name, version). Prints advisory ids on stdout. Returns
 # non-zero on ANY query failure (curl error after retries, or a non-JSON body),
