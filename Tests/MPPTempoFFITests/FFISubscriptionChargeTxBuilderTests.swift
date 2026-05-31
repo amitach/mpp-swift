@@ -42,6 +42,19 @@ struct FFISubscriptionChargeTxBuilderTests {
         )
     }
 
+    private func hex(_ data: Data) -> String {
+        data.map { String(format: "%02x", $0) }.joined()
+    }
+
+    // The byte-exact no-auth charge tx, shared with the Rust GOLDEN_SUBSCRIPTION_CHARGE_TX.
+    private static let goldenCharge =
+        "76f8db82a5bf830f4240843b9aca00830186a0f87ef87c9420c0000000000000000000000000000000" +
+        "00000180b86495777d590000000000000000000000001111111111111111111111111111111111111111" +
+        "00000000000000000000000000000000000000000000000000000000000f4240abababababababababab" +
+        "ababababababababababababababababababababababc0800780808080c0b841a4e841b650d9eb291850" +
+        "174d5038c4b2488414a8aa0da30acb002b76bd4318a96dd2920e6a9b74346aabc1ccb472923231607" +
+        "41ba1678bdc661aba90be3f0bfd1c"
+
     private func parameters(keyAuthorization: Data?) throws -> TempoSubscriptionChargeParameters {
         try TempoSubscriptionChargeParameters(
             accessKeyPrivateKey: accessKey,
@@ -53,12 +66,15 @@ struct FFISubscriptionChargeTxBuilderTests {
         )
     }
 
-    @Test("builds a 0x76 transferWithMemo charge tx without a key authorization")
+    @Test("builds the byte-exact golden 0x76 transferWithMemo charge tx (no key authorization)")
     func chargeWithoutAuthorization() async throws {
         let transaction = try await builder().buildSubscriptionChargeTransaction(
             parameters(keyAuthorization: nil), chainID: chainID
         )
         #expect(transaction.first == 0x76)
+        // Identical bytes to the Rust golden (GOLDEN_SUBSCRIPTION_CHARGE_TX), so a mismatch
+        // on either side of the FFI trips immediately.
+        #expect(hex(transaction) == Self.goldenCharge)
     }
 
     @Test("the provisioning charge attaches the key authorization (bytes grow)")

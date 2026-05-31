@@ -852,14 +852,15 @@ mod tests {
         let currency = address!("20c0000000000000000000000000000000000001");
         let recipient = address!("1111111111111111111111111111111111111111");
         let memo = [0xabu8; 32];
+        // The same fixed inputs as the Swift test (FFISubscriptionChargeTxBuilderTests).
         let build = |auth: Option<SignedKeyAuthorization>| {
             build_subscription_charge_tx(
                 42431,
                 7,
                 1_000_000_000,
-                1_000_000_000,
+                1_000_000,
                 100_000,
-                Some(currency),
+                None,
                 access_key,
                 currency,
                 recipient,
@@ -878,6 +879,11 @@ mod tests {
         assert_ne!(with_auth, without_auth);
         assert!(with_auth.len() > without_auth.len());
         assert_eq!(with_auth[0], 0x76);
-        assert_eq!(without_auth[0], 0x76);
+        // Byte-exact golden for the no-auth charge (the regression net the other builders
+        // have; the Swift test pins the identical bytes for cross-language equivalence).
+        let hex: String = without_auth.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, GOLDEN_SUBSCRIPTION_CHARGE_TX);
     }
+
+    const GOLDEN_SUBSCRIPTION_CHARGE_TX: &str = "76f8db82a5bf830f4240843b9aca00830186a0f87ef87c9420c000000000000000000000000000000000000180b86495777d59000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000f4240ababababababababababababababababababababababababababababababababc0800780808080c0b841a4e841b650d9eb291850174d5038c4b2488414a8aa0da30acb002b76bd4318a96dd2920e6a9b74346aabc1ccb47292323160741ba1678bdc661aba90be3f0bfd1c";
 }
