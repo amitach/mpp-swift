@@ -46,6 +46,7 @@ let package = Package(
         .library(name: "MPPTempo", targets: ["MPPTempo"]),
         .library(name: "MPPTempoServer", targets: ["MPPTempoServer"]),
         .library(name: "MPPStripe", targets: ["MPPStripe"]),
+        .library(name: "MPPStripeServer", targets: ["MPPStripeServer"]),
         .library(name: "MPPMCP", targets: ["MPPMCP"]),
         .library(name: "MPPProxy", targets: ["MPPProxy"]),
         .library(name: "MPPHummingbird", targets: ["MPPHummingbird"]),
@@ -256,6 +257,24 @@ let package = Package(
         .testTarget(
             name: "MPPStripeTests",
             dependencies: ["MPPStripe", "MPPCore", "MPPClient"]
+        ),
+        // MPPStripeServer: the Stripe charge method, SERVER side (StripeChargeVerifier + the
+        // concrete StripePaymentIntentClient over MPPHTTPTransport). Reuses MPPStripe's shared
+        // types, MPPServer's PaymentMethodServer seam, and swift-crypto for the idempotency key.
+        .target(
+            name: "MPPStripeServer",
+            dependencies: [
+                "MPPStripe", "MPPCore", "MPPServer", "MPPClient",
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+                .product(name: "Crypto", package: "swift-crypto"),
+            ]
+        ),
+        .testTarget(
+            name: "MPPStripeServerTests",
+            dependencies: [
+                "MPPStripeServer", "MPPStripe", "MPPCore", "MPPServer", "MPPClient",
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+            ]
         ),
         // MPPMCP: binds the 402 flow to JSON-RPC / Model Context Protocol on the official MCP
         // SDK (module `MCP`). Rail-agnostic: it composes MPPServer's mint/verify pipeline and
