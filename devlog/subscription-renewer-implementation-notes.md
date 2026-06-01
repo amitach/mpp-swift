@@ -72,6 +72,26 @@ Option<SignedKeyAuthorization>` (provisions the access key into the AccountKeych
   the peer, in shipped doc.
 - No production caller yet; the renewer (PR-4) consumes it (the plan sequences it as the consumer).
 
+## PR-3 (AccessKeyStore + access-key private-key seam): DONE
+
+- `AccessKeyStore` protocol + `InMemoryAccessKeyStore` actor in MPPTempoServer (mirrors
+  SubscriptionStore/ChannelStore), keyed by `lookupKey` like the peer's `store.getAccessKey`.
+  `provision(forLookupKey:)` generates-or-gets a keypair (idempotent) and returns the address to
+  embed in the 402; `privateKey(forLookupKey:)` returns it for renewal signing. Keypair = 32
+  system-RNG bytes (injectable generator, like the saltProvider pattern), Secp256k1Signer,
+  EthereumAddress; provision is a synchronous actor method (no await inside), so it is atomic and
+  concurrent first-uses mint exactly one key.
+- Wired into the dev MPPConformanceServer subscription middleware: provisions the access key and
+  embeds `accessKeyAddress.checksummed` in the 402, replacing the hardcoded hex (the real caller for
+  the subtraction gate; made `makeSubscriptionMiddleware` async). The offline reverse conformance
+  only verifies (privateKey unused there; the renewer PR-4 is its consumer).
+- **Security (self-review):** holds spendable secp256k1 private keys at rest; in-memory impl is
+  test-only; never log key material (provision returns the address, the key only via the explicit
+  accessor). Doc made honest: the seam returns raw key bytes because the renewal FFI signs with them,
+  so it fits an OS-keychain/KMS-backed store that returns the key for the FFI to zeroize; a fully
+  NON-EXPORTING HSM would need a signing-delegation seam (a follow-up), not key export. Deterministic
+  test pins private key 1 to account #1's address.
+
 ## Open for later PRs
-- AccessKeyStore + private-key storage (PR-3), the Swift SubscriptionRenewer (PR-4), live Moderato
-  e2e (PR-5). See the plan HTML.
+- The Swift SubscriptionRenewer (PR-4) wires AccessKeyStore + Attribution + the FFI charge builder +
+  EVMRPC; live Moderato e2e (PR-5). See the plan HTML.
