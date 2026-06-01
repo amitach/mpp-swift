@@ -188,6 +188,13 @@ struct SpendingCapAuthorizerTests {
         try await auth.authorize(req)
     }
 
+    @Test("the currency match is case-insensitive (usd == USD)")
+    func currencyMatchCaseInsensitive() async throws {
+        let auth = try SpendingCapAuthorizer(maxAmount: Amount("100"), currency: "usd")
+        let req = try request(amount: Amount("50"), currency: "USD")
+        try await auth.authorize(req)
+    }
+
     @Test("a currency mismatch is denied")
     func currencyMismatch() async throws {
         let auth = try SpendingCapAuthorizer(maxAmount: Amount("100"), currency: "usd")

@@ -14,7 +14,8 @@ public struct SpendingCapAuthorizer: PaymentAuthorizer {
     public let maxAmount: Amount
     /// The currency the cap is denominated in. When set, a charge in another
     /// currency (or with no currency) is denied; when `nil`, the cap applies to
-    /// the amount regardless of currency.
+    /// the amount regardless of currency. The match is case-insensitive (`usd` ==
+    /// `USD`, a lowercase == checksummed EVM address).
     public let currency: String?
 
     /// Creates a cap of `maxAmount`, optionally pinned to `currency`.
@@ -28,7 +29,10 @@ public struct SpendingCapAuthorizer: PaymentAuthorizer {
     /// otherwise.
     public func authorize(_ request: PaymentApprovalRequest) async throws {
         guard let amount = request.amount else { throw PaymentDenied.amountUnknown }
-        if let currency, currency != request.currency {
+        // Compare case-insensitively: a fiat code (`usd` vs `USD`) and an EVM address (checksummed
+        // vs lowercase) are the same currency, and rails surface them in different cases. A missing
+        // charge currency still fails closed (it never equals the pinned currency).
+        if let currency, currency.lowercased() != request.currency?.lowercased() {
             throw PaymentDenied.currencyMismatch(expected: currency, got: request.currency)
         }
         guard amount <= maxAmount else {
