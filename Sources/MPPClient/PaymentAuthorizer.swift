@@ -22,9 +22,15 @@ public struct PaymentApprovalRequest: Sendable, Hashable {
     public let intent: IntentName
     /// The charge amount in base units, if the rail decoded it. `nil` when unknown.
     public let amount: Amount?
-    /// The currency/token of the charge, if the rail decoded it.
+    /// The currency or token of the charge, if the rail decoded it. The form is
+    /// rail-defined: a fiat code for Stripe (e.g. `"usd"`), a token address for
+    /// Tempo. EVM addresses are case-insensitive and a rail may surface them
+    /// lowercased or EIP-55 checksummed, so an authorizer that matches on a token
+    /// should normalize case rather than compare raw strings.
     public let currency: String?
-    /// The payee identifier of the charge, if the rail decoded it.
+    /// The payee identifier of the charge, if the rail decoded it. Rail-defined,
+    /// and for EVM rails an address whose case an authorizer should normalize
+    /// (see ``currency``).
     public let recipient: String?
     /// The challenge's human-readable description, for display only.
     public let description: String?
