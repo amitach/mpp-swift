@@ -26,6 +26,7 @@
             guard let access = SecAccessControlCreateWithFlags(
                 nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, .userPresence, &accessError
             ) else {
+                accessError?.release()
                 throw AccountStoreError.ioFailure("could not create access control")
             }
             let query: [String: Any] = [

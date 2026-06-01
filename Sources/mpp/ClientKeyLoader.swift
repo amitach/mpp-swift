@@ -35,13 +35,9 @@ enum ClientKeyLoader {
 
         if let account {
             guard let store else { throw CLIError.accountsUnsupported }
-            let key: Data
-            do {
-                key = try store.privateKey(name: account)
-            } catch let error as AccountStoreError {
-                if case .notFound = error { throw CLIError.noPaymentMethod }
-                throw error
-            }
+            // A missing account propagates AccountStoreError.notFound -> "No such account: <name>",
+            // not the env-oriented "Set MPP_PRIVATE_KEY" message.
+            let key = try store.privateKey(name: account)
             try methods.append(tempoMethod(forKey: key))
         } else if let keyHex = environment["MPP_PRIVATE_KEY"] {
             guard let key = Data(hexPrefixed: keyHex) else { throw CLIError.invalidPrivateKey }

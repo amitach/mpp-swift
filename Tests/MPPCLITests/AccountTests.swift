@@ -119,9 +119,9 @@ struct ClientKeyLoaderAccountTests {
         }
     }
 
-    @Test("an unknown account yields a no-method error")
+    @Test("an unknown account yields a clear no-such-account error")
     func unknownAccount() {
-        #expect(throws: CLIError.self) {
+        #expect(throws: AccountStoreError.notFound("ghost")) {
             _ = try ClientKeyLoader.methods(
                 account: "ghost", store: InMemoryAccountStore(), environment: [:]
             )
