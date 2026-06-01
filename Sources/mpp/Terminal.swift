@@ -2,6 +2,8 @@
     import Darwin
 #elseif canImport(Glibc)
     import Glibc
+#elseif canImport(Musl)
+    import Musl
 #endif
 
 /// Terminal-attachment probe used to decide whether a payment prompt can be shown and answered.
