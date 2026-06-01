@@ -103,10 +103,9 @@ struct DocumentLoaderTests {
 struct SignDiscoverExitCodeTests {
     @Test("the new errors map to their curl/mppx codes")
     func exitCodes() {
-        #expect(CLIOutcome(error: CLIError.invalidChallenge("x")).exitCode == 2)
+        #expect(CLIOutcome(error: CLIError.invalidChallenge).exitCode == 2)
         #expect(CLIOutcome(error: CLIError.noMethodForChallenge).exitCode == 75)
         #expect(CLIOutcome(error: CLIError.cannotLoad("x")).exitCode == 2)
         #expect(CLIOutcome(error: CLIError.invalidInput("x")).exitCode == 2)
-        #expect(CLIOutcome(error: CLIError.discoveryInvalid(3)).exitCode == 1)
     }
 }

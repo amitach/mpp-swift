@@ -43,7 +43,7 @@ struct Sign: AsyncParsableCommand {
 
     private func execute() async throws {
         let challenges = Challenge.challenges(inHeaderValue: challenge)
-        guard !challenges.isEmpty else { throw CLIError.invalidChallenge(challenge) }
+        guard !challenges.isEmpty else { throw CLIError.invalidChallenge }
 
         if dryRun {
             emitDryRun(challenges)
@@ -91,7 +91,7 @@ func signedHeader(
     environment: [String: String]
 ) async throws -> (header: String, challenge: Challenge) {
     let challenges = Challenge.challenges(inHeaderValue: value)
-    guard !challenges.isEmpty else { throw CLIError.invalidChallenge(value) }
+    guard !challenges.isEmpty else { throw CLIError.invalidChallenge }
     let methods = try ClientKeyLoader.methods(from: environment)
     guard let selection = selectPaymentMethod(for: challenges, from: methods) else {
         throw methods.isEmpty ? CLIError.noPaymentMethod : CLIError.noMethodForChallenge

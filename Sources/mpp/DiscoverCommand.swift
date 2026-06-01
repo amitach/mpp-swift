@@ -34,6 +34,10 @@ struct DiscoverValidate: AsyncParsableCommand {
     func run() async throws {
         do {
             try await execute()
+        } catch let exit as ExitCode {
+            // execute() already emitted the validation result; this just sets the exit code,
+            // so do NOT emit a second (error) envelope.
+            throw exit
         } catch {
             let outcome = CLIOutcome(error: error)
             if json {
@@ -70,7 +74,9 @@ struct DiscoverValidate: AsyncParsableCommand {
             }
             if errors.isEmpty { print("valid") }
         }
-        if !errors.isEmpty { throw CLIError.discoveryInvalid(errors.count) }
+        // The result is already emitted above; throw a bare ExitCode (passed through by run())
+        // so an invalid document exits 1 without a second output.
+        if !errors.isEmpty { throw ExitCode(1) }
     }
 }
 
