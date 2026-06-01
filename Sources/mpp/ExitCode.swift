@@ -1,4 +1,5 @@
 import Foundation
+import MPPAuth
 import MPPClient
 import MPPCore
 import MPPStripe
@@ -18,6 +19,9 @@ enum CLIError: Error {
     case noMethodForChallenge
     case cannotLoad(String)
     case invalidInput(String)
+    case accountsUnsupported
+    case accountExists(String)
+    case invalidAccountName(String)
 }
 
 /// The resolved outcome for any thrown error: a process exit code (curl / mppx convention: 0 ok,
@@ -53,6 +57,7 @@ struct CLIOutcome {
         case is PaymentDenied:
             .init(75, "payment_rejected", "Payment was not authorized (\(error)).")
         case let flow as PaymentClientError: flow.fields
+        case let store as AccountStoreError: store.fields
         case is StripeMethodError:
             .init(77, "stripe_error", "The Stripe payment method failed (\(error)).")
         case is Amount.ValidationError:
@@ -92,6 +97,23 @@ private extension CLIError {
             .init(2, "usage", "Could not read: \(source)")
         case let .invalidInput(reason):
             .init(2, "usage", "Invalid input: \(reason)")
+        case .accountsUnsupported:
+            .init(2, "usage", "Named accounts need macOS; on this platform set MPP_PRIVATE_KEY.")
+        case let .accountExists(name):
+            .init(2, "usage", "An account named '\(name)' already exists.")
+        case let .invalidAccountName(name):
+            .init(2, "usage", "Invalid account name '\(name)' (use letters, digits, - and _).")
+        }
+    }
+}
+
+private extension AccountStoreError {
+    var fields: CLIOutcome.Fields {
+        switch self {
+        case let .notFound(name):
+            .init(69, "no_account", "No such account: \(name)")
+        case let .ioFailure(detail):
+            .init(1, "keychain_error", "Account store error: \(detail)")
         }
     }
 }
