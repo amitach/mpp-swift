@@ -1,5 +1,6 @@
 import ArgumentParser
 import Foundation
+import MPPAuth
 import MPPClient
 import MPPCore
 
@@ -20,6 +21,12 @@ struct Sign: AsyncParsableCommand {
 
     @Flag(name: .customLong("dry-run"), help: "Parse and validate the challenge without signing.")
     var dryRun = false
+
+    @Option(
+        name: [.customShort("a"), .customLong("account")],
+        help: "Use a stored account's key (macOS Keychain) instead of MPP_PRIVATE_KEY."
+    )
+    var account: String?
 
     @Flag(name: .customLong("json"), help: "Emit a JSON result instead of plain text.")
     var json = false
@@ -50,7 +57,8 @@ struct Sign: AsyncParsableCommand {
             return
         }
         let signed = try await signedHeader(
-            forChallengeValue: challenge, environment: ProcessInfo.processInfo.environment
+            forChallengeValue: challenge, environment: ProcessInfo.processInfo.environment,
+            account: account, store: makeAccountStore()
         )
         if json {
             emitJSON(SignResult(
@@ -88,11 +96,17 @@ struct Sign: AsyncParsableCommand {
 /// request). Returns the header and the selected challenge. The testable core of `sign`.
 func signedHeader(
     forChallengeValue value: String,
-    environment: [String: String]
+    environment: [String: String],
+    account: String? = nil,
+    store: (any AccountStore)? = nil
 ) async throws -> (header: String, challenge: Challenge) {
     let challenges = Challenge.challenges(inHeaderValue: value)
     guard !challenges.isEmpty else { throw CLIError.invalidChallenge }
-    let methods = try ClientKeyLoader.methods(from: environment)
+    let methods = try ClientKeyLoader.methods(
+        account: account,
+        store: store,
+        environment: environment
+    )
     guard let selection = selectPaymentMethod(for: challenges, from: methods) else {
         throw methods.isEmpty ? CLIError.noPaymentMethod : CLIError.noMethodForChallenge
     }

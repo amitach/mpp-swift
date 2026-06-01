@@ -127,7 +127,10 @@ struct Pay: AsyncParsableCommand {
         let authorizer = try AuthorizerFactory.make(
             approve: approve, maxAmount: cap, interactive: Terminal.isInteractive
         )
-        let methods = try ClientKeyLoader.methods(from: ProcessInfo.processInfo.environment)
+        let methods = try ClientKeyLoader.methods(
+            account: globals.account, store: makeAccountStore(),
+            environment: ProcessInfo.processInfo.environment
+        )
         guard !methods.isEmpty else { throw CLIError.noPaymentMethod }
 
         let runner = PayRunner(

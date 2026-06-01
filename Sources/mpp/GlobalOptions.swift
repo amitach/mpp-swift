@@ -46,4 +46,10 @@ struct GlobalOptions: ParsableArguments {
         help: "Allow a non-https URL for a loopback host (local testing only)."
     )
     var insecure = false
+
+    @Option(
+        name: [.customShort("a"), .customLong("account")],
+        help: "Use a stored account's key (macOS Keychain) instead of MPP_PRIVATE_KEY."
+    )
+    var account: String?
 }
