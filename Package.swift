@@ -353,8 +353,8 @@ let package = Package(
 // literal constants here (not an external file) so editing them invalidates SwiftPM's
 // manifest cache, which is keyed on Package.swift.
 let tempoFFIReleaseURL =
-    "https://github.com/amitach/mpp-swift/releases/download/tempo-tx-ffi-v0.0.2/TempoTxFFI.xcframework.zip"
-let tempoFFIReleaseChecksum = "e2dc9908c6ef48254b9e5b30ae05ccba7faf1f43f401b3f1afd51d15f1b0bf01"
+    "https://github.com/amitach/mpp-swift/releases/download/tempo-tx-ffi-v0.0.3/TempoTxFFI.xcframework.zip"
+let tempoFFIReleaseChecksum = "4780dbb9bb63bb007ffd38f975177846c4c7bd10a02d210989600120d334d0a3"
 
 // The MPPTempoFFI target + test target that sit on top of a given binary target
 // (returned, not appended, so this stays free of the main-actor-isolated `package`).
