@@ -83,9 +83,34 @@ mppx `server/Charge.test.ts`:
 - idempotency-key format -> `idempotencyKey`.
 - (live happy/invalid-SPT/expired/malformed + proxy -> PR-3.)
 
+## PR-3 (conformance) decisions
+- **No account-free cross-SDK harness for Stripe.** Unlike the proof (offline ecrecover) and
+  subscription-activation (offline signature) rails, the reference `mppx` Stripe *server* verifies by
+  creating a real PaymentIntent, so it needs a Stripe key. There is no keyless `mppx` Stripe server to
+  test against. So account-free conformance is a **pure-Swift hermetic end-to-end** (the real client
+  method builds an SPT credential for a server-minted challenge; the real `PaymentVerifier` pipeline
+  verifies it, settling via a stub PaymentIntent client) plus the decode/shape parity from PR-1/PR-2.
+  A Node `mppx` cross-SDK Stripe harness is deferred (needs an mppx server with a preview key).
+- **Live (preview + secret gated):** `StripeLiveConformanceTests` mints a test SPT via Stripe's
+  test-helpers and settles a real test-mode PaymentIntent through the concrete client; gated on
+  `MPP_STRIPE_LIVE_SK` and **SPT private-preview enrollment** (skips otherwise). `run-stripe-live.sh`
+  + a non-required `Conformance (stripe-live)` CI job (gated on `secrets.STRIPE_TEST_SK`,
+  `contents: read`). Not run in the default suite; not verified locally (needs preview enrollment).
+
+## Peer-test parity matrix (G7.5) - PR-3 (conformance) slice
+mppx `Charge.integration.test.ts`:
+- live happy path -> `StripeLiveConformanceTests.settlesLive` (preview-gated).
+- invalid SPT -> covered by the live error path (the client surfaces Stripe's `error.message`); unit:
+  `StripePaymentIntentClientTests.stripeError`.
+- expired challenge -> enforced by `PaymentVerifier` (`:127`), not the method (framework-level).
+- malformed payload (missing spt) -> `StripeChargeVerifierTests.missingSPT`.
+- receipt-format stability -> `endToEnd` + `succeeded`.
+mppx `proxy/services/stripe.test.ts` -> N/A here: an MPPProxy Stripe service (Basic-auth inject,
+`Stripe-Account` strip) is a separate MPPProxy follow-up, noted as deferred.
+
 ## Status
-- **PR-1 (client) MERGED (#103).** **PR-2 (server) DONE locally:** `MPPStripeServer` target + product;
-  `StripeConnectSettlement`/`StripeTransferData`/`StripeConnectViolation`, `StripePaymentIntentCreating`
-  seam, `StripeIdempotencyKey`, `StripeAnalyticsMetadata`, `StripeChargeVerifier`,
-  `StripePaymentIntentClient`; 18 server tests. Full suite 722 green; swiftformat + swiftlint clean;
-  no em dashes. Next: PR-3 conformance (offline format parity + the preview-gated live job).
+- **PR-1 (client) MERGED (#103); PR-2 (server) MERGED (#104).** **PR-3 (conformance) DONE locally:**
+  hermetic end-to-end `StripeConformanceTests` (client <-> server through `PaymentVerifier`) + the
+  preview-gated `StripeLiveConformanceTests` + `run-stripe-live.sh` + the non-required CI job. Full
+  suite 725 green; swiftformat + swiftlint clean; no em dashes. **WS-11 complete** (modulo the
+  deferred Node cross-SDK Stripe harness + MPPProxy Stripe service follow-ups).
