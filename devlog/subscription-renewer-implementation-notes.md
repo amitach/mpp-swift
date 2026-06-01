@@ -92,6 +92,26 @@ Option<SignedKeyAuthorization>` (provisions the access key into the AccountKeych
   NON-EXPORTING HSM would need a signing-delegation seam (a follow-up), not key export. Deterministic
   test pins private key 1 to account #1's address.
 
+## PR-4 (TempoSubscriptionRenewer): DONE
+
+- `TempoSubscriptionRenewer: SubscriptionRenewer` (MPPTempoServer) ties the vertical together behind
+  injected seams: `AccessKeyStore.privateKey(forLookupKey:)` for the signing key, `Attribution.encode`
+  for the memo, a `TempoSubscriptionChargeTxBuilder` for the signed tx, and a `submit` closure
+  (`@Sendable (Data) -> TransactionReceipt`, production passes `EVMRPC.sendRawTransactionSync`).
+- `charge(record, period, idempotencyReference)`: resolve the access key (else `accessKeyMissing`);
+  attach the authorization iff `record.lastChargedPeriod == nil` (the provisioning charge; later
+  charges omit it, matching our nil-default activation); memo from the idempotencyReference; build +
+  submit; `succeeded == false` -> `chargeReverted(hash)` so the engine releases its claim; return the
+  tx hash. `period` is unused directly (it is encoded in the idempotencyReference, like the peer's
+  settlementReference).
+- DECISION: provisioning inferred from `lastChargedPeriod == nil` rather than a new
+  `accessKeyProvisioned` record field (subtract-before-add; keeps the rail-agnostic engine + record
+  unchanged). Correct for our activation model (verifier does not settle period 0); documented.
+- No new FFI function (consumes PR-1's `build_subscription_charge_transaction`), so NO release.
+- Tests (5, hermetic): first charge attaches auth + correct currency/recipient/amount/memo/chain +
+  the stored key; later charge omits auth; revert throws; missing key throws; end-to-end through
+  SubscriptionEngine (activate -> renew -> .renewed, record advances, first charge provisions).
+
 ## Open for later PRs
-- The Swift SubscriptionRenewer (PR-4) wires AccessKeyStore + Attribution + the FFI charge builder +
-  EVMRPC; live Moderato e2e (PR-5). See the plan HTML.
+- Live Moderato e2e (PR-5): faucet-fund payer + access key, activate, run the renewer twice
+  (provision+charge, then plain charge), assert both settle on-chain. Gated. See the plan HTML.
