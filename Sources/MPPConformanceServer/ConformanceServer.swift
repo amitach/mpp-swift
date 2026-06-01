@@ -110,11 +110,22 @@ private func makeSubscriptionMiddleware() async throws -> MPPServerMiddleware {
             "chainId": .integer(Int64(chainId)),
         ]),
     ]))
+    // The activating verifier persists the verified subscription into the store on verify (the
+    // engine's renewer is unused here: this offline reverse-conformance activates, never renews).
+    let subscriptions = SubscriptionEngine(
+        store: InMemorySubscriptionStore(), renewer: ConformanceNoopRenewer()
+    )
+    let activating = ActivatingSubscriptionVerifier(
+        verifier: TempoSubscriptionVerifier(defaultChainID: chainId),
+        engine: subscriptions
+    ) { credential in
+        .init(subscriptionID: credential.challenge.id, lookupKey: subscriptionLookupKey)
+    }
     return MPPServerMiddleware(
         minter: ChallengeMinter(signer: signer),
         verifier: PaymentVerifier(
             signer: signer, replayStore: InMemoryReplayStore(),
-            methods: [TempoSubscriptionVerifier(defaultChainID: chainId)]
+            methods: [activating]
         ),
         binding: binding,
         request: request
@@ -123,10 +134,18 @@ private func makeSubscriptionMiddleware() async throws -> MPPServerMiddleware {
         case let .challengeIssued(challenge):
             log("[server] issued 402 (subscription) id=\(challenge.id)")
         case let .paymentVerified(verified):
-            log("[server] VERIFIED (subscription) source=\(verified.credential.source ?? "nil")")
+            log("[server] ACTIVATED (subscription) source=\(verified.credential.source ?? "nil")")
         case let .paymentRejected(rejection):
             log("[server] rejected (subscription) \(rejection)")
         }
+    }
+}
+
+/// A no-op renewer for the offline conformance server, which activates subscriptions but never
+/// drives a recurring charge (so the engine's renewer is never invoked).
+private struct ConformanceNoopRenewer: SubscriptionRenewer {
+    func charge(_: SubscriptionRecord, period _: Int, idempotencyReference: String) -> String {
+        idempotencyReference
     }
 }
 

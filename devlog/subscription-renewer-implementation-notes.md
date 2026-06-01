@@ -136,3 +136,20 @@ Option<SignedKeyAuthorization>` (provisions the access key into the AccountKeych
   FFI 24/24 + renewer/store green; lint + em-dash clean.
 
 THE ON-CHAIN SUBSCRIPTION RENEWER VERTICAL IS COMPLETE (PR-1..PR-5).
+
+## Closeout A1 (activation wiring into the subscription server path): DONE
+
+- `ActivatingSubscriptionVerifier: PaymentMethodServer` (MPPTempoServer) wraps
+  `TempoSubscriptionVerifier` and, on a successful verify, persists the subscription via
+  `SubscriptionEngine.activate(_:now:)`. Because `verify(_:now:)` is `async`, the activation is
+  awaited INLINE (resolving the PR-3 deferral: the middleware's sync event callback could not await
+  the actor-backed store). A store-write failure rejects the payment (client retries on a fresh 402).
+- `subscriptionID`/`lookupKey` are application identity from an injected `resolveIdentity` hook (the
+  auth context the 402 was issued under); `billingAnchor` = the verify instant; `lastChargedPeriod` =
+  nil. Reuses the #92 activation seam + engine.activate (no parallel path).
+- Wired into the dev MPPConformanceServer subscription middleware (replacing the bare verifier): the
+  reverse conformance now VERIFIES + ACTIVATES (persists into an in-memory store; the engine renewer
+  is a no-op there). The real (non-test) caller for the subtraction gate.
+- Pure Swift, no FFI change, no release. 4 hermetic tests (persist + receipt, supports, forged
+  rejects + persists nothing, supersession). swift test + swiftformat + swiftlint + em-dash clean.
+- A2 (live cross-SDK subscription conformance) remains, direction TBD with the user.
