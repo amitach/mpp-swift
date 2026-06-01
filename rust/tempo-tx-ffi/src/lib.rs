@@ -98,19 +98,19 @@ fn build_signed_tx(
     let signing_key_result = SigningKey::from_bytes((&private_key).into());
     private_key.zeroize();
 
-    // Parse + wipe the fee-payer (sponsor) key eagerly too, before any fallible `?` below, so
-    // neither key's raw bytes can survive on an early-return path. The fee-payer signature itself
-    // is built after the sender's (it commits to the same tx); we only capture the parsed key and
-    // its hash here. A fee payer is honoured only with a keychain context (a sponsored access-key
-    // tx); the trailing `zeroize()` still wipes a stray key handed in on any other path.
-    let fee_payer_prep = match keychain_user_address {
-        Some(sender) => fee_payer_key.take().map(|mut key| {
+    // Parse the fee-payer (sponsor) key eagerly too, before any fallible `?` below, so neither
+    // key's raw bytes can survive on an early-return path. We *borrow* it (no `take()`/move): a
+    // move of a `Copy` `[u8; 32]` out of the `Option` would leave the original payload bytes
+    // behind un-wiped (`None` only rewrites the discriminant), so we keep it `Some` and let the
+    // in-place `zeroize()` below overwrite the real bytes. The fee-payer signature itself is built
+    // after the sender's (it commits to the same tx); we only capture the parsed key + hash here.
+    // A fee payer is honoured only with a keychain context (a sponsored access-key tx).
+    let fee_payer_prep = match (keychain_user_address, fee_payer_key.as_ref()) {
+        (Some(sender), Some(key)) => {
             let fee_payer_hash = tx.fee_payer_signature_hash(sender);
-            let parsed = SigningKey::from_bytes((&key).into());
-            key.zeroize();
-            (parsed, fee_payer_hash)
-        }),
-        None => None,
+            Some((SigningKey::from_bytes(key.into()), fee_payer_hash))
+        }
+        _ => None,
     };
     fee_payer_key.zeroize();
 

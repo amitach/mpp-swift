@@ -75,8 +75,11 @@ has to cover the transfer. Ported the same:
   dereferenced out of the `Zeroizing` wrapper into a bare array). Fixed all three: `build_signed_tx`
   now parses + wipes both keys *before* any fallible `?`, so no early return leaks; the caller wipes
   its `Copy`; the export keeps the sponsor key in `Zeroizing` and hands down only a `Copy`. The
-  golden tests confirm the signed bytes are unchanged (only zeroization timing moved). Requires
-  another FFI release (binary behaviour changed, signature did not).
+  sponsor key is *borrowed* (via `as_ref`), not `take()`-moved: moving a `Copy` `[u8; 32]` out of
+  the `Option` would leave the original payload bytes un-wiped (`None` rewrites only the
+  discriminant), so it stays `Some` and the in-place `zeroize()` overwrites the real bytes (a
+  second-round review catch). The golden tests confirm the signed bytes are unchanged (only
+  zeroization moved). Requires another FFI release (binary behaviour changed, signature did not).
 - **Live-subscription route now opt-in** (was always returning non-nil). It guards on
   `CONFORMANCE_FEE_PAYER_KEY` (which it requires to succeed anyway), matching how
   `makeSessionMiddleware` gates on `CONFORMANCE_OPERATOR_KEY`. A proof-only run no longer touches
