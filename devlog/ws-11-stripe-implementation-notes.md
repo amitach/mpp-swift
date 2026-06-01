@@ -1,4 +1,4 @@
-# WS-11 — MPP Stripe rail — implementation notes (running)
+# WS-11 - MPP Stripe rail - implementation notes (running)
 
 The Stripe rail is an MPP method (`stripe`/`charge`): the client presents a Stripe Shared Payment
 Token (SPT) in the credential; the server settles by creating a Stripe PaymentIntent. Two products
@@ -17,7 +17,7 @@ not pull `MPPServer`+`swift-crypto`. Plan: `~/.claude/plans/nested-crafting-map.
   `description`/`externalId`/`recipient`, and `methodDetails{networkId, paymentMethodTypes[>=1],
   metadata?}`. (The mppx `Methods.ts` `z.transform` folds `networkId`/`paymentMethodTypes` into
   `methodDetails` and drops top-level `decimals`/`networkId`; the client never sees `decimals`.)
-- **Credential carries no `source`** — matches mppx (its Stripe client sets none; the server omits
+- **Credential carries no `source`** - matches mppx (its Stripe client sets none; the server omits
   `mpp_client_id` when source is absent). Stripe identifies the payer by the SPT, not a wallet DID.
 - **SPT-provider seam** (`StripeTokenProvider`): no Stripe.js in Swift, so the agent injects the SPT
   out of band (the mppx `createToken` analogue). The provider doubles as the pre-pay gate (refusing
@@ -31,9 +31,9 @@ not pull `MPPServer`+`swift-crypto`. Plan: `~/.claude/plans/nested-crafting-map.
 ## G3.6 subtraction
 - No approval-policy type (the token provider is the gate). No fields decoded that are unused. The
   `paymentMethodTypes` is decoded and surfaced to the provider but is NOT sent to the PaymentIntent
-  (server-side, PR-2) — recorded so PR-2 does not add `payment_method_types`.
+  (server-side, PR-2) - recorded so PR-2 does not add `payment_method_types`.
 
-## Peer-test parity matrix (G7.5) — PR-1 (client) slice
+## Peer-test parity matrix (G7.5) - PR-1 (client) slice
 mppx `Methods.test.ts` + `client/Charge.test.ts`:
 - name/intent == stripe/charge -> `StripeMethodTests`-equivalent via `StripeMethod.name` + ranges test.
 - schema validates valid request -> `decodesValid`, `optionalAbsent`.
