@@ -6,6 +6,7 @@ import MPPStripe
 /// A command-line failure the `mpp` tool raises, each carrying a curl / mppx-style exit code.
 enum CLIError: Error {
     case invalidURL(String)
+    case invalidMethod(String)
     case invalidPrivateKey
     case invalidMaxAmount(String)
     case noPaymentMethod
@@ -63,6 +64,8 @@ private extension CLIError {
         switch self {
         case let .invalidURL(url):
             .init(2, "usage", "Not a valid URL: \(url)")
+        case let .invalidMethod(method):
+            .init(2, "usage", "Not a valid HTTP method: \(method)")
         case .invalidPrivateKey:
             .init(2, "usage", "MPP_PRIVATE_KEY is not valid 0x-prefixed 32-byte hex.")
         case let .invalidMaxAmount(value):

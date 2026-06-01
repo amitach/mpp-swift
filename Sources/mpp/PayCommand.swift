@@ -2,8 +2,28 @@ import ArgumentParser
 import Foundation
 import HTTPTypes
 import HTTPTypesFoundation
+import MPPAuth
 import MPPClient
 import MPPCore
+
+/// A short, terminal-safe progress line for a `--verbose` run. Method / intent are
+/// grammar-validated
+/// (inert); the server-controlled `realm` and the receipt reference are sanitized via
+/// `displaySafe`.
+func verboseLine(for event: ClientEvent) -> String {
+    switch event {
+    case let .challengeReceived(challenge):
+        "* challenge \(challenge.method.rawValue)/\(challenge.intent.rawValue) from "
+            + displaySafe(challenge.realm, maxLength: 120)
+    case .credentialCreated:
+        "* credential built"
+    case let .paymentResponse(receipt):
+        receipt.map { "* paid; receipt " + displaySafe($0.reference, maxLength: 120) }
+            ?? "* response received"
+    case let .paymentFailed(error):
+        "* payment failed (\(error))"
+    }
+}
 
 /// Collects the receipt from the client's event stream (the HTTP flow surfaces it via `onEvent`,
 /// not the return value). Synchronous, lock-guarded: `onEvent` is called from inside the request.
@@ -21,9 +41,6 @@ final class EventCollector: @unchecked Sendable {
     }
 }
 
-/// The injected, network-free core of `pay`: send a request through a `PaymentClient` (which pays a
-/// 402 transparently) and return the paid response plus any receipt. Separated from the
-/// ArgumentParser command so the flow is testable over a stub transport.
 /// The outcome of a paid request: the paid response's status, its body, and any receipt.
 struct PayResult {
     let status: Int
@@ -31,20 +48,39 @@ struct PayResult {
     let receipt: Receipt?
 }
 
+/// The injected, network-free core of `pay`: send a request through a `PaymentClient` (which pays a
+/// 402 transparently) and return the paid response plus any receipt. Separated from the
+/// ArgumentParser command so the flow is testable over a stub transport.
 struct PayRunner {
     let transport: any MPPHTTPTransport
     let authorizer: any PaymentAuthorizer
     let methods: [any PaymentMethodClient]
     let allowInsecureLocal: Bool
+    let progress: (@Sendable (ClientEvent) -> Void)?
+
+    init(
+        transport: any MPPHTTPTransport,
+        authorizer: any PaymentAuthorizer,
+        methods: [any PaymentMethodClient],
+        allowInsecureLocal: Bool,
+        progress: (@Sendable (ClientEvent) -> Void)? = nil
+    ) {
+        self.transport = transport
+        self.authorizer = authorizer
+        self.methods = methods
+        self.allowInsecureLocal = allowInsecureLocal
+        self.progress = progress
+    }
 
     func run(request: HTTPRequest, body: Data) async throws -> PayResult {
         let events = EventCollector()
+        let forward = progress
         let client = PaymentClient(
             transport: transport,
             methods: methods,
             allowInsecureLocal: allowInsecureLocal,
             authorizer: authorizer,
-            onEvent: { events.record($0) }
+            onEvent: { event in events.record(event); forward?(event) }
         )
         let (response, responseBody) = try await client.send(request, body: body)
         return PayResult(status: response.status.code, body: responseBody, receipt: events.receipt)
@@ -96,21 +132,34 @@ struct Pay: AsyncParsableCommand {
 
         let runner = PayRunner(
             transport: URLSessionTransport(), authorizer: authorizer,
-            methods: methods, allowInsecureLocal: globals.insecure
+            methods: methods, allowInsecureLocal: globals.insecure, progress: progressSink()
         )
         let body = globals.data.map { Data($0.utf8) } ?? Data()
         let result = try await runner.run(request: request, body: body)
 
-        emitSuccess(result)
+        // Check --fail before emitting, so a failing response produces a single error output
+        // (the body suppressed, curl-like) rather than a success line and then an error line.
         if globals.fail, result.status >= 400 {
             throw CLIError.httpError(status: result.status)
+        }
+        emitSuccess(result)
+    }
+
+    /// A stderr progress printer for `--verbose` (suppressed by `--silent`), else nil.
+    private func progressSink() -> (@Sendable (ClientEvent) -> Void)? {
+        guard globals.verbose, !globals.silent else { return nil }
+        return { event in
+            FileHandle.standardError.write(Data((verboseLine(for: event) + "\n").utf8))
         }
     }
 
     private func buildRequest() throws -> HTTPRequest {
         guard let parsed = URL(string: url) else { throw CLIError.invalidURL(url) }
         var request = HTTPRequest(url: parsed)
-        if let method = globals.method, let parsedMethod = HTTPRequest.Method(method) {
+        if let method = globals.method {
+            guard let parsedMethod = HTTPRequest.Method(method) else {
+                throw CLIError.invalidMethod(method)
+            }
             request.method = parsedMethod
         }
         for header in globals.headers {

@@ -16,7 +16,10 @@ import Foundation
 /// PDF, and the LRI..PDI isolates). The bidi set is filtered by code point rather than relying on
 /// `CharacterSet` category membership, so a "Trojan Source" style visual reordering of the payee or
 /// amount cannot slip through even if the category set changes.
-func displaySafe(_ value: String, maxLength: Int? = nil) -> String {
+///
+/// Public so a consumer that renders a server-controlled string to a terminal (a `--verbose`
+/// progress line, a custom prompt or reason) can reuse the same guarantee.
+public func displaySafe(_ value: String, maxLength: Int? = nil) -> String {
     let controls = CharacterSet.controlCharacters
     let bidi: Set<Unicode.Scalar> = [
         "\u{200E}", "\u{200F}", // LRM, RLM

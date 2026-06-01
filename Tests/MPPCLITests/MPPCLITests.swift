@@ -163,6 +163,7 @@ struct CLIOutcomeTests {
         #expect(CLIOutcome(error: CLIError.noPaymentMethod).exitCode == 69)
         #expect(CLIOutcome(error: CLIError.unboundedHeadlessSpend).exitCode == 2)
         #expect(CLIOutcome(error: CLIError.invalidURL("x")).exitCode == 2)
+        #expect(CLIOutcome(error: CLIError.invalidMethod("BAD METHOD")).exitCode == 2)
         #expect(CLIOutcome(error: PaymentClientError.insecureTransport(url: "http://x"))
             .exitCode == 60)
         #expect(CLIOutcome(error: PaymentClientError.noSupportedMethod).exitCode == 75)
@@ -181,6 +182,29 @@ struct HeaderParsingTests {
         #expect(parsed.0 == fieldName("Content-Type"))
         #expect(parsed.1 == "application/json")
         #expect(Pay.parseHeader("no-colon") == nil)
+    }
+}
+
+// MARK: - Verbose progress lines
+
+@Suite("verbose progress")
+struct VerboseLineTests {
+    @Test("formats the challenge and sanitizes a server-controlled realm")
+    func formatsAndSanitizes() throws {
+        let challenge = try Challenge(
+            id: "c", realm: "api\u{202E}\u{1B}[2K.example.com", method: tempo(),
+            intent: .charge, request: EncodedJSON("e30")
+        )
+        let line = verboseLine(for: .challengeReceived(challenge))
+        #expect(line.contains("tempo/charge"))
+        #expect(!line.unicodeScalars.contains("\u{202E}")) // bidi override stripped
+        #expect(!line.unicodeScalars.contains("\u{1B}")) // escape stripped
+    }
+
+    @Test("a built credential line carries no secret material")
+    func credentialLineHasNoSecret() throws {
+        let credential = try Credential(challenge: chargeChallenge(), payload: ["proof": "SECRET"])
+        #expect(verboseLine(for: .credentialCreated(credential)) == "* credential built")
     }
 }
 
