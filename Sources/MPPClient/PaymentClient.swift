@@ -20,6 +20,7 @@ public struct PaymentClient: Sendable {
     private let acceptPaymentPolicy: AcceptPaymentPolicy
     private let advertise: String?
     private let allowInsecureLocal: Bool
+    private let authorizer: any PaymentAuthorizer
     private let onEvent: @Sendable (ClientEvent) -> Void
 
     /// Creates a payment client over a transport and a set of payment methods.
@@ -34,6 +35,9 @@ public struct PaymentClient: Sendable {
     ///   - allowInsecureLocal: Permit non-`https` only for a loopback host
     ///     (`localhost`, `*.localhost`, `127.0.0.1`, `::1`); for tests and local
     ///     servers. Defaults to `false` (production is `https`-only).
+    ///   - authorizer: Consulted once after a challenge is selected and before its
+    ///     credential is built; throwing denies the payment. Defaults to
+    ///     ``AllowAllAuthorizer`` (the prior, ungated behavior).
     ///   - onEvent: A synchronous diagnostics sink; defaults to a no-op.
     public init(
         transport: any MPPHTTPTransport,
@@ -41,6 +45,7 @@ public struct PaymentClient: Sendable {
         acceptPaymentPolicy: AcceptPaymentPolicy = .always,
         advertise: String? = nil,
         allowInsecureLocal: Bool = false,
+        authorizer: any PaymentAuthorizer = AllowAllAuthorizer(),
         onEvent: @escaping @Sendable (ClientEvent) -> Void = { _ in }
     ) {
         self.transport = transport
@@ -48,6 +53,7 @@ public struct PaymentClient: Sendable {
         self.acceptPaymentPolicy = acceptPaymentPolicy
         self.advertise = advertise
         self.allowInsecureLocal = allowInsecureLocal
+        self.authorizer = authorizer
         self.onEvent = onEvent
     }
 
@@ -56,8 +62,8 @@ public struct PaymentClient: Sendable {
     /// - Returns: the final response. If the first response is not `402`, it is
     ///   returned as-is. On a `402`, the paid retry's response is returned.
     /// - Throws: ``PaymentClientError`` for the flow's own rejections (insecure
-    ///   transport, no parseable challenge, no supported method); a transport or
-    ///   method error propagates unwrapped.
+    ///   transport, no parseable challenge, no supported method); a transport,
+    ///   authorizer, or method error propagates unwrapped.
     public func send(
         _ request: HTTPRequest,
         body: Data = Data()
@@ -89,6 +95,13 @@ public struct PaymentClient: Sendable {
             throw PaymentClientError.noSupportedMethod
         }
         onEvent(.challengeReceived(selection.challenge))
+
+        // Consult the authorizer for the selected challenge before the method signs
+        // anything. A denial throws unwrapped (like a method error) and no credential
+        // is built.
+        try await authorizeSelection(
+            method: selection.method, challenge: selection.challenge, with: authorizer
+        )
 
         let credential = try await selection.method.buildCredential(for: selection.challenge)
         onEvent(.credentialCreated(credential))

@@ -52,3 +52,16 @@ public struct Amount: Sendable, Hashable {
 
 // Transparent Codable + description come from RawStringValidated.
 extension Amount: RawStringValidated {}
+
+extension Amount: Comparable {
+    /// Orders two amounts numerically. Both `rawValue`s are canonical non-negative
+    /// integers with no leading zeros, so the longer string is the larger number,
+    /// and equal-length values compare by ASCII digit order (which, for digits, is
+    /// numeric order). This is exact at arbitrary precision (amounts can exceed any
+    /// fixed-width integer), with no parsing or overflow.
+    public static func < (lhs: Amount, rhs: Amount) -> Bool {
+        let left = lhs.rawValue, right = rhs.rawValue
+        if left.count != right.count { return left.count < right.count }
+        return left < right
+    }
+}

@@ -70,6 +70,7 @@ func mcpCredentialMeta(byte: UInt8 = 1) async throws -> Metadata {
 /// `MCPPaymentClient` over `InMemoryTransport`.
 func makeMCPPair(
     clientMethods: [any PaymentMethodClient],
+    authorizer: any PaymentAuthorizer = AllowAllAuthorizer(),
     handler: @escaping @Sendable (CallTool.Parameters) async throws -> CallTool.Result
 ) async throws -> MCPPaymentClient {
     let (clientTransport, serverTransport) = await InMemoryTransport.createConnectedPair()
@@ -79,16 +80,18 @@ func makeMCPPair(
 
     let client = Client(name: "mpp-mcp-test-client", version: "1.0")
     _ = try await client.connect(transport: clientTransport)
-    return MCPPaymentClient(client: client, methods: clientMethods)
+    return MCPPaymentClient(client: client, methods: clientMethods, authorizer: authorizer)
 }
 
 /// The common case: a server gating a single `premium` tool behind payment.
 func makeMCPPaymentPair(
-    clientMethods: [any PaymentMethodClient]
+    clientMethods: [any PaymentMethodClient],
+    authorizer: any PaymentAuthorizer = AllowAllAuthorizer()
 ) async throws -> MCPPaymentClient {
     let gate = try MCPPaymentServer(middleware: mcpMiddleware(), now: { mcpNow })
     return try await makeMCPPair(
         clientMethods: clientMethods,
+        authorizer: authorizer,
         handler: gate.gated { params in
             CallTool.Result(content: [
                 .text(text: "premium content for \(params.name)", annotations: nil, _meta: nil),

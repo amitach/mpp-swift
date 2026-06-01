@@ -69,6 +69,22 @@ public struct TempoSubscriptionMethod: PaymentMethodClient {
             && (try? SubscriptionRequest(challenge: challenge)) != nil
     }
 
+    /// The approval facts for `challenge`, filling amount/currency/recipient from the
+    /// decoded subscription request (the same fields the per-method ``ChargeApproval`` carries).
+    /// An undecodable request falls back to the rail-agnostic facts.
+    public func approvalFacts(for challenge: Challenge) -> PaymentApprovalRequest {
+        guard let request = try? SubscriptionRequest(challenge: challenge) else {
+            return PaymentApprovalRequest(generic: challenge)
+        }
+        return PaymentApprovalRequest(
+            challengeId: challenge.id, realm: challenge.realm,
+            method: challenge.method, intent: challenge.intent,
+            amount: request.amount, currency: request.currency.checksummed,
+            recipient: request.recipient.checksummed,
+            description: challenge.description, expires: challenge.expires
+        )
+    }
+
     /// Builds the key-authorization credential for `challenge`.
     ///
     /// - Throws: ``TempoSubscriptionMethodError`` for a wrong method/intent, a malformed request,

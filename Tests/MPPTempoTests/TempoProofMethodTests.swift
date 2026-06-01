@@ -67,6 +67,18 @@ struct TempoProofMethodTests {
         )
     }
 
+    @Test("approvalFacts decodes the amount and the rail-agnostic fields for the authorizer")
+    func approvalFactsDecodes() throws {
+        let subject = try method()
+        let offered = try chargeChallenge(amount: "0")
+        let facts = subject.approvalFacts(for: offered)
+        #expect(try facts.amount == Amount("0"))
+        #expect(facts.method == TempoMethod.name)
+        #expect(facts.intent == .charge)
+        #expect(facts.challengeId == Self.challengeId)
+        #expect(facts.realm == Self.realm)
+    }
+
     // MARK: credential content
 
     @Test("v2 (default) credential is byte-exact: payload, source, type")

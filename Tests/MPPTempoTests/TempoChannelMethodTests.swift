@@ -44,6 +44,19 @@ struct TempoChannelMethodTests {
         #expect(method.supports(challenge) == false)
     }
 
+    @Test("approvalFacts decodes the per-charge amount, currency, and recipient for the authorizer")
+    func approvalFactsDecodes() throws {
+        let method = try makeMethod(builder: StubOpenTxBuilder())
+        let facts = try method.approvalFacts(for: sessionChallenge(amount: "100"))
+        // The per-charge tick amount is surfaced; a budget authorizer accumulates these against an
+        // approved deposit, keyed by (realm, recipient, currency, intent).
+        #expect(try facts.amount == Amount("100"))
+        #expect(facts.currency == Fixture.tokenHex)
+        #expect(facts.recipient == Fixture.payeeHex)
+        #expect(facts.intent == .session)
+        #expect(facts.method == TempoMethod.name)
+    }
+
     @Test("advertises the tempo/session range, formatting to a header value")
     func advertises() throws {
         let method = try makeMethod(builder: StubOpenTxBuilder())

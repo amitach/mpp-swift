@@ -1,0 +1,44 @@
+# WS-14 CLI implementation notes
+
+A running log of the WS-14 `mpp` CLI workstream and the vendor-neutral payment-approval seam it builds on. Updated as each PR lands.
+
+## Scope and references
+- Goal: a shipped `mpp` executable at client-CLI parity with the reference peer `mppx` (github.com/wevm/mppx), plus a `PaymentAuthorizer` seam (Touch ID for the GUI consumer, env/auto for headless and CI).
+- Peers: `mppx` is the SOLE CLI peer; `mpp-rs` has no CLI. There is no normative CLI spec; the CLI is shaped by the protocol's client flow (draft-httpauth-payment-00) plus mppx behavioral/test parity (the G7.5 gate).
+- The full G7.5 peer-test parity matrix is assembled in PR-H.
+
+## PR-A: PaymentAuthorizer seam + approvalFacts + rail wiring (MPPClient, MPPMCP, MPPTempo, MPPStripe, MPPCore)
+
+The consent seam consulted once per payment, before any credential is built. It unifies what were three independent per-rail gates into one path, and is the seam the GUI consumer (Touch ID) and the CLI (env/auto/TTY) both inject. PR-A is library-only and Linux-safe; the concrete TTY/biometric authorizers land in PR-B.
+
+### G0 reuse (right primitives)
+- Consulted at the single existing credential-build chokepoint: `PaymentClient.send` (just before `selection.method.buildCredential`) and `MCPPaymentClient.callTool` (the same call). One shared free function `authorizeSelection(method:challenge:with:)` lives next to the existing `selectPaymentMethod`, so the HTTP and MCP flows cannot drift.
+- Reused `Challenge`/`Credential`/`Amount`/`Expires`/`MethodName`/`IntentName` and each rail's existing request decode (`TempoChargeRequest`, `SubscriptionRequest`, `StripeChargeRequest`) and approval fact set (`ChargeApproval`, `StripeTokenRequest`). No parallel transport, amount, or selection primitive was introduced.
+- Added `Amount: Comparable` in MPPCore (the right home for a numeric type; reused by `SpendingCapAuthorizer` and, later, by a consumer's budget authorizer) rather than a private comparator. The comparison is exact at arbitrary precision (canonical base-units strings: longer is larger, equal length compares by digit order), so it is correct beyond any fixed-width integer.
+
+### Verified at the source (the reason approvalFacts exists)
+- `amount`, `currency`, and `recipient` are NOT top-level on `Challenge`; they live inside the method-specific base64url `request` blob, which only the rail can decode. So the central chokepoint cannot build a full approval request generically.
+- Fix: `PaymentMethodClient` gains `approvalFacts(for:)` with a protocol-extension default that returns only the rail-agnostic fields (`PaymentApprovalRequest(generic:)`); each rail overrides it to fill amount/currency/recipient from its own decode. `amount`/`currency`/`recipient` are therefore OPTIONAL on `PaymentApprovalRequest`, and `SpendingCapAuthorizer` FAILS CLOSED on a nil amount (`PaymentDenied.amountUnknown`) rather than treating an unknown spend as free.
+- The override is a protocol requirement satisfied by an extension witness in the same module, so it dispatches correctly through `any PaymentMethodClient`.
+
+### Streaming / channel granularity (matters for a consumer budget)
+- `TempoChannelMethod.buildCredential` runs PER CHARGE, keying an open channel by `(payee, token, escrow)`; the first charge opens (deposit from `depositPolicy`, not the charge amount) and later charges voucher cumulatively. So `authorize()` fires per voucher with the per-tick amount. A consumer's budget authorizer accumulates per `(realm, recipient, currency, intent)` and stays silent within an approved deposit; escrow is not needed for budgeting. The minimal seam already supports this with no SDK change beyond `approvalFacts`.
+
+### Receipt surfacing (for a consumer ledger)
+- HTTP receipts surface via the existing `onEvent` sink (`ClientEvent.paymentResponse(receipt:)`), not the return tuple; MCP returns `PaidResult.receipt`. A consumer ledgers from those; no SDK change needed.
+
+### Decisions / reasoned deviations (G3.5)
+- One consent point, no double-prompt: the central authorizer is the sole consent gate. The CLI (PR-C) always constructs Tempo methods with `approval: .allowAll` and the Stripe token provider as a pure SPT mint, so exactly one authorization fires per payment. This is a construction-time invariant the CLI factory owns.
+- `TempoApprovalPolicy` is KEPT, not deleted (subtraction note below): it is shipped public API on three methods and guards the resolved `chainId` bound into the EIP-712 signature, a fact the central request cannot express (chain resolution happens inside `buildCredential`). A library embedder may still want that chain-bound defense-in-depth. The CLI demotes it to `.allowAll`.
+- The Stripe token provider stays a separate concern from consent: its job is to mint the SPT instrument. Collapsing it into consent would conflate "deny" with "no token available" and break the later exit-code parity (payment-rejected vs stripe-error).
+- A thrown authorizer error propagates unwrapped (like a method error), consistent with the flow's existing contract; it is not relabeled into `PaymentClientError`.
+
+### Subtraction audit (G3.6)
+- `PaymentDenied` carries only the three cases PR-A uses (`amountUnknown`, `overCap`, `currencyMismatch`); cases for the TTY/biometric authorizers are added in PR-B when they have a caller.
+- Considered deleting `TempoApprovalPolicy`; kept it (see above), demoted by the CLI.
+- The `TempoChannelMethod.approvalFacts` override lives in `TempoChannelMethod+ApprovalFacts.swift` (an extension), not the main type body, so it does not push the file past the file-length / type-body-length limits, the same reason `channelVoucherPayload` is file-scope. The other three rails' overrides are inline (their files are well under the limits).
+
+### Verified
+- `swift build` + full `swift test` green (743 tests). New tests: the authorizer seam over the HTTP `PaymentClient` (approve proceeds, deny short-circuits before `buildCredential` with no retry, the selected challenge is gated exactly once, the default `approvalFacts` is rail-agnostic), `SpendingCapAuthorizer` (under/at/over cap, nil-amount fails closed, currency match/mismatch), `Amount` ordering across the 64-bit boundary, each rail's `approvalFacts` decode (proof, channel per-tick, subscription checksummed, stripe), and the MCP client deny path.
+- Lint clean: `swiftformat --lint .` (0.61.1), `swiftlint --strict` repo-wide, the no-em-dash gate, and the secret scan.
+- Linux-safe: PR-A links no Apple-only framework (LocalAuthentication / Security arrive in PR-B/PR-E, platform-guarded). The CI Linux job is the backstop.

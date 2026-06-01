@@ -75,6 +75,19 @@ struct TempoSubscriptionMethodTests {
         try #require(EthereumAddress(hex: Self.wallet))
     }
 
+    @Test("approvalFacts decodes the amount and the checksummed currency and recipient")
+    func approvalFactsDecodes() throws {
+        let subject = try method()
+        let facts = try subject.approvalFacts(for: requestJSON())
+        let request = try SubscriptionRequest(challenge: requestJSON())
+        #expect(try facts.amount == Amount("1000000"))
+        #expect(facts.method == TempoMethod.name)
+        #expect(facts.intent == .subscription)
+        #expect(facts.challengeId == "sub-1")
+        #expect(facts.currency == request.currency.checksummed)
+        #expect(facts.recipient == request.recipient.checksummed)
+    }
+
     // MARK: credential content (byte-real)
 
     @Test("the credential carries a keyAuthorization that recovers the wallet")

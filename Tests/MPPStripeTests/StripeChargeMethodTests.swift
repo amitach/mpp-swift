@@ -29,6 +29,19 @@ struct StripeChargeMethodTests {
         ))))
     }
 
+    @Test("approvalFacts decodes amount, currency, and recipient for the authorizer")
+    func approvalFactsDecodes() throws {
+        let method = StripeChargeMethod(tokenProvider: fixedTokenProvider())
+        let challenge = try stripeChallenge(request: stripeRequest(recipient: .string("acct_x")))
+        let facts = method.approvalFacts(for: challenge)
+        #expect(try facts.amount == Amount("1000"))
+        #expect(facts.currency == "usd")
+        #expect(facts.recipient == "acct_x")
+        #expect(facts.method == StripeMethod.name)
+        #expect(facts.intent == .charge)
+        #expect(facts.challengeId == "c1")
+    }
+
     @Test("buildCredential carries the SPT and no source")
     func buildCredentialSPT() async throws {
         let method = StripeChargeMethod(tokenProvider: fixedTokenProvider("spt_abc"))

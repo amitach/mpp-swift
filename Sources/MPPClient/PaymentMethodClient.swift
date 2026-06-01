@@ -19,4 +19,22 @@ public protocol PaymentMethodClient: Sendable {
     /// is malformed for this method, or signing material is unavailable); the
     /// flow propagates that error to the caller unwrapped.
     func buildCredential(for challenge: Challenge) async throws -> Credential
+
+    /// The vendor-neutral approval facts for `challenge`, surfaced to a
+    /// ``PaymentAuthorizer`` before the credential is built.
+    ///
+    /// The default returns the rail-agnostic facts on the challenge alone
+    /// (``PaymentApprovalRequest/init(generic:)``), leaving amount/currency/
+    /// recipient `nil`. A method that can decode those from the challenge's
+    /// method-specific `request` overrides this to fill them, so a spending cap or
+    /// a user prompt sees the real amount. It does no signing and must not throw:
+    /// a request it cannot decode falls back to the generic facts.
+    func approvalFacts(for challenge: Challenge) -> PaymentApprovalRequest
+}
+
+public extension PaymentMethodClient {
+    /// The rail-agnostic default: the facts available on the challenge alone.
+    func approvalFacts(for challenge: Challenge) -> PaymentApprovalRequest {
+        PaymentApprovalRequest(generic: challenge)
+    }
 }
