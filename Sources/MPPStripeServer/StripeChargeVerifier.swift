@@ -134,7 +134,9 @@ public struct StripeChargeVerifier: PaymentMethodServer {
             challengeID: challenge.id, realm: challenge.realm,
             intent: challenge.intent.rawValue, source: credential.source
         )
-        let metadata = StripeAnalyticsMetadata.merged(analytics: analytics, user: request.metadata)
+        let metadata = StripeAnalyticsMetadata.merged(
+            analytics: analytics, user: request.metadata, challengeID: challenge.id
+        )
         return StripePaymentIntentRequest(
             amount: amount,
             currency: request.currency,

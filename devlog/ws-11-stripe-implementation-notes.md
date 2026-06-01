@@ -130,9 +130,15 @@ non-export account.
 Compared the implementation against `paymentauth.org/draft-stripe-charge-00`. The whole flow matches
 (method/intent, request + credential fields, verify ordering, challenge binding, PI params, status
 mapping, Connect + client-trust-boundary, receipt, no-receipt-on-error, TLS). Reconciled / noted:
-- **`challenge_id` metadata key (§9): FIXED here.** The spec mandates `metadata: { challenge_id:
-  challenge.id, ... }`; we emitted only `mpp_challenge_id` (reference-SDK analytics). Added the
-  spec-required `challenge_id` key (kept the `mpp_*` namespace alongside). Unit-tested.
+- **`challenge_id` metadata key (§9): FIXED here.** Verbatim spec §9 is
+  `metadata: { ...(stripeDetails.metadata || {}), challenge_id: challenge.id }` - i.e. the bare key
+  `challenge_id` (NOT `mpp_challenge_id`), assigned **after** user metadata so it is
+  **non-overridable**. The peer (mppx `buildAnalytics`) diverges: it emits `mpp_challenge_id` (no
+  bare `challenge_id`) and spreads user metadata last (user wins). Per the gate (spec wins on a
+  spec/peer divergence; keep peer analytics as additive), we: keep the `mpp_*` namespace
+  (user-overridable, peer parity) AND apply the spec's `challenge_id` last (non-overridable). A user
+  `challenge_id` in `methodDetails.metadata` cannot clobber it (unit-tested). Stripe itself imposes
+  no key (PaymentIntent `metadata` is freeform), so the key name is purely spec/peer-driven.
 - **Idempotency key (§9, SHOULD):** spec shows `${challenge.id}_${spt}` (raw); we derive
   `mpp-swift_{id}_{sha256(spt)}` for header/log hygiene (the SPT is a secret). "Derived from the
   challenge ID and SPT" so arguably compliant, but diverges from the literal form (loses same-account
