@@ -993,4 +993,55 @@ mod tests {
     }
 
     const GOLDEN_SUBSCRIPTION_CHARGE_TX: &str = "76f8f082a5bf830f4240843b9aca00830186a0f87ef87c9420c000000000000000000000000000000000000180b86495777d59000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000f4240ababababababababababababababababababababababababababababababababc0800780808080c0b856047e5f4552091a69125d5dfcb7b8c2659029395bdf34b62d4b8e525ea50f6941cd3e0b13750c90eb7098290614fe734921ead18c4c471151d237efd57add8ead8e52534aa2f968307173523013f281b0236d3056e81b";
+
+    /// The sponsored provisioning charge: a gas sponsor (`fee_payer`) signs the fee-payer
+    /// signature so the access key's per-period spending limit only has to cover the transfer
+    /// (the chain meters gas in the fee token and would otherwise draw it from that limit). Locks
+    /// the exact sponsored bytes, and asserts the sponsor signature actually changes the output vs
+    /// the unsponsored charge. The live-Moderato e2e is the authoritative on-chain check; this
+    /// catches byte-level regressions (e.g. a dep bump) without network access.
+    #[test]
+    fn sponsored_subscription_charge_golden() {
+        use alloy_primitives::{address, U256};
+        let access_key = [0x02u8; 32];
+        let fee_payer = [0x03u8; 32];
+        let root = address!("7e5f4552091a69125d5dfcb7b8c2659029395bdf");
+        let currency = address!("20c0000000000000000000000000000000000001");
+        let recipient = address!("1111111111111111111111111111111111111111");
+        let memo = [0xabu8; 32];
+        // Same fixed inputs as subscription_charge_attaches_key_authorization, plus the sponsor.
+        let build = |fee_payer: Option<[u8; 32]>| {
+            let auth = decode_key_authorization(
+                alloy_primitives::hex::decode(PEER_GOLDEN_SIGNED_AUTH).unwrap(),
+            )
+            .unwrap();
+            build_subscription_charge_tx(
+                42431,
+                7,
+                1_000_000_000,
+                1_000_000,
+                100_000,
+                None,
+                access_key,
+                root,
+                currency,
+                recipient,
+                U256::from(1_000_000u64),
+                memo,
+                Some(auth),
+                fee_payer,
+            )
+            .expect("builds")
+        };
+        let sponsored = build(Some(fee_payer));
+        let unsponsored = build(None);
+        // The fee-payer signature is present, so the sponsored encoding differs and is longer.
+        assert_ne!(sponsored, unsponsored);
+        assert!(sponsored.len() > unsponsored.len());
+        assert_eq!(sponsored[0], 0x76);
+        let hex: String = sponsored.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, GOLDEN_SPONSORED_SUBSCRIPTION_CHARGE_TX);
+    }
+
+    const GOLDEN_SPONSORED_SUBSCRIPTION_CHARGE_TX: &str = "76f901ec82a5bf830f4240843b9aca00830186a0f87ef87c9420c000000000000000000000000000000000000180b86495777d59000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000f4240ababababababababababababababababababababababababababababababababc08007808080f84380a0495dd4c63e0d09a6764fa341ee85e0385d6430d9901f66b70a157967fed370aba07e3f01871f0693c9359df444110e27f44f28145c64f4a1358a8a6e626956bba0c0f8b6f87182a5bf8094be95c3f554e9fc85ec51be69a3d807a0d55bcf2c8470dbd880dedd9420c0000000000000000000000000000000000001830f424083093a80f3f29420c0000000000000000000000000000000000001dcdb8495777d59d5941111111111111111111111111111111111111111b8412f8b4dba4eea0baaf11a6e6c75ddf3ac45e3884a189f8e0378237693c27caad82401fa516b307698e0c1ddb295b7b919f442dc68658b7357f3d70e2bd51f51d81cb856047e5f4552091a69125d5dfcb7b8c2659029395bdfae31c1f2df41562bb968e1e5b648a530f6add36135862a27f6923478bb2955674a7c130786786b5ab253fbfcc3cec8fb931029b2db9b44924ff7e1ce4c1d3d7d1b";
 }
