@@ -41,6 +41,7 @@ let package = Package(
         .library(name: "MPPBodyDigest", targets: ["MPPBodyDigest"]),
         .library(name: "MPPServer", targets: ["MPPServer"]),
         .library(name: "MPPClient", targets: ["MPPClient"]),
+        .library(name: "MPPAuth", targets: ["MPPAuth"]),
         .library(name: "MPPEVM", targets: ["MPPEVM"]),
         .library(name: "MPPDiscovery", targets: ["MPPDiscovery"]),
         .library(name: "MPPTempo", targets: ["MPPTempo"]),
@@ -150,6 +151,20 @@ let package = Package(
         .testTarget(
             name: "MPPClientTests",
             dependencies: ["MPPClient", "MPPCore"]
+        ),
+        // MPPAuth: concrete PaymentAuthorizer implementations for an interactive or headless
+        // payer (a terminal y/n prompt, and an Apple-only Touch ID / device-auth prompt). The
+        // protocol and the pure authorizers (AllowAll, SpendingCap) live in MPPClient; the
+        // I/O-bound ones live here so a library consumer that only needs the seam pulls neither
+        // a TTY nor LocalAuthentication. BiometricPaymentAuthorizer is `#if`-guarded to Apple
+        // platforms, so this target builds on Linux (TTY only).
+        .target(
+            name: "MPPAuth",
+            dependencies: ["MPPClient", "MPPCore"]
+        ),
+        .testTarget(
+            name: "MPPAuthTests",
+            dependencies: ["MPPAuth", "MPPClient", "MPPCore"]
         ),
         // MPPEVM: the EVM message-signing layer (Keccak-256, the secp256k1 recoverable
         // signer, and EIP-712 struct hashing). Kept out of MPPCore/MPPClient so a

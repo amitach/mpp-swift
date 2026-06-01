@@ -109,4 +109,10 @@ public enum PaymentDenied: Error, Sendable, Hashable {
     case overCap(amount: Amount, cap: Amount)
     /// The charge `currency` did not match the currency the cap is denominated in.
     case currencyMismatch(expected: String, got: String?)
+    /// The payer declined the spend (answered no at a prompt, or cancelled a
+    /// biometric / device-auth check).
+    case declined
+    /// The authorizer could not run its check (for example biometrics and a
+    /// device passcode are both unavailable); the spend is denied, not assumed.
+    case unavailable(String)
 }
