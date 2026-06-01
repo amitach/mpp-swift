@@ -14,6 +14,11 @@ enum CLIError: Error {
     case promptUnavailable(mode: String)
     case biometricUnavailable
     case httpError(status: Int)
+    case invalidChallenge(String)
+    case noMethodForChallenge
+    case cannotLoad(String)
+    case invalidInput(String)
+    case discoveryInvalid(Int)
 }
 
 /// The resolved outcome for any thrown error: a process exit code (curl / mppx convention: 0 ok,
@@ -80,6 +85,16 @@ private extension CLIError {
             .init(2, "usage", "Biometric approval is unavailable on this platform.")
         case let .httpError(status):
             .init(22, "http_error", "The server returned HTTP \(status).")
+        case let .invalidChallenge(value):
+            .init(2, "usage", "Not a valid Payment challenge: \(value)")
+        case .noMethodForChallenge:
+            .init(75, "payment_rejected", "No configured method can sign this challenge.")
+        case let .cannotLoad(source):
+            .init(2, "usage", "Could not read: \(source)")
+        case let .invalidInput(reason):
+            .init(2, "usage", "Invalid input: \(reason)")
+        case let .discoveryInvalid(count):
+            .init(1, "invalid_document", "The discovery document has \(count) error(s).")
         }
     }
 }

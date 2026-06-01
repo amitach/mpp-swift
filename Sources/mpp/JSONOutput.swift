@@ -39,12 +39,19 @@ struct JSONOutput: Encodable {
 
     /// Encodes and prints the envelope to stdout.
     func emit() {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(self),
-              let text = String(data: data, encoding: .utf8) else {
-            return
-        }
-        print(text)
+        emitJSON(self)
     }
+}
+
+/// Encodes a value as sorted-key JSON and prints it to stdout (the shared JSON sink for the CLI's
+/// `--json` outputs).
+func emitJSON(_ value: some Encodable) {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    guard let data = try? encoder.encode(value),
+          let text = String(data: data, encoding: .utf8)
+    else {
+        return
+    }
+    print(text)
 }

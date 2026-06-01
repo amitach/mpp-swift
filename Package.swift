@@ -185,6 +185,7 @@ let package = Package(
                 "MPPEVM",
                 "MPPTempo",
                 "MPPStripe",
+                "MPPDiscovery",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "HTTPTypes", package: "swift-http-types"),
                 .product(name: "HTTPTypesFoundation", package: "swift-http-types"),
@@ -193,7 +194,7 @@ let package = Package(
         .testTarget(
             name: "MPPCLITests",
             dependencies: [
-                "mpp", "MPPClient", "MPPCore", "MPPEVM", "MPPTempo",
+                "mpp", "MPPClient", "MPPCore", "MPPEVM", "MPPTempo", "MPPDiscovery",
                 .product(name: "HTTPTypes", package: "swift-http-types"),
             ]
         ),
