@@ -38,6 +38,7 @@ Scripts/conformance/run-session.sh         # forward CHANNEL: our client open/vo
 Scripts/conformance/run-session-reverse.sh # reverse CHANNEL: mppx client open/voucher/close vs our SessionMethod server (live)
 Scripts/conformance/run-subscription.sh         # forward SUBSCRIPTION: our client signs a key-auth vs the mppx subscription server (offline)
 Scripts/conformance/run-subscription-reverse.sh # reverse SUBSCRIPTION: mppx client signs a key-auth vs our TempoSubscriptionVerifier (offline)
+Scripts/conformance/run-subscription-live.sh     # reverse SUBSCRIPTION, LIVE: mppx client activates vs our server, which settles period 0 on-chain (Moderato)
 ```
 
 The forward Swift test is gated on `MPP_CONFORMANCE_URL` (skipped by the default
@@ -67,11 +68,14 @@ the FFI gate; the default reverse server stays proof-only and Rust-free.
 The off-chain proof flow (above) stays offline and deterministic; only the channel/settle
 flow touches the chain.
 
-## Subscriptions (key authorization, both directions, offline)
+## Subscriptions (key authorization + on-chain renewal, both directions)
 
-The `tempo`/`subscription` activation is verified in BOTH directions against `mppx`. Activation
-signs no on-chain transaction (it grants a `TempoKeyAuthorization`), so this is fully **offline**
-(no faucet, RPC, or testnet), deterministic and cheap.
+The `tempo`/`subscription` flow is verified against `mppx` at two levels: **activation** (signing the
+`TempoKeyAuthorization`, offline in both directions) and **on-chain renewal** (our server settling a
+recurring charge live on Moderato).
+
+**Activation (offline, both directions).** Activation signs no on-chain transaction (it grants a
+`TempoKeyAuthorization`), so it is fully offline (no faucet, RPC, or testnet), deterministic and cheap.
 
 - **Forward** (`run-subscription.sh`): our `TempoSubscriptionMethod` (client) signs the key
   authorization delegating the access key the `mppx` **subscription server** issued in its 402, and
@@ -83,6 +87,20 @@ signs no on-chain transaction (it grants a `TempoKeyAuthorization`), so this is 
 
 Gated on `MPP_CONFORMANCE_SUBSCRIPTION_URL` (forward) / run as an internal executable (reverse); the
 `/subscription` route is un-gated (offline) so it runs in the standard `Conformance (local)` CI job.
+
+**On-chain renewal (live on Moderato).** `run-subscription-live.sh` proves the full recurring charge,
+not just the signature: the `mppx` **client** activates a subscription against our `/subscription-live`
+route, and our `TempoSubscriptionRenewer` immediately settles period 0 on-chain (charge-on-activate) by
+submitting the recurring `transferWithMemo` the key authorization permits, signed by the server-held
+access key (`AccessKeyStore`) as a Tempo V2 keychain signature on behalf of the payer (root). A PASS
+means the `mppx` client's authorization was accepted **and** our charge mined successfully.
+
+The charge is **gas-sponsored**: the chain meters gas against the access key's per-period spending
+limit in addition to the transfer, and both SDKs set that limit to the charge amount, so a fee payer
+(a faucet-funded gas sponsor) signs the transaction's fee-payer signature and pays gas, leaving the
+limit to cover only the transfer. The route is opt-in (gated on `CONFORMANCE_FEE_PAYER_KEY`, which the
+harness funds before boot) and FFI-gated (the charge needs the `0x76` builder), so it runs in the
+non-required live CI job alongside the channel-session live conformance, not the default `swift test`.
 
 ## Metered streaming codecs (SSE + WebSocket)
 

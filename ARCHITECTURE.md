@@ -19,7 +19,7 @@ actual SwiftPM dependencies (verified against `Package.swift`):
 | `MPPServer` | `MPPCore`, `MPPBodyDigest` | framework-agnostic 402 middleware: challenge mint/verify, replay, the verify pipeline |
 | `MPPDiscovery` | `MPPCore` | OpenAPI x-payment-info parse/emit |
 | `MPPTempo` | `MPPCore`, `MPPEVM`, `MPPClient` | Tempo rail: the proof charge method, the 402 channel-payment client `TempoChannelMethod` (open/voucher/topUp/close, deposit policy, recovery, access-key signer) + the `TempoOpenTxBuilder`/`TempoTopUpTxBuilder`/`TempoCloseTxBuilder` + `ChannelStateReading` seams, EVMRPC, TempoEscrow (getChannel read), ChannelAmount, OnChainChannel; the subscription client `TempoSubscriptionMethod` + `SubscriptionRequest` (signs the `TempoKeyAuthorization`) |
-| `MPPTempoServer` | `MPPTempo`, `MPPCore`, `MPPEVM`, `MPPServer` | Tempo SERVER side: proof verify, the 4-action SessionMethod (opts into `reusesChallenge`, so the session's one challenge is not consumed per voucher; the channel-store cumulative is the anti-replay), ChannelStore, RPCChannelStateProvider; the subscription `TempoSubscriptionVerifier` (re-encode-and-compare) + `SubscriptionStore`/`SubscriptionEngine` (two-phase atomic renewal behind a `SubscriptionRenewer` seam); metered streaming `SessionStream` + `SessionStreamEvent` (SSE) + `SessionWebSocketFrame` (WS) |
+| `MPPTempoServer` | `MPPTempo`, `MPPCore`, `MPPEVM`, `MPPServer` | Tempo SERVER side: proof verify, the 4-action SessionMethod (opts into `reusesChallenge`, so the session's one challenge is not consumed per voucher; the channel-store cumulative is the anti-replay), ChannelStore, RPCChannelStateProvider; the subscription `TempoSubscriptionVerifier` (re-encode-and-compare) + `SubscriptionStore`/`SubscriptionEngine` (two-phase atomic renewal behind a `SubscriptionRenewer` seam) + the concrete on-chain `TempoSubscriptionRenewer` (over `AccessKeyStore` + `Attribution` + the `0x76` charge builder, with fee-payer gas sponsorship); metered streaming `SessionStream` + `SessionStreamEvent` (SSE) + `SessionWebSocketFrame` (WS) |
 | `MPPMCP` | `MPPCore`, `MPPServer`, `MPPClient`, `MCP` | JSON-RPC / MCP payment binding (rail-agnostic): a server gate that reuses `MPPServerMiddleware` and maps its decision onto the `-32042`/`-32043` frame + `result._meta` receipt, and a client wrapper that pays transparently. Depends on the official MCP Swift SDK, which raises the package floor to Swift 6.2 |
 | `MPPProxy` | `MPPServer`, `MPPClient`, `MPPCore`, `MPPDiscovery` | framework-neutral 402 reverse-proxy engine: routes `/{service}/...` to upstream origins, gates each route with `MPPServerMiddleware`, scrubs credential/cookie/hop-by-hop headers both ways, forwards via the `MPPHTTPTransport` seam, and serves `/openapi.json` + `/llms.txt`. Pure request/response logic; no server dependency, no Rust |
 | `MPPHummingbird` | `MPPProxy`, `MPPServer`, `MPPCore` + `Hummingbird` | the live HTTP-server binding: bridges Hummingbird's `Request`/`Response` to the engine's `(HTTPRequest, Data)` and runs `MPPProxy` as a catch-all responder (or a single gated route via `GatedResponder`). The only product that links swift-nio; runtime entry points are `@available` macOS 14 / iOS 17 |
@@ -109,6 +109,17 @@ The **subscription rail** and **metered streaming** build on the same pieces:
   fresh ownership token, charge via the injected **`SubscriptionRenewer`** seam with a stable
   idempotency reference, then commit only if this attempt still owns the claim (timeout takeover;
   `lookupKey` supersession; cancel/revoke).
+- **`TempoSubscriptionRenewer`** (in `MPPTempoServer`): the concrete on-chain `SubscriptionRenewer`.
+  It charges a period by submitting the recurring `transferWithMemo` the key authorization permits,
+  signed by the server-held access key (the **`AccessKeyStore`** seam supplies the private key per
+  `lookupKey`) as a Tempo V2 keychain signature on behalf of the payer (root), with an **`Attribution`**
+  memo bound to the idempotency reference. The **first** charge (`lastChargedPeriod == nil`) attaches
+  the signed authorization so the chain provisions the access key into its `AccountKeychain` precompile
+  before verifying the tx; later charges omit it. Gas is metered against the access key's per-period
+  spending limit, so an optional **fee payer** (gas sponsor) signs the transaction's fee-payer
+  signature and pays the gas, leaving the limit to cover only the transfer. Exactly-once stays the
+  engine's (claim/commit); the renewer just builds, signs, and broadcasts via an injected submit
+  closure. Proven settling live on Moderato; the `0x76` charge builder is the one FFI piece (below).
 - **`SessionStream`**: pay-as-you-go metered streaming. Each chunk draws one `tickCost` via the
   channel store's atomic `deductFromChannel`; when the balance is short it emits a single
   `payment-need-voucher` and polls until a client voucher raises the channel's highest cumulative,
@@ -117,13 +128,20 @@ The **subscription rail** and **metered streaming** build on the same pieces:
   **`SessionWebSocketFrame`** codec as `{ "mpp": <type>, ... }` JSON; one metering loop, two
   transports.
 
-The one seam the FFI fills:
+The seams the FFI fills:
 
 - **`TempoCloseTxBuilder`**: a one-method protocol (`buildCloseTransaction`). The
   **`MPPTempoFFI`** product's `FFITempoTxBuilder` conforms to it, calling the UniFFI
   bindings to the Rust shim; a server that never settles on-chain itself needs no
   conformer. The same builder also exposes the client-side `open` / `topUp` builders
   (each a two-call `approve` + escrow-call transaction).
+- **`TempoSubscriptionChargeTxBuilder`**: the recurring-charge analogue (in `MPPTempo`).
+  `MPPTempoFFI`'s `FFISubscriptionChargeTxBuilder` conforms to it, building the `0x76`
+  `transferWithMemo` signed by the access key as a keychain signature, attaching the key
+  authorization on the provisioning charge and an optional fee-payer signature when a gas
+  sponsor is supplied. The access key (and any sponsor key) is per-charge, so it travels in
+  the call parameters, not in construction. The Rust shim zeroizes every raw key byte it
+  copies, on every exit path.
 
 The write path is **proven on-chain**, not just by the byte-golden vectors: a gated test
 (`ModeratoE2ETests`, `MPP_MODERATO_E2E=1`) funds a fresh key from the live Moderato faucet

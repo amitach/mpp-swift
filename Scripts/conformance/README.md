@@ -11,10 +11,17 @@ This is **dev-only tooling**. Nothing here ships in any product, and the default
 ## Run
 
 ```sh
-Scripts/conformance/run.sh            # forward, local self-contained mppx server (no network)
-Scripts/conformance/run.sh --testnet  # forward, also probe the live Moderato node (42431)
-Scripts/conformance/run-reverse.sh     # reverse: the mppx CLIENT pays our Swift server
+Scripts/conformance/run.sh            # forward proof, local self-contained mppx server (no network)
+Scripts/conformance/run.sh --testnet  # forward proof, also probe the live Moderato node (42431)
+Scripts/conformance/run-reverse.sh     # reverse proof: the mppx CLIENT pays our Swift server
 ```
+
+These two cover the zero-amount **proof** flow. The settled rails (payment-channel
+sessions and on-chain subscription renewal, both live on Moderato) have their own
+scripts: `run-session.sh` / `run-session-reverse.sh` and `run-subscription.sh` /
+`run-subscription-reverse.sh` (activation, offline) / `run-subscription-live.sh` (our
+server settles a recurring charge on-chain). See [../../CONFORMANCE.md](../../CONFORMANCE.md)
+for the full matrix and what each proves.
 
 `run.sh` (forward) installs the Node deps, boots `server.mjs`, runs the
 `MPP_CONFORMANCE_URL`-gated Swift test (`ConformanceProofTests`) against it, and
@@ -41,6 +48,7 @@ property (ecrecover, no RPC) and npm hardening as the forward offline run.
 
 Proves the full client vertical (challenge/credential parsing, EIP-712 proof
 signing, the 402 flow, the URLSession transport, the Tempo proof method) is
-byte-compatible with the reference server for the **zero-amount proof**. It does
-**not** exercise a settled on-chain transfer (non-zero amount): that path needs the
-Tempo transaction layer and lands in a later PR.
+byte-compatible with the reference server for the **zero-amount proof**. The
+settled on-chain transfers (non-zero channel sessions and recurring subscription
+charges) are exercised by the separate live scripts noted above, against the Tempo
+`0x76` transaction layer on Moderato.
