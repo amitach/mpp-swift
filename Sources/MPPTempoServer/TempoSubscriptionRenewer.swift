@@ -76,6 +76,7 @@ public struct TempoSubscriptionRenewer: SubscriptionRenewer {
         let keyAuthorization = record.lastChargedPeriod == nil ? record.keyAuthorization : nil
         let parameters = TempoSubscriptionChargeParameters(
             accessKeyPrivateKey: accessKeyPrivateKey,
+            payer: record.payer,
             currency: record.currency,
             recipient: record.recipient,
             amount: record.amount.rawValue,

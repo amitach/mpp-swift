@@ -367,8 +367,16 @@ func mppTempoFFITargets(binaryName: String) -> [Target] {
         .testTarget(
             name: "MPPTempoFFITests",
             // MPPClient (URLSessionTransport) + MPPCore (JSONValue) for the gated live
-            // Moderato e2e, which drives EVMRPC over a real transport.
-            dependencies: ["MPPTempoFFI", "MPPTempo", "MPPEVM", "MPPClient", "MPPCore"]
+            // Moderato e2e, which drives EVMRPC over a real transport. MPPTempoServer for the
+            // subscription-renewer live e2e (TempoSubscriptionRenewer + AccessKeyStore).
+            dependencies: [
+                "MPPTempoFFI",
+                "MPPTempo",
+                "MPPTempoServer",
+                "MPPEVM",
+                "MPPClient",
+                "MPPCore",
+            ]
         ),
     ]
 }
@@ -394,7 +402,9 @@ func mppTempoFFITargets(binaryName: String) -> [Target] {
             ),
             .testTarget(
                 name: "MPPTempoFFITests",
-                dependencies: ["MPPTempoFFI", "MPPTempo", "MPPEVM", "MPPClient", "MPPCore"]
+                dependencies: [
+                    "MPPTempoFFI", "MPPTempo", "MPPTempoServer", "MPPEVM", "MPPClient", "MPPCore",
+                ]
             ),
         ])
     }

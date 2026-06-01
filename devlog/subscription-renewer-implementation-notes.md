@@ -112,6 +112,27 @@ Option<SignedKeyAuthorization>` (provisions the access key into the AccountKeych
   the stored key; later charge omits auth; revert throws; missing key throws; end-to-end through
   SubscriptionEngine (activate -> renew -> .renewed, record advances, first charge provisions).
 
-## Open for later PRs
-- Live Moderato e2e (PR-5): faucet-fund payer + access key, activate, run the renewer twice
-  (provision+charge, then plain charge), assert both settle on-chain. Gated. See the plan HTML.
+## PR-5 (live Moderato e2e): DONE, and it found a real on-chain bug
+
+- New gated e2e (`MPP_MODERATO_E2E=1`): fund a payer (root), sign a real `TempoKeyAuthorization`
+  delegating a fresh access key, run `TempoSubscriptionRenewer` twice (provision+charge, then a plain
+  charge), assert the recipient's TIP-20 balance grows by the amount each time. Self-contained via the
+  faucet. MPPTempoServer added to the MPPTempoFFITests target deps. Runnable locally (the Moderato RPC
+  + faucet are public); iterated live.
+- **KEY FINDING (the whole point of a live e2e): the charge tx needs a Tempo V2 KEYCHAIN signature,
+  not a plain signature.** The chain rejected the plain-signed tx: "KeyAuthorization must be signed by
+  root account X, but was signed by Y" - a plain signature makes the tx SIGNER the root, but an access
+  key signs ON BEHALF OF the root via a `KeychainSignature{user_address: root}` (V2: the access key
+  signs `keccak256(0x04 || sig_hash || user_address)`). PR-1's builder produced a plain signature -
+  self-consistent in the hermetic goldens but on-chain-invalid. FIX (this PR): `build_signed_tx` gained
+  `Option<Address> keychain_user_address`; the subscription builder passes `Some(root)`, signs the
+  keychain hash, wraps `TempoSignature::Keychain(KeychainSignature::new(root, Secp256k1(sig)))`; the
+  channel builders pass `None` (unchanged). `TempoSubscriptionChargeParameters` + the renewer now carry
+  `payer` (the root); the nonce is the payer's (the executing account), not the access key's.
+- The FFI signature changed (added `root_address`), so this needs a new release: cut
+  **tempo-tx-ffi-v0.0.4** + bump the Package.swift constants (same dance as v0.0.2/v0.0.3). Updated the
+  Rust + Swift charge goldens (now keychain-signed: trailing `b856 04 <root> <65-byte sig>`).
+- Verified LIVE on Moderato: both charges settle, the recipient balance grows each period; hermetic
+  FFI 24/24 + renewer/store green; lint + em-dash clean.
+
+THE ON-CHAIN SUBSCRIPTION RENEWER VERTICAL IS COMPLETE (PR-1..PR-5).

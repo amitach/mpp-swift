@@ -33,7 +33,9 @@ public struct FFISubscriptionChargeTxBuilder: TempoSubscriptionChargeTxBuilder {
         _ parameters: TempoSubscriptionChargeParameters,
         chainID: UInt64
     ) async throws -> Data {
-        let nonce = try await nonceProvider(accessKeyAddress(parameters.accessKeyPrivateKey))
+        // The charge executes for the payer (root) account, so its nonce is the payer's, not the
+        // access key's (the access key only signs the keychain signature).
+        let nonce = try await nonceProvider(parameters.payer)
         do {
             return try MPPTempoFFI.buildSubscriptionChargeTransaction(
                 chainId: chainID,
@@ -43,6 +45,7 @@ public struct FFISubscriptionChargeTxBuilder: TempoSubscriptionChargeTxBuilder {
                 gasLimit: fee.gasLimit,
                 feeToken: fee.feeToken?.bytes,
                 privateKey: parameters.accessKeyPrivateKey,
+                rootAddress: parameters.payer.bytes,
                 currency: parameters.currency.bytes,
                 recipient: parameters.recipient.bytes,
                 amount: parameters.amount,
@@ -52,19 +55,5 @@ public struct FFISubscriptionChargeTxBuilder: TempoSubscriptionChargeTxBuilder {
         } catch let error as FfiError {
             throw FFITempoTxBuilder.map(error)
         }
-    }
-
-    /// The access-key address derived from its private key, for the nonce lookup.
-    private func accessKeyAddress(_ privateKey: Data) throws(FFITempoTxError) -> EthereumAddress {
-        let signer: Secp256k1Signer
-        do {
-            signer = try Secp256k1Signer(privateKey: privateKey)
-        } catch {
-            throw FFITempoTxError.invalidSigningKey
-        }
-        guard let address = EthereumAddress(uncompressedPublicKey: signer.publicKey) else {
-            throw FFITempoTxError.senderAddressDerivationFailed
-        }
-        return address
     }
 }
