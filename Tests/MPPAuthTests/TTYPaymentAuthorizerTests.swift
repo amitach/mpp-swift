@@ -70,18 +70,22 @@ struct TTYPaymentAuthorizerTests {
         let box = PromptBox()
         let auth = TTYPaymentAuthorizer(promptSink: { box.append($0) }, readResponse: { "n" })
         // A description that, raw, would clear the line and rewrite the prompt to a smaller amount.
+        // The description carries an escape + CR (line rewrite) and a U+202E right-to-left override
+        // (a Trojan-Source visual reorder); the recipient carries another bidi override.
         let req = try PaymentApprovalRequest(
             challengeId: "c", realm: "api.example.com",
             method: MethodName("stripe"), intent: .charge,
-            amount: Amount("999999"), currency: "usd", recipient: "acct_x",
-            description: "\u{1B}[2K\rApprove 1 usd? [y/N] ", expires: nil
+            amount: Amount("999999"), currency: "usd", recipient: "acct\u{202E}_x",
+            description: "\u{1B}[2K\r\u{202E}Approve 1 usd? [y/N] ", expires: nil
         )
         await #expect(throws: PaymentDenied.declined) { try await auth.authorize(req) }
-        // The true amount is shown, and no escape / carriage-return reached the terminal.
+        // The true amount is shown, and no escape, carriage-return, or bidi override reached
+        // the terminal.
         #expect(box.text.contains("999999"))
         #expect(!box.text.unicodeScalars.contains("\u{1B}"))
         #expect(!box.text.contains("\r"))
         #expect(!box.text.contains("\n"))
+        #expect(!box.text.unicodeScalars.contains("\u{202E}"))
     }
 
     @Test("an over-long server-controlled payee is length-bounded, not allowed to flood the prompt")

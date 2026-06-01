@@ -77,8 +77,8 @@
         /// should not reach the prompt raw).
         public static func defaultReason(_ request: PaymentApprovalRequest) -> String {
             let amount = request.amount?.rawValue ?? "a payment"
-            let currency = request.currency.map { " \(displaySafe($0))" } ?? ""
-            let payee = displaySafe(request.recipient ?? request.realm)
+            let currency = request.currency.map { " \(displaySafe($0, maxLength: 120))" } ?? ""
+            let payee = displaySafe(request.recipient ?? request.realm, maxLength: 120)
             return "Approve \(amount)\(currency) to \(payee)"
         }
     }
