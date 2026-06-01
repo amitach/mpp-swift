@@ -45,6 +45,7 @@ let package = Package(
         .library(name: "MPPDiscovery", targets: ["MPPDiscovery"]),
         .library(name: "MPPTempo", targets: ["MPPTempo"]),
         .library(name: "MPPTempoServer", targets: ["MPPTempoServer"]),
+        .library(name: "MPPStripe", targets: ["MPPStripe"]),
         .library(name: "MPPMCP", targets: ["MPPMCP"]),
         .library(name: "MPPProxy", targets: ["MPPProxy"]),
         .library(name: "MPPHummingbird", targets: ["MPPHummingbird"]),
@@ -243,6 +244,18 @@ let package = Package(
                 "MPPClient",
                 .product(name: "HTTPTypes", package: "swift-http-types"),
             ]
+        ),
+        // MPPStripe: the Stripe charge method, CLIENT side (StripeChargeMethod). Presents a
+        // Shared Payment Token in the credential; no crypto (no MPPEVM) and no Stripe secret. The
+        // server side (StripeChargeVerifier + the PaymentIntent client) lands in MPPStripeServer,
+        // split off so a client-only consumer is not forced onto MPPServer + swift-crypto.
+        .target(
+            name: "MPPStripe",
+            dependencies: ["MPPCore", "MPPClient"]
+        ),
+        .testTarget(
+            name: "MPPStripeTests",
+            dependencies: ["MPPStripe", "MPPCore", "MPPClient"]
         ),
         // MPPMCP: binds the 402 flow to JSON-RPC / Model Context Protocol on the official MCP
         // SDK (module `MCP`). Rail-agnostic: it composes MPPServer's mint/verify pipeline and
