@@ -8,13 +8,8 @@ import MPPTempo
 import MPPTempoServer
 import NIOCore
 
-// MPPClient/MPPEVM/MPPTempoFFI are used only by the FFI-gated session route, so they (and
-// their imports) ride the gate; the default proof-only server depends on neither.
-#if MPP_TEMPO_FFI_ENABLED
-    import MPPClient
-    import MPPEVM
-    import MPPTempoFFI
-#endif
+// The live (FFI-gated) routes and their MPPClient/MPPEVM/MPPTempoFFI imports live in
+// LiveConformanceRoutes.swift; this file is the proof + offline-subscription server plus main().
 
 // A dev-only HTTP server exposing one zero-amount tempo/charge endpoint (and, under the FFI gate,
 // a live-settling session endpoint) backed by MPPServerMiddleware + the MPPTempoServer verifiers.
@@ -29,13 +24,15 @@ import NIOCore
 private let requestedPort = ProcessInfo.processInfo.environment["PORT"]
     .flatMap(UInt16.init) ?? 8799
 // Moderato testnet chain id, put in the challenge so a Tempo client signs for it.
-private let chainId: UInt64 = 42431
-private let secret = Data("mpp-swift-reverse-conformance-secret-key-0123456789".utf8)
+// `chainId`/`secret`/`log` are internal (not private): the live routes in
+// LiveConformanceRoutes.swift share them.
+let chainId: UInt64 = 42431
+let secret = Data("mpp-swift-reverse-conformance-secret-key-0123456789".utf8)
 // CONFORMANCE_VERBOSE=1 logs the challenge issued and the credential verified, so a
 // run shows the real data crossing the wire (useful for debugging interop).
 private let verbose = ProcessInfo.processInfo.environment["CONFORMANCE_VERBOSE"] == "1"
 
-private func log(_ message: @autoclosure () -> String) {
+func log(_ message: @autoclosure () -> String) {
     // fflush(nil) flushes all streams without referencing the global `stdout` var,
     // which is not concurrency-safe under Swift 6 on Glibc.
     if verbose { print(message()); fflush(nil) }
@@ -82,7 +79,8 @@ private func makeMiddleware() throws -> MPPServerMiddleware {
 // chain), so it is un-gated and always registered. The whole-second `.000Z` expiry is the form
 // `Date.toISOString()` emits, exercising the interop-tolerant parse in the reverse direction too.
 private let subscriptionCurrencyHex = "0x20c0000000000000000000000000000000000001"
-private let subscriptionRecipientHex = "0x1111111111111111111111111111111111111111"
+// Internal (not private): the live subscription route in LiveConformanceRoutes.swift reuses it.
+let subscriptionRecipientHex = "0x1111111111111111111111111111111111111111"
 private let subscriptionLookupKey = "conformance-subscription"
 
 private func makeSubscriptionMiddleware() async throws -> MPPServerMiddleware {
@@ -149,88 +147,6 @@ private struct ConformanceNoopRenewer: SubscriptionRenewer {
     }
 }
 
-#if MPP_TEMPO_FFI_ENABLED
-    // Reverse session conformance (live on Moderato). The mppx CLIENT opens a channel to
-    // our recipient, vouchers, and closes; our SessionMethod relays the open, accepts the
-    // vouchers, and settles the close on-chain with the faucet-funded operator key. Gated
-    // on the FFI (the close builder) and on CONFORMANCE_OPERATOR_KEY being set.
-    private let moderatoRPCURL = "https://rpc.moderato.tempo.xyz"
-    private let sessionEscrowHex = "0xe1c4d3dce17bc111181ddf716f75bae49e61a336"
-    private let sessionTokenHex = "0x20c0000000000000000000000000000000000000"
-
-    private enum SessionConfigError: Error { case badOperatorKey }
-
-    /// Resolves the on-chain relay/settle provider and the operator (payee) address from the
-    /// faucet-funded operator key, or nil if no key is configured (proof-only run).
-    private func makeSessionProvider()
-        async throws -> (provider: RPCChannelStateProvider, payee: EthereumAddress)? {
-        guard let keyHex = ProcessInfo.processInfo.environment["CONFORMANCE_OPERATOR_KEY"],
-              let keyData = Data(hexPrefixed: keyHex)
-        else { return nil }
-        let operatorSigner = try Secp256k1Signer(privateKey: keyData)
-        guard let payee = EthereumAddress(uncompressedPublicKey: operatorSigner.publicKey),
-              let rpcURL = URL(string: moderatoRPCURL)
-        else { throw SessionConfigError.badOperatorKey }
-        let rpc = try EVMRPC(transport: URLSessionTransport(), url: rpcURL)
-        let gasPrice = try await rpc.gasPrice()
-        let builder = FFITempoTxBuilder(
-            signingKey: keyData,
-            fee: TempoFeeParameters(
-                maxFeePerGas: String(gasPrice * 2),
-                maxPriorityFeePerGas: "0",
-                gasLimit: 2_000_000,
-                feeToken: nil
-            ),
-            nonceProvider: { try await rpc.transactionCount($0) }
-        )
-        return (RPCChannelStateProvider(rpc: rpc, closeTxBuilder: builder), payee)
-    }
-
-    /// Builds the session middleware, or nil if no operator key is configured (proof-only).
-    private func makeSessionMiddleware() async throws -> MPPServerMiddleware? {
-        guard let (provider, payee) = try await makeSessionProvider() else { return nil }
-        let sessionMethod = SessionMethod(
-            provider: provider, store: InMemoryChannelStore(), defaultChainID: chainId
-        )
-        let signer = ChallengeSigner(secret: secret)
-        let binding = try RouteBinding(
-            realm: "127.0.0.1", method: MethodName("tempo"), intent: .session
-        )
-        // The session 402 the mppx client opens against: amount + payee (our operator) +
-        // currency + a top-level suggestedDeposit + methodDetails.{chainId, escrowContract}.
-        let request = EncodedJSON(json: .object([
-            "amount": .string("1"),
-            "recipient": .string(payee.checksummed),
-            "currency": .string(sessionTokenHex),
-            "suggestedDeposit": .string("1000"),
-            "methodDetails": .object([
-                "chainId": .integer(Int64(chainId)),
-                "escrowContract": .string(sessionEscrowHex),
-            ]),
-        ]))
-        return MPPServerMiddleware(
-            minter: ChallengeMinter(signer: signer),
-            // A normal one-time replay store is fine: SessionMethod.reusesChallenge tells the
-            // verifier not to consume the challenge id (the channel cumulative is the
-            // anti-replay), so the same challenge serves open, vouchers, and close.
-            verifier: PaymentVerifier(
-                signer: signer, replayStore: InMemoryReplayStore(), methods: [sessionMethod]
-            ),
-            binding: binding,
-            request: request
-        ) { event in
-            switch event {
-            case let .challengeIssued(challenge):
-                log("[server] issued 402 (session) id=\(challenge.id)")
-            case let .paymentVerified(verified):
-                log("[server] VERIFIED (session) source=\(verified.credential.source ?? "nil")")
-            case let .paymentRejected(rejection):
-                log("[server] rejected (session) \(rejection)")
-            }
-        }
-    }
-#endif
-
 /// Logs what the server received on a request: the method/path, and (when a
 /// credential is present) the decoded challenge id, source DID, and proof payload.
 private func logIncoming(_ request: HTTPRequest) {
@@ -279,6 +195,12 @@ enum ConformanceServer {
                     gate: sessionGate, handler: paidBody
                 )
                 register(sessionResponder, on: router, path: "session")
+            }
+            if let liveSubscriptionGate = try await makeSubscriptionLiveMiddleware() {
+                let responder = GatedResponder<BasicRequestContext>(
+                    gate: liveSubscriptionGate, handler: paidBody
+                )
+                register(responder, on: router, path: "subscription-live")
             }
         #endif
 

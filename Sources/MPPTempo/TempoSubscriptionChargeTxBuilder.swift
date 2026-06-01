@@ -31,6 +31,13 @@ public struct TempoSubscriptionChargeParameters: Sendable {
     /// The serialized signed `TempoKeyAuthorization` to attach on the provisioning charge
     /// (it adds the access key to the on-chain keychain), or `nil` on later charges.
     public let keyAuthorization: Data?
+    /// The 32-byte secp256k1 private key of an optional fee payer (gas sponsor). When set, that
+    /// account signs the transaction's `fee_payer_signature` and pays gas, so the access key's
+    /// spending limit only has to cover the transfer itself, not the gas (which the chain meters
+    /// in the fee token and would otherwise deduct from the same per-period limit). `nil` lets
+    /// the payer (root) account pay its own gas. Like `accessKeyPrivateKey`, this is secret key
+    /// material and must never be logged.
+    public let feePayerPrivateKey: Data?
 
     /// Creates the charge inputs.
     public init(
@@ -40,7 +47,8 @@ public struct TempoSubscriptionChargeParameters: Sendable {
         recipient: EthereumAddress,
         amount: String,
         memo: Data,
-        keyAuthorization: Data?
+        keyAuthorization: Data?,
+        feePayerPrivateKey: Data? = nil
     ) {
         self.accessKeyPrivateKey = accessKeyPrivateKey
         self.payer = payer
@@ -49,6 +57,7 @@ public struct TempoSubscriptionChargeParameters: Sendable {
         self.amount = amount
         self.memo = memo
         self.keyAuthorization = keyAuthorization
+        self.feePayerPrivateKey = feePayerPrivateKey
     }
 }
 

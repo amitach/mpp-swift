@@ -31,6 +31,7 @@ public struct TempoSubscriptionRenewer: SubscriptionRenewer {
     private let builder: any TempoSubscriptionChargeTxBuilder
     private let accessKeys: any AccessKeyStore
     private let serverId: String
+    private let feePayer: (@Sendable () async -> Data?)?
     private let submit: @Sendable (Data) async throws -> TransactionReceipt
 
     /// Creates the renewer.
@@ -38,17 +39,24 @@ public struct TempoSubscriptionRenewer: SubscriptionRenewer {
     ///   - builder: builds + signs the `transferWithMemo` charge transaction.
     ///   - accessKeys: supplies the access-key private key per `lookupKey`.
     ///   - serverId: the server identity baked into the attribution memo.
+    ///   - feePayer: an optional gas-sponsor key provider. When it returns a key, that account
+    ///     signs the transaction's fee-payer signature and pays gas, so the access key's per-period
+    ///     spending limit only has to cover the transfer (the chain meters gas in the fee token and
+    ///     would otherwise draw it from that same limit). Defaults to `nil`: the payer (root)
+    ///     account pays its own gas. The returned bytes are secret key material and never logged.
     ///   - submit: broadcasts the signed tx and returns its receipt (typically
     ///     `{ try await rpc.sendRawTransactionSync($0) }`).
     public init(
         builder: any TempoSubscriptionChargeTxBuilder,
         accessKeys: any AccessKeyStore,
         serverId: String,
+        feePayer: (@Sendable () async -> Data?)? = nil,
         submit: @escaping @Sendable (Data) async throws -> TransactionReceipt
     ) {
         self.builder = builder
         self.accessKeys = accessKeys
         self.serverId = serverId
+        self.feePayer = feePayer
         self.submit = submit
     }
 
@@ -74,6 +82,11 @@ public struct TempoSubscriptionRenewer: SubscriptionRenewer {
         // omit it (already provisioned). lastChargedPeriod == nil means nothing has been charged
         // yet.
         let keyAuthorization = record.lastChargedPeriod == nil ? record.keyAuthorization : nil
+        let feePayerPrivateKey: Data? = if let feePayer {
+            await feePayer()
+        } else {
+            nil
+        }
         let parameters = TempoSubscriptionChargeParameters(
             accessKeyPrivateKey: accessKeyPrivateKey,
             payer: record.payer,
@@ -81,7 +94,8 @@ public struct TempoSubscriptionRenewer: SubscriptionRenewer {
             recipient: record.recipient,
             amount: record.amount.rawValue,
             memo: Attribution.encode(serverId: serverId, challengeId: idempotencyReference),
-            keyAuthorization: keyAuthorization
+            keyAuthorization: keyAuthorization,
+            feePayerPrivateKey: feePayerPrivateKey
         )
         let raw = try await builder.buildSubscriptionChargeTransaction(
             parameters, chainID: record.chainID

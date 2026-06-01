@@ -255,7 +255,7 @@ RustBuffer uniffi_tempo_tx_ffi_fn_func_build_open_transaction(uint64_t chain_id,
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_FN_FUNC_BUILD_SUBSCRIPTION_CHARGE_TRANSACTION
 #define UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_FN_FUNC_BUILD_SUBSCRIPTION_CHARGE_TRANSACTION
-RustBuffer uniffi_tempo_tx_ffi_fn_func_build_subscription_charge_transaction(uint64_t chain_id, uint64_t nonce, RustBuffer max_fee_per_gas, RustBuffer max_priority_fee_per_gas, uint64_t gas_limit, RustBuffer fee_token, RustBuffer private_key, RustBuffer root_address, RustBuffer currency, RustBuffer recipient, RustBuffer amount, RustBuffer memo, RustBuffer key_authorization, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_tempo_tx_ffi_fn_func_build_subscription_charge_transaction(uint64_t chain_id, uint64_t nonce, RustBuffer max_fee_per_gas, RustBuffer max_priority_fee_per_gas, uint64_t gas_limit, RustBuffer fee_token, RustBuffer private_key, RustBuffer root_address, RustBuffer currency, RustBuffer recipient, RustBuffer amount, RustBuffer memo, RustBuffer key_authorization, RustBuffer fee_payer_private_key, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_FN_FUNC_BUILD_TOP_UP_TRANSACTION
