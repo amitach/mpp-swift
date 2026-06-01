@@ -71,11 +71,14 @@
             guard approved else { throw PaymentDenied.declined }
         }
 
-        /// The default prompt text: a short summary of the amount, currency, and payee.
+        /// The default prompt text: a short summary of the amount, currency, and payee. The
+        /// server-controlled currency and payee are sanitized of control characters (defense in
+        /// depth; a system auth dialog does not interpret terminal escapes, but a malicious field
+        /// should not reach the prompt raw).
         public static func defaultReason(_ request: PaymentApprovalRequest) -> String {
             let amount = request.amount?.rawValue ?? "a payment"
-            let currency = request.currency.map { " \($0)" } ?? ""
-            let payee = request.recipient ?? request.realm
+            let currency = request.currency.map { " \(displaySafe($0))" } ?? ""
+            let payee = displaySafe(request.recipient ?? request.realm)
             return "Approve \(amount)\(currency) to \(payee)"
         }
     }

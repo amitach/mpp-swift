@@ -92,6 +92,13 @@ public struct PaymentApprovalRequest: Sendable, Hashable {
 /// The default ``AllowAllAuthorizer`` approves every spend, preserving the
 /// behavior of a client constructed without one; supply a real authorizer
 /// (a spending cap, a user prompt) whenever real funds are at stake.
+///
+/// - Important: one authorizer may be shared across concurrent payments, so
+///   ``authorize(_:)`` can be invoked concurrently. A stateful authorizer (for
+///   example one enforcing a running budget) MUST make its check-and-commit
+///   atomic; otherwise two in-flight payments can both pass a budget check before
+///   either is recorded and overspend (a time-of-check/time-of-use race). The
+///   built-in authorizers are stateless and so are inherently safe.
 public protocol PaymentAuthorizer: Sendable {
     /// Approves `request`, or throws to deny it (no credential is then built).
     func authorize(_ request: PaymentApprovalRequest) async throws

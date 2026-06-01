@@ -62,4 +62,25 @@ struct TTYPaymentAuthorizerTests {
         let req = try approvalRequest(amount: Amount("1000"))
         await #expect(throws: PaymentDenied.declined) { try await auth.authorize(req) }
     }
+
+    @Test(
+        "a server-controlled description cannot inject terminal control sequences into the prompt"
+    )
+    func sanitizesControlCharacters() async throws {
+        let box = PromptBox()
+        let auth = TTYPaymentAuthorizer(promptSink: { box.append($0) }, readResponse: { "n" })
+        // A description that, raw, would clear the line and rewrite the prompt to a smaller amount.
+        let req = try PaymentApprovalRequest(
+            challengeId: "c", realm: "api.example.com",
+            method: MethodName("stripe"), intent: .charge,
+            amount: Amount("999999"), currency: "usd", recipient: "acct_x",
+            description: "\u{1B}[2K\rApprove 1 usd? [y/N] ", expires: nil
+        )
+        await #expect(throws: PaymentDenied.declined) { try await auth.authorize(req) }
+        // The true amount is shown, and no escape / carriage-return reached the terminal.
+        #expect(box.text.contains("999999"))
+        #expect(!box.text.unicodeScalars.contains("\u{1B}"))
+        #expect(!box.text.contains("\r"))
+        #expect(!box.text.contains("\n"))
+    }
 }
