@@ -10,6 +10,15 @@ public struct StripeConnectContext: Sendable {
     public let realm: String
     public let request: StripeChargeRequest
     public let source: String?
+
+    /// Public so a consumer can construct one to unit-test its own ``StripeConnect`` resolver in
+    /// isolation (the verifier builds it during a charge).
+    public init(challengeID: String, realm: String, request: StripeChargeRequest, source: String?) {
+        self.challengeID = challengeID
+        self.realm = realm
+        self.request = request
+        self.source = source
+    }
 }
 
 /// The server's Connect-settlement policy: a fixed settlement, or a resolver that decides per
