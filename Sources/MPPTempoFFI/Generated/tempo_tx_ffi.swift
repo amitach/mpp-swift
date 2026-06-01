@@ -666,7 +666,7 @@ public func buildOpenTransaction(chainId: UInt64, nonce: UInt64, maxFeePerGas: S
  * bytes; `key_authorization` is the serialized signed authorization on the provisioning
  * charge, or `None` once the access key is provisioned.
  */
-public func buildSubscriptionChargeTransaction(chainId: UInt64, nonce: UInt64, maxFeePerGas: String, maxPriorityFeePerGas: String, gasLimit: UInt64, feeToken: Data?, privateKey: Data, currency: Data, recipient: Data, amount: String, memo: Data, keyAuthorization: Data?)throws  -> Data  {
+public func buildSubscriptionChargeTransaction(chainId: UInt64, nonce: UInt64, maxFeePerGas: String, maxPriorityFeePerGas: String, gasLimit: UInt64, feeToken: Data?, privateKey: Data, rootAddress: Data, currency: Data, recipient: Data, amount: String, memo: Data, keyAuthorization: Data?)throws  -> Data  {
     return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
     uniffi_tempo_tx_ffi_fn_func_build_subscription_charge_transaction(
         FfiConverterUInt64.lower(chainId),
@@ -676,6 +676,7 @@ public func buildSubscriptionChargeTransaction(chainId: UInt64, nonce: UInt64, m
         FfiConverterUInt64.lower(gasLimit),
         FfiConverterOptionData.lower(feeToken),
         FfiConverterData.lower(privateKey),
+        FfiConverterData.lower(rootAddress),
         FfiConverterData.lower(currency),
         FfiConverterData.lower(recipient),
         FfiConverterString.lower(amount),
@@ -728,7 +729,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tempo_tx_ffi_checksum_func_build_open_transaction() != 13165) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tempo_tx_ffi_checksum_func_build_subscription_charge_transaction() != 16146) {
+    if (uniffi_tempo_tx_ffi_checksum_func_build_subscription_charge_transaction() != 20486) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tempo_tx_ffi_checksum_func_build_top_up_transaction() != 53419) {

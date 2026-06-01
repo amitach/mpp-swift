@@ -17,6 +17,7 @@ use alloy_primitives::{Address, Bytes, FixedBytes, Signature, TxKind, U256};
 use alloy_sol_types::{sol, SolCall};
 use k256::ecdsa::SigningKey;
 use tempo_primitives::transaction::key_authorization::{KeyAuthorization, SignedKeyAuthorization};
+use tempo_primitives::transaction::tt_signature::KeychainSignature;
 use tempo_primitives::transaction::{Call, PrimitiveSignature};
 use tempo_primitives::{TempoSignature, TempoTransaction};
 use zeroize::{Zeroize, Zeroizing};
@@ -68,6 +69,7 @@ fn build_signed_tx(
     mut private_key: [u8; 32],
     calls: Vec<Call>,
     key_authorization: Option<SignedKeyAuthorization>,
+    keychain_user_address: Option<Address>,
 ) -> Result<Vec<u8>, BuildError> {
     let tx = TempoTransaction {
         chain_id,
@@ -88,16 +90,30 @@ fn build_signed_tx(
     let signing_key_result = SigningKey::from_bytes((&private_key).into());
     private_key.zeroize();
     let signing_key = signing_key_result.map_err(|_| BuildError::InvalidKey)?;
+    // A keychain (access-key) signature signs `keccak256(0x04 || sig_hash || user_address)` (V2),
+    // so the chain executes the tx for `user_address` (the root) on behalf of the signing access
+    // key; a plain signature signs the tx hash directly.
+    let effective_hash = match keychain_user_address {
+        Some(user_address) => KeychainSignature::signing_hash(hash, user_address),
+        None => hash,
+    };
     let (sig, recid) = signing_key
-        .sign_prehash_recoverable(hash.as_slice())
+        .sign_prehash_recoverable(effective_hash.as_slice())
         .map_err(|_| BuildError::SigningFailed)?;
     let alloy_sig = Signature::new(
         U256::from_be_slice(&sig.r().to_bytes()),
         U256::from_be_slice(&sig.s().to_bytes()),
         recid.is_y_odd(),
     );
+    let tempo_sig = match keychain_user_address {
+        Some(user_address) => TempoSignature::Keychain(KeychainSignature::new(
+            user_address,
+            PrimitiveSignature::Secp256k1(alloy_sig),
+        )),
+        None => TempoSignature::from(alloy_sig),
+    };
 
-    let signed = tx.into_signed(TempoSignature::from(alloy_sig));
+    let signed = tx.into_signed(tempo_sig);
     let mut out = Vec::new();
     signed.eip2718_encode(&mut out);
     Ok(out)
@@ -138,6 +154,7 @@ pub fn build_close_tx(
         fee_token,
         private_key,
         vec![call(escrow, close)],
+        None,
         None,
     );
     private_key.zeroize();
@@ -187,6 +204,7 @@ pub fn build_open_tx(
         private_key,
         vec![call(token, approve), call(escrow, open)],
         None,
+        None,
     );
     private_key.zeroize();
     result
@@ -229,6 +247,7 @@ pub fn build_top_up_tx(
         private_key,
         vec![call(token, approve), call(escrow, top_up)],
         None,
+        None,
     );
     private_key.zeroize();
     result
@@ -236,10 +255,12 @@ pub fn build_top_up_tx(
 
 /// Builds the signed `0x76` transaction for a recurring subscription charge: a single
 /// call to `currency.transferWithMemo(recipient, amount, memo)`, signed by the access
-/// key the subscription delegated. When `key_authorization` is present (the first,
-/// provisioning charge) it is attached so the chain adds the access key to the
-/// AccountKeychain precompile before verifying this tx's signature; later charges pass
-/// `None` (the key is already provisioned). `amount` is a `uint256`.
+/// key the subscription delegated as a **keychain (V2) signature** for `root_address` (the
+/// payer), so the chain executes the transfer for the payer on behalf of the access key.
+/// When `key_authorization` is present (the first, provisioning charge) it is attached so
+/// the chain registers the access key in the AccountKeychain precompile before verifying
+/// this tx's keychain signature; later charges pass `None` (the key is already provisioned).
+/// `amount` is a `uint256`.
 #[allow(clippy::too_many_arguments)]
 pub fn build_subscription_charge_tx(
     chain_id: u64,
@@ -249,6 +270,7 @@ pub fn build_subscription_charge_tx(
     gas_limit: u64,
     fee_token: Option<Address>,
     mut private_key: [u8; 32],
+    root_address: Address,
     currency: Address,
     recipient: Address,
     amount: U256,
@@ -271,6 +293,7 @@ pub fn build_subscription_charge_tx(
         private_key,
         vec![call(currency, transfer)],
         key_authorization,
+        Some(root_address),
     );
     private_key.zeroize();
     result
@@ -527,6 +550,7 @@ pub fn build_subscription_charge_transaction(
     gas_limit: u64,
     fee_token: Option<Vec<u8>>,
     private_key: Vec<u8>,
+    root_address: Vec<u8>,
     currency: Vec<u8>,
     recipient: Vec<u8>,
     amount: String,
@@ -543,6 +567,7 @@ pub fn build_subscription_charge_transaction(
         gas_limit,
         parse_optional_address("fee_token", fee_token)?,
         *key,
+        parse_address("root_address", &root_address)?,
         parse_address("currency", &currency)?,
         parse_address("recipient", &recipient)?,
         parse_u256("amount", &amount)?,
@@ -872,6 +897,7 @@ mod tests {
     fn subscription_charge_attaches_key_authorization() {
         use alloy_primitives::{address, U256};
         let access_key = [0x02u8; 32];
+        let root = address!("7e5f4552091a69125d5dfcb7b8c2659029395bdf");
         let currency = address!("20c0000000000000000000000000000000000001");
         let recipient = address!("1111111111111111111111111111111111111111");
         let memo = [0xabu8; 32];
@@ -885,6 +911,7 @@ mod tests {
                 100_000,
                 None,
                 access_key,
+                root,
                 currency,
                 recipient,
                 U256::from(1_000_000u64),
@@ -908,5 +935,5 @@ mod tests {
         assert_eq!(hex, GOLDEN_SUBSCRIPTION_CHARGE_TX);
     }
 
-    const GOLDEN_SUBSCRIPTION_CHARGE_TX: &str = "76f8db82a5bf830f4240843b9aca00830186a0f87ef87c9420c000000000000000000000000000000000000180b86495777d59000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000f4240ababababababababababababababababababababababababababababababababc0800780808080c0b841a4e841b650d9eb291850174d5038c4b2488414a8aa0da30acb002b76bd4318a96dd2920e6a9b74346aabc1ccb47292323160741ba1678bdc661aba90be3f0bfd1c";
+    const GOLDEN_SUBSCRIPTION_CHARGE_TX: &str = "76f8f082a5bf830f4240843b9aca00830186a0f87ef87c9420c000000000000000000000000000000000000180b86495777d59000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000f4240ababababababababababababababababababababababababababababababababc0800780808080c0b856047e5f4552091a69125d5dfcb7b8c2659029395bdf34b62d4b8e525ea50f6941cd3e0b13750c90eb7098290614fe734921ead18c4c471151d237efd57add8ead8e52534aa2f968307173523013f281b0236d3056e81b";
 }

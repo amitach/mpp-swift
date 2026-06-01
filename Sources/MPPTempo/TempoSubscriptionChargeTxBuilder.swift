@@ -15,8 +15,11 @@ import MPPEVM
 ///   the caller (which holds it in its access-key store) and must never be logged.
 public struct TempoSubscriptionChargeParameters: Sendable {
     /// The 32-byte secp256k1 private key of the access key the subscription delegated; it
-    /// signs (and pays gas for) the charge transaction.
+    /// produces the keychain signature on the charge transaction.
     public let accessKeyPrivateKey: Data
+    /// The payer (root) account the charge executes for: the keychain signature carries it as
+    /// the `user_address`, so the chain moves the payer's funds on behalf of the access key.
+    public let payer: EthereumAddress
     /// The TIP-20 token the recurring transfer moves.
     public let currency: EthereumAddress
     /// The payee the recurring transfer is scoped to.
@@ -32,6 +35,7 @@ public struct TempoSubscriptionChargeParameters: Sendable {
     /// Creates the charge inputs.
     public init(
         accessKeyPrivateKey: Data,
+        payer: EthereumAddress,
         currency: EthereumAddress,
         recipient: EthereumAddress,
         amount: String,
@@ -39,6 +43,7 @@ public struct TempoSubscriptionChargeParameters: Sendable {
         keyAuthorization: Data?
     ) {
         self.accessKeyPrivateKey = accessKeyPrivateKey
+        self.payer = payer
         self.currency = currency
         self.recipient = recipient
         self.amount = amount

@@ -9,9 +9,10 @@ import MPPTempo
 /// Unlike ``FFITempoTxBuilder`` (which holds one channel-payer key), the signing key here
 /// is the *access key*, which differs per subscription and arrives per charge in
 /// ``TempoSubscriptionChargeParameters``. So this builder holds only the shared
-/// infrastructure: the fee parameters and a `nonceProvider` that returns the access key's
-/// next nonce. The access key's private-key bytes cross the FFI, which zeroizes its own
-/// copy on every path (see the Rust crate).
+/// infrastructure: the fee parameters and a `nonceProvider` that returns the next nonce for
+/// the **payer (root) account** the charge executes for (the access key only produces the
+/// keychain signature). The access key's private-key bytes cross the FFI, which zeroizes its
+/// own copy on every path (see the Rust crate).
 public struct FFISubscriptionChargeTxBuilder: TempoSubscriptionChargeTxBuilder {
     private let fee: TempoFeeParameters
     private let nonceProvider: @Sendable (EthereumAddress) async throws -> UInt64
@@ -19,8 +20,9 @@ public struct FFISubscriptionChargeTxBuilder: TempoSubscriptionChargeTxBuilder {
     /// Creates the builder.
     /// - Parameters:
     ///   - fee: the gas/fee parameters the charge transaction carries.
-    ///   - nonceProvider: returns the next nonce for the access-key address (derived from
-    ///     the per-charge key); typically reads `eth_getTransactionCount(..., "pending")`.
+    ///   - nonceProvider: returns the next nonce for the payer (root) account the charge
+    ///     executes for (handed `parameters.payer`); typically reads
+    ///     `eth_getTransactionCount(..., "pending")`.
     public init(
         fee: TempoFeeParameters,
         nonceProvider: @escaping @Sendable (EthereumAddress) async throws -> UInt64
@@ -33,7 +35,9 @@ public struct FFISubscriptionChargeTxBuilder: TempoSubscriptionChargeTxBuilder {
         _ parameters: TempoSubscriptionChargeParameters,
         chainID: UInt64
     ) async throws -> Data {
-        let nonce = try await nonceProvider(accessKeyAddress(parameters.accessKeyPrivateKey))
+        // The charge executes for the payer (root) account, so its nonce is the payer's, not the
+        // access key's (the access key only signs the keychain signature).
+        let nonce = try await nonceProvider(parameters.payer)
         do {
             return try MPPTempoFFI.buildSubscriptionChargeTransaction(
                 chainId: chainID,
@@ -43,6 +47,7 @@ public struct FFISubscriptionChargeTxBuilder: TempoSubscriptionChargeTxBuilder {
                 gasLimit: fee.gasLimit,
                 feeToken: fee.feeToken?.bytes,
                 privateKey: parameters.accessKeyPrivateKey,
+                rootAddress: parameters.payer.bytes,
                 currency: parameters.currency.bytes,
                 recipient: parameters.recipient.bytes,
                 amount: parameters.amount,
@@ -52,19 +57,5 @@ public struct FFISubscriptionChargeTxBuilder: TempoSubscriptionChargeTxBuilder {
         } catch let error as FfiError {
             throw FFITempoTxBuilder.map(error)
         }
-    }
-
-    /// The access-key address derived from its private key, for the nonce lookup.
-    private func accessKeyAddress(_ privateKey: Data) throws(FFITempoTxError) -> EthereumAddress {
-        let signer: Secp256k1Signer
-        do {
-            signer = try Secp256k1Signer(privateKey: privateKey)
-        } catch {
-            throw FFITempoTxError.invalidSigningKey
-        }
-        guard let address = EthereumAddress(uncompressedPublicKey: signer.publicKey) else {
-            throw FFITempoTxError.senderAddressDerivationFailed
-        }
-        return address
     }
 }
