@@ -112,8 +112,9 @@ struct ModeratoSubscriptionE2ETests {
             gasLimit: 6_000_000,
             feeToken: nil,
         )
-        let builder = FFISubscriptionChargeTxBuilder(fee: fee) { _ in
-            try await rpc.transactionCount(payer.address)
+        // The builder hands the nonce provider the payer (root) account the charge executes for.
+        let builder = FFISubscriptionChargeTxBuilder(fee: fee) { account in
+            try await rpc.transactionCount(account)
         }
         let renewer = TempoSubscriptionRenewer(
             builder: builder, accessKeys: accessKeys, serverId: "e2e",

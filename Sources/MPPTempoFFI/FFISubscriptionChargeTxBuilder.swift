@@ -9,9 +9,10 @@ import MPPTempo
 /// Unlike ``FFITempoTxBuilder`` (which holds one channel-payer key), the signing key here
 /// is the *access key*, which differs per subscription and arrives per charge in
 /// ``TempoSubscriptionChargeParameters``. So this builder holds only the shared
-/// infrastructure: the fee parameters and a `nonceProvider` that returns the access key's
-/// next nonce. The access key's private-key bytes cross the FFI, which zeroizes its own
-/// copy on every path (see the Rust crate).
+/// infrastructure: the fee parameters and a `nonceProvider` that returns the next nonce for
+/// the **payer (root) account** the charge executes for (the access key only produces the
+/// keychain signature). The access key's private-key bytes cross the FFI, which zeroizes its
+/// own copy on every path (see the Rust crate).
 public struct FFISubscriptionChargeTxBuilder: TempoSubscriptionChargeTxBuilder {
     private let fee: TempoFeeParameters
     private let nonceProvider: @Sendable (EthereumAddress) async throws -> UInt64
@@ -19,8 +20,9 @@ public struct FFISubscriptionChargeTxBuilder: TempoSubscriptionChargeTxBuilder {
     /// Creates the builder.
     /// - Parameters:
     ///   - fee: the gas/fee parameters the charge transaction carries.
-    ///   - nonceProvider: returns the next nonce for the access-key address (derived from
-    ///     the per-charge key); typically reads `eth_getTransactionCount(..., "pending")`.
+    ///   - nonceProvider: returns the next nonce for the payer (root) account the charge
+    ///     executes for (handed `parameters.payer`); typically reads
+    ///     `eth_getTransactionCount(..., "pending")`.
     public init(
         fee: TempoFeeParameters,
         nonceProvider: @escaping @Sendable (EthereumAddress) async throws -> UInt64
