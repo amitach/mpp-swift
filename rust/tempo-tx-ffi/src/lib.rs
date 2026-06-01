@@ -17,6 +17,7 @@ use alloy_primitives::{Address, Bytes, FixedBytes, Signature, TxKind, U256};
 use alloy_sol_types::{sol, SolCall};
 use k256::ecdsa::SigningKey;
 use tempo_primitives::transaction::key_authorization::{KeyAuthorization, SignedKeyAuthorization};
+use tempo_primitives::transaction::tempo_transaction::FEE_PAYER_SIGNATURE_MARKER;
 use tempo_primitives::transaction::tt_signature::KeychainSignature;
 use tempo_primitives::transaction::{Call, PrimitiveSignature};
 use tempo_primitives::{TempoSignature, TempoTransaction};
@@ -70,8 +71,14 @@ fn build_signed_tx(
     calls: Vec<Call>,
     key_authorization: Option<SignedKeyAuthorization>,
     keychain_user_address: Option<Address>,
+    mut fee_payer_key: Option<[u8; 32]>,
 ) -> Result<Vec<u8>, BuildError> {
-    let tx = TempoTransaction {
+    // A sponsored tx carries a fee-payer signature: the fee payer (not the sender) pays gas, so
+    // gas is NOT drawn from the access key's spending limit. While the sender signs, the field
+    // holds a marker (so the sender's hash uses the placeholder + skips committing to the fee
+    // token); the real fee-payer signature replaces it below.
+    let sponsored = fee_payer_key.is_some() && keychain_user_address.is_some();
+    let mut tx = TempoTransaction {
         chain_id,
         fee_token,
         max_priority_fee_per_gas,
@@ -83,6 +90,7 @@ fn build_signed_tx(
         // Present only for the provisioning charge: adds the access key to the
         // AccountKeychain precompile before the tx signature is verified.
         key_authorization,
+        fee_payer_signature: sponsored.then_some(FEE_PAYER_SIGNATURE_MARKER),
         ..Default::default()
     };
 
@@ -112,6 +120,23 @@ fn build_signed_tx(
         )),
         None => TempoSignature::from(alloy_sig),
     };
+
+    // The fee payer signs `fee_payer_signature_hash(sender)`, where `sender` is the account the tx
+    // executes for (the keychain root). This commits the sponsor to the fee token and pays the gas.
+    if let (Some(mut key), Some(sender)) = (fee_payer_key.take(), keychain_user_address) {
+        let fee_payer_hash = tx.fee_payer_signature_hash(sender);
+        let fee_payer_key_result = SigningKey::from_bytes((&key).into());
+        key.zeroize();
+        let fee_payer_signing_key = fee_payer_key_result.map_err(|_| BuildError::InvalidKey)?;
+        let (fee_sig, fee_recid) = fee_payer_signing_key
+            .sign_prehash_recoverable(fee_payer_hash.as_slice())
+            .map_err(|_| BuildError::SigningFailed)?;
+        tx.fee_payer_signature = Some(Signature::new(
+            U256::from_be_slice(&fee_sig.r().to_bytes()),
+            U256::from_be_slice(&fee_sig.s().to_bytes()),
+            fee_recid.is_y_odd(),
+        ));
+    }
 
     let signed = tx.into_signed(tempo_sig);
     let mut out = Vec::new();
@@ -154,6 +179,7 @@ pub fn build_close_tx(
         fee_token,
         private_key,
         vec![call(escrow, close)],
+        None,
         None,
         None,
     );
@@ -205,6 +231,7 @@ pub fn build_open_tx(
         vec![call(token, approve), call(escrow, open)],
         None,
         None,
+        None,
     );
     private_key.zeroize();
     result
@@ -248,6 +275,7 @@ pub fn build_top_up_tx(
         vec![call(token, approve), call(escrow, top_up)],
         None,
         None,
+        None,
     );
     private_key.zeroize();
     result
@@ -276,6 +304,7 @@ pub fn build_subscription_charge_tx(
     amount: U256,
     memo: [u8; 32],
     key_authorization: Option<SignedKeyAuthorization>,
+    fee_payer_key: Option<[u8; 32]>,
 ) -> Result<Vec<u8>, BuildError> {
     let transfer = transferWithMemoCall {
         recipient,
@@ -294,6 +323,7 @@ pub fn build_subscription_charge_tx(
         vec![call(currency, transfer)],
         key_authorization,
         Some(root_address),
+        fee_payer_key,
     );
     private_key.zeroize();
     result
@@ -556,9 +586,16 @@ pub fn build_subscription_charge_transaction(
     amount: String,
     memo: Vec<u8>,
     key_authorization: Option<Vec<u8>>,
+    fee_payer_private_key: Option<Vec<u8>>,
 ) -> Result<Vec<u8>, FfiError> {
     let key = take_key(private_key)?;
     let authorization = decode_optional_key_authorization(key_authorization)?;
+    // The optional sponsor key: when present, gas is paid by the fee payer (not drawn from the
+    // access key's spending limit).
+    let fee_payer = match fee_payer_private_key {
+        Some(bytes) => Some(*take_key(bytes)?),
+        None => None,
+    };
     build_subscription_charge_tx(
         chain_id,
         nonce,
@@ -573,6 +610,7 @@ pub fn build_subscription_charge_transaction(
         parse_u256("amount", &amount)?,
         parse_bytes32("memo", memo)?,
         authorization,
+        fee_payer,
     )
     .map_err(map_build_error)
 }
@@ -917,6 +955,7 @@ mod tests {
                 U256::from(1_000_000u64),
                 memo,
                 auth,
+                None,
             )
             .expect("builds")
         };

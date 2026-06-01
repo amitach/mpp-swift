@@ -52,7 +52,8 @@ public struct FFISubscriptionChargeTxBuilder: TempoSubscriptionChargeTxBuilder {
                 recipient: parameters.recipient.bytes,
                 amount: parameters.amount,
                 memo: parameters.memo,
-                keyAuthorization: parameters.keyAuthorization
+                keyAuthorization: parameters.keyAuthorization,
+                feePayerPrivateKey: parameters.feePayerPrivateKey
             )
         } catch let error as FfiError {
             throw FFITempoTxBuilder.map(error)
