@@ -17,6 +17,16 @@ import MPPTempo
 /// authorization so the chain provisions the access key into its keychain; later charges omit it
 /// (the key is already provisioned). This matches the activation model where the verifier does not
 /// settle period 0, so the renewal engine's first charge is the provisioning one.
+///
+/// **Exactly-once** is the engine's, not this renewer's: ``SubscriptionEngine`` claims a period
+/// before calling `charge` and commits after, so concurrent renewers cannot both charge a period.
+/// This renewer does not itself dedupe before submitting; `idempotencyReference` is stable per
+/// `(subscription, period)` and is seeded into the attribution memo, so it is the reconciliation
+/// key
+/// for the rare crash between a successful submit and the engine's commit. An automatic pre-submit
+/// on-chain lookup (return the existing charge instead of re-sending) is a deliberate non-goal
+/// here:
+/// it would be a separate memo-lookup seam, not part of the charge path.
 public struct TempoSubscriptionRenewer: SubscriptionRenewer {
     private let builder: any TempoSubscriptionChargeTxBuilder
     private let accessKeys: any AccessKeyStore
