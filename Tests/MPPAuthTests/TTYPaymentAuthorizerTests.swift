@@ -83,4 +83,20 @@ struct TTYPaymentAuthorizerTests {
         #expect(!box.text.contains("\r"))
         #expect(!box.text.contains("\n"))
     }
+
+    @Test("an over-long server-controlled payee is length-bounded, not allowed to flood the prompt")
+    func boundsLongPayee() async throws {
+        let box = PromptBox()
+        let auth = TTYPaymentAuthorizer(promptSink: { box.append($0) }, readResponse: { "n" })
+        let req = try PaymentApprovalRequest(
+            challengeId: "c", realm: "api.example.com",
+            method: MethodName("stripe"), intent: .charge,
+            amount: Amount("1000"), currency: "usd",
+            recipient: String(repeating: "A", count: 5000), description: nil, expires: nil
+        )
+        await #expect(throws: PaymentDenied.declined) { try await auth.authorize(req) }
+        // The 5000-char payee is truncated (with an ellipsis), so the whole prompt stays bounded.
+        #expect(box.text.contains("\u{2026}"))
+        #expect(box.text.count < 400)
+    }
 }

@@ -16,7 +16,11 @@ public struct TTYPaymentAuthorizer: PaymentAuthorizer {
 
     /// - Parameters:
     ///   - promptSink: writes the confirmation prompt; defaults to standard error.
-    ///   - readResponse: reads one line of the operator's answer; defaults to standard input.
+    ///   - readResponse: reads one line of the operator's answer; defaults to standard input. The
+    ///     default uses a synchronous `readLine`, which blocks the calling thread until the
+    /// operator
+    ///     answers - fine for an interactive CLI (one prompt at a time); inject a non-blocking
+    ///     reader for a concurrent or server context.
     public init(
         promptSink: @escaping @Sendable (String) -> Void = { message in
             FileHandle.standardError.write(Data(message.utf8))
@@ -39,11 +43,11 @@ public struct TTYPaymentAuthorizer: PaymentAuthorizer {
     private static func prompt(for request: PaymentApprovalRequest) -> String {
         // The amount is a validated digits-only `Amount`, safe as-is. The currency, payee, and
         // description are server-controlled, so they are sanitized of terminal control characters
-        // before display (and the free-form description is length-bounded) so a crafted challenge
-        // cannot spoof or rewrite this confirmation line.
+        // and length-bounded before display, so a crafted challenge cannot spoof, rewrite, or
+        // flood this confirmation line.
         let amount = request.amount?.rawValue ?? "an unspecified amount"
-        let currency = request.currency.map { " \(displaySafe($0))" } ?? ""
-        let payee = displaySafe(request.recipient ?? request.realm)
+        let currency = request.currency.map { " \(displaySafe($0, maxLength: 120))" } ?? ""
+        let payee = displaySafe(request.recipient ?? request.realm, maxLength: 120)
         let detail = request.description.map { " (\(displaySafe($0, maxLength: 120)))" } ?? ""
         return "Approve payment of \(amount)\(currency) to \(payee)\(detail)? [y/N] "
     }
