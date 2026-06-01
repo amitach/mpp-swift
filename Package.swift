@@ -51,6 +51,7 @@ let package = Package(
         .library(name: "MPPMCP", targets: ["MPPMCP"]),
         .library(name: "MPPProxy", targets: ["MPPProxy"]),
         .library(name: "MPPHummingbird", targets: ["MPPHummingbird"]),
+        .executable(name: "mpp", targets: ["mpp"]),
     ],
     dependencies: [
         // swift-crypto and CryptoSwift (below) do NOT overlap; neither replaces the
@@ -109,6 +110,11 @@ let package = Package(
             url: "https://github.com/hummingbird-project/hummingbird.git",
             "2.25.0" ..< "3.0.0"
         ),
+        // swift-argument-parser: the command-line surface for the shipped `mpp` executable. Apple
+        // first-party with first-class Linux support, so the Linux CI builds it. FLOOR range
+        // (Apple-package pinning policy); reachable only from the `mpp` executable, so no library
+        // consumer pulls it.
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
     ],
     targets: [
         .target(name: "MPPCore"),
@@ -165,6 +171,31 @@ let package = Package(
         .testTarget(
             name: "MPPAuthTests",
             dependencies: ["MPPAuth", "MPPClient", "MPPCore"]
+        ),
+        // mpp: the shipped command-line tool. A thin ArgumentParser front end over the client
+        // libraries (pay a 402 URL today; sign / discover / account / services / --mcp follow). It
+        // links the client rails + MPPAuth (authorizers) but no server/FFI; biometric is guarded
+        // out on Linux via MPPAuth, so the executable builds there too.
+        .executableTarget(
+            name: "mpp",
+            dependencies: [
+                "MPPCore",
+                "MPPClient",
+                "MPPAuth",
+                "MPPEVM",
+                "MPPTempo",
+                "MPPStripe",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+                .product(name: "HTTPTypesFoundation", package: "swift-http-types"),
+            ]
+        ),
+        .testTarget(
+            name: "MPPCLITests",
+            dependencies: [
+                "mpp", "MPPClient", "MPPCore", "MPPEVM", "MPPTempo",
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+            ]
         ),
         // MPPEVM: the EVM message-signing layer (Keccak-256, the secp256k1 recoverable
         // signer, and EIP-712 struct hashing). Kept out of MPPCore/MPPClient so a
