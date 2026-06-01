@@ -1,10 +1,16 @@
-/// Builds the MPP analytics metadata attached to every Stripe PaymentIntent, then merges the
-/// charge's user metadata over it (user keys win on collision, matching the reference SDK; the
-/// `mpp_*` flags are best-effort, not a security boundary).
+/// Builds the metadata attached to every Stripe PaymentIntent: the reference-SDK `mpp_*` analytics
+/// namespace (user-overridable) plus the spec-required `challenge_id` reconciliation key, which is
+/// applied last so user metadata cannot override it.
+///
+/// Per `draft-stripe-charge-00` §9 the PaymentIntent metadata spreads the user metadata first and
+/// assigns `challenge_id` after it (non-overridable). The reference SDK (mppx) instead emits
+/// `mpp_challenge_id` and lets user metadata win; we keep its `mpp_*` namespace as additive
+/// analytics but follow the spec for the authoritative `challenge_id` key and its precedence.
 enum StripeAnalyticsMetadata {
-    /// The analytics keys, in the order the reference SDK emits them. `mpp_client_id` is included
+    /// The reference-SDK `mpp_*` analytics namespace (user-overridable). `mpp_client_id` is
+    /// included
     /// only when a credential `source` is present (Stripe charges carry none, so it is usually
-    /// absent).
+    /// absent). The spec's `challenge_id` is NOT built here; ``merged`` applies it last.
     static func build(
         challengeID: String, realm: String, intent: String, source: String?
     ) -> [String: String] {
@@ -21,11 +27,19 @@ enum StripeAnalyticsMetadata {
         return metadata
     }
 
-    /// Merges `user` metadata over the analytics, with user keys winning on collision.
+    /// Merges `user` metadata over the analytics (user keys win on collision, matching the
+    /// reference
+    /// SDK), then sets the spec-required `challenge_id` **last** so user metadata cannot override
+    /// the
+    /// authoritative reconciliation key (`draft-stripe-charge-00` §9).
     static func merged(
-        analytics: [String: String], user: [String: String]?
+        analytics: [String: String], user: [String: String]?, challengeID: String
     ) -> [String: String] {
-        guard let user else { return analytics }
-        return analytics.merging(user) { _, userValue in userValue }
+        var result = analytics
+        if let user {
+            result.merge(user) { _, userValue in userValue }
+        }
+        result["challenge_id"] = challengeID
+        return result
     }
 }

@@ -25,6 +25,9 @@ struct StripeLiveConformanceTests {
         let request = EncodedJSON(json: .object([
             "amount": .string("1000"),
             "currency": .string("usd"),
+            // A description is forwarded to the PaymentIntent; some Stripe accounts (e.g. an Indian
+            // export account) require one, so the live charge always carries it.
+            "description": .string("MPP Stripe live conformance"),
             "methodDetails": .object([
                 "networkId": .string("internal"),
                 "paymentMethodTypes": .array([.string("card")]),

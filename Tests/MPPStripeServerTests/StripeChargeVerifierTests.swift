@@ -105,18 +105,25 @@ struct StripeChargeVerifierTests {
             "methodDetails": .object([
                 "networkId": .string("internal"),
                 "paymentMethodTypes": .array([.string("card")]),
-                "metadata": .object(["plan": .string("pro"), "mpp_is_mpp": .string("false")]),
+                // A user `challenge_id` MUST NOT override the spec reconciliation key; a user
+                // `mpp_*` key wins (reference-SDK behavior).
+                "metadata": .object([
+                    "plan": .string("pro"),
+                    "mpp_is_mpp": .string("false"),
+                    "challenge_id": .string("forged"),
+                ]),
             ]),
         ]))
         _ = try await verifier.verify(stripeCredential(challenge: challenge), now: now)
         let captured = await stub.captured
         let metadata = try #require(captured?.metadata)
+        #expect(metadata["challenge_id"] == "c1") // spec key, applied last, NOT overridable
         #expect(metadata["mpp_version"] == "1")
         #expect(metadata["mpp_intent"] == "charge")
         #expect(metadata["mpp_challenge_id"] == "c1")
         #expect(metadata["mpp_server_id"] == "https://api.example.com")
         #expect(metadata["plan"] == "pro")
-        #expect(metadata["mpp_is_mpp"] == "false") // user override wins
+        #expect(metadata["mpp_is_mpp"] == "false") // user override wins for the mpp_* namespace
         #expect(metadata["mpp_client_id"] == nil) // no source on a Stripe credential
     }
 
@@ -132,6 +139,23 @@ struct StripeChargeVerifierTests {
         #expect(hex.count == 64) // sha256 hex of the spt
         let allHex = hex.allSatisfy(\.isHexDigit)
         #expect(allHex)
+    }
+
+    @Test("the charge description is forwarded to the PaymentIntent")
+    func descriptionForwarded() async throws {
+        let stub = StubPaymentIntent()
+        let verifier = StripeChargeVerifier(client: stub)
+        let challenge = try stripeChargeChallenge(request: .object([
+            "amount": .string("1000"), "currency": .string("usd"),
+            "description": .string("a coffee"),
+            "methodDetails": .object([
+                "networkId": .string("internal"),
+                "paymentMethodTypes": .array([.string("card")]),
+            ]),
+        ]))
+        _ = try await verifier.verify(stripeCredential(challenge: challenge), now: now)
+        let captured = await stub.captured
+        #expect(captured?.description == "a coffee")
     }
 
     @Test("a valid Connect settlement reaches the PaymentIntent request")

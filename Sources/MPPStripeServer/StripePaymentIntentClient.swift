@@ -91,6 +91,9 @@ public struct StripePaymentIntentClient: StripePaymentIntentCreating {
             ("currency", request.currency),
             (StripeAPI.sharedPaymentTokenField, request.sharedPaymentGrantedToken),
         ]
+        if let description = request.description {
+            pairs.append(("description", description))
+        }
         for (key, value) in request.metadata.sorted(by: { $0.key < $1.key }) {
             pairs.append(("metadata[\(key)]", value))
         }
