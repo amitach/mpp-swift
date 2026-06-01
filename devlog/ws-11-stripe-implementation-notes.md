@@ -108,9 +108,26 @@ mppx `Charge.integration.test.ts`:
 mppx `proxy/services/stripe.test.ts` -> N/A here: an MPPProxy Stripe service (Basic-auth inject,
 `Stripe-Account` strip) is a separate MPPProxy follow-up, noted as deferred.
 
+## Live verification (post-merge follow-up)
+First real run of `StripeLiveConformanceTests` against `api.stripe.com` (preview-enrolled key)
+surfaced a genuine gap the hermetic tests could not: the SPT minted fine, but the PaymentIntent was
+rejected because **we did not forward the charge `description` to the PaymentIntent**. The challenge
+carries `description` and some accounts require it, so it is now plumbed through:
+`StripePaymentIntentRequest.description` -> `StripeChargeVerifier` (from `request.description`) ->
+`StripePaymentIntentClient` body. Unit-tested (verifier forwarding + the form body). The reference
+SDK does not forward it either; this is a correct, reasoned addition (evidence: the live Stripe
+error), not a parity break (Stripe is field-order-insensitive; the field is legitimate).
+
+After that fix the live run advanced to the NEXT error on the test account: "export transactions
+require a customer name and address." That account is an **Indian export account**, whose
+regulatory requirements (customer identity) are outside the MPP SPT-charge data model (the challenge
+has no customer field; mppx hits the same wall). Decision (with user): the SPT agentic flow targets
+US / non-export accounts, so live verification uses a US/non-export test key; we do NOT add
+India-export customer/shipping plumbing to the rail. The live job's key must therefore be a
+non-export account.
+
 ## Status
-- **PR-1 (client) MERGED (#103); PR-2 (server) MERGED (#104).** **PR-3 (conformance) DONE locally:**
-  hermetic end-to-end `StripeConformanceTests` (client <-> server through `PaymentVerifier`) + the
-  preview-gated `StripeLiveConformanceTests` + `run-stripe-live.sh` + the non-required CI job. Full
-  suite 725 green; swiftformat + swiftlint clean; no em dashes. **WS-11 complete** (modulo the
-  deferred Node cross-SDK Stripe harness + MPPProxy Stripe service follow-ups).
+- **PR-1 (client) MERGED (#103); PR-2 (server) MERGED (#104); PR-3 (conformance) MERGED (#105).**
+  **WS-11 complete.** Follow-up: `description` forwarding (live-surfaced) + unit tests; live
+  settlement verified on a US/non-export account. Deferred: a Node cross-SDK Stripe harness, an
+  MPPProxy Stripe service, and (explicitly out of scope) India-export customer/shipping support.

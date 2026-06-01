@@ -7,6 +7,10 @@ public struct StripePaymentIntentRequest: Sendable, Hashable {
     public let amount: Int
     public let currency: String
     public let sharedPaymentGrantedToken: String
+    /// The charge description (from the challenge), forwarded to the PaymentIntent. Optional in
+    /// general, but some Stripe accounts require it (e.g. an Indian export account rejects a charge
+    /// without a description), so it is plumbed through rather than dropped.
+    public let description: String?
     public let metadata: [String: String]
     public let idempotencyKey: String
     public let settlement: StripeConnectSettlement?
@@ -15,6 +19,7 @@ public struct StripePaymentIntentRequest: Sendable, Hashable {
         amount: Int,
         currency: String,
         sharedPaymentGrantedToken: String,
+        description: String? = nil,
         metadata: [String: String],
         idempotencyKey: String,
         settlement: StripeConnectSettlement? = nil
@@ -22,6 +27,7 @@ public struct StripePaymentIntentRequest: Sendable, Hashable {
         self.amount = amount
         self.currency = currency
         self.sharedPaymentGrantedToken = sharedPaymentGrantedToken
+        self.description = description
         self.metadata = metadata
         self.idempotencyKey = idempotencyKey
         self.settlement = settlement

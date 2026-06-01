@@ -139,6 +139,7 @@ public struct StripeChargeVerifier: PaymentMethodServer {
             amount: amount,
             currency: request.currency,
             sharedPaymentGrantedToken: spt,
+            description: request.description,
             metadata: metadata,
             idempotencyKey: StripeIdempotencyKey.derive(challengeID: challenge.id, spt: spt),
             settlement: settlement

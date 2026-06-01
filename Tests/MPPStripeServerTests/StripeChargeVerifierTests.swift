@@ -134,6 +134,23 @@ struct StripeChargeVerifierTests {
         #expect(allHex)
     }
 
+    @Test("the charge description is forwarded to the PaymentIntent")
+    func descriptionForwarded() async throws {
+        let stub = StubPaymentIntent()
+        let verifier = StripeChargeVerifier(client: stub)
+        let challenge = try stripeChargeChallenge(request: .object([
+            "amount": .string("1000"), "currency": .string("usd"),
+            "description": .string("a coffee"),
+            "methodDetails": .object([
+                "networkId": .string("internal"),
+                "paymentMethodTypes": .array([.string("card")]),
+            ]),
+        ]))
+        _ = try await verifier.verify(stripeCredential(challenge: challenge), now: now)
+        let captured = await stub.captured
+        #expect(captured?.description == "a coffee")
+    }
+
     @Test("a valid Connect settlement reaches the PaymentIntent request")
     func connectApply() async throws {
         let settlement = StripeConnectSettlement(

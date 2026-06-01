@@ -15,6 +15,7 @@ struct StripePaymentIntentClientTests {
             amount: 1000,
             currency: "usd",
             sharedPaymentGrantedToken: "spt_x",
+            description: "a coffee",
             metadata: ["plan": "pro", "mpp_version": "1"],
             idempotencyKey: "idem_1",
             settlement: StripeConnectSettlement(
@@ -60,6 +61,7 @@ struct StripePaymentIntentClientTests {
                 + "&automatic_payment_methods%5Benabled%5D=true&confirm=true&currency=usd"
                 + "&shared_payment_granted_token=spt_x"
         ))
+        #expect(text.contains("description=a+coffee"))
         #expect(text.contains("metadata%5Bplan%5D=pro"))
         #expect(text.contains("metadata%5Bmpp_version%5D=1"))
         #expect(text.contains("application_fee_amount=10"))
