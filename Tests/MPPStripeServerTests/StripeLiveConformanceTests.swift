@@ -57,6 +57,10 @@ struct StripeLiveConformanceTests {
         var fields = HTTPFields()
         fields[.contentType] = "application/x-www-form-urlencoded"
         fields[.authorization] = "Basic " + Data("\(secretKey):".utf8).base64EncodedString()
+        // The SPT test-helpers endpoint is private preview, so pin the same preview version.
+        if let stripeVersion = HTTPField.Name("Stripe-Version") {
+            fields[stripeVersion] = StripeAPI.version
+        }
         let request = HTTPRequest(
             method: .post, scheme: "https", authority: "api.stripe.com",
             path: "/v1/test_helpers/shared_payment/granted_tokens", headerFields: fields
