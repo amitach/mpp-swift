@@ -67,6 +67,24 @@ has to cover the transfer. Ported the same:
   each file under the length limit. `chainId`/`secret`/`log`/`subscriptionRecipientHex` became
   internal so the split file can share them. No behaviour change.
 
+## Review hardening (Devin, PR #99)
+
+- **Fee-payer key zeroization (real bug, fixed).** The first cut zeroized the sponsor key only on
+  the happy path inside `build_signed_tx`, and not at all in `build_subscription_charge_tx` (where
+  `[u8; 32]` is `Copy`, so the caller frame keeps a copy) nor in the UniFFI export (which
+  dereferenced out of the `Zeroizing` wrapper into a bare array). Fixed all three: `build_signed_tx`
+  now parses + wipes both keys *before* any fallible `?`, so no early return leaks; the caller wipes
+  its `Copy`; the export keeps the sponsor key in `Zeroizing` and hands down only a `Copy`. The
+  golden tests confirm the signed bytes are unchanged (only zeroization timing moved). Requires
+  another FFI release (binary behaviour changed, signature did not).
+- **Live-subscription route now opt-in** (was always returning non-nil). It guards on
+  `CONFORMANCE_FEE_PAYER_KEY` (which it requires to succeed anyway), matching how
+  `makeSessionMiddleware` gates on `CONFORMANCE_OPERATOR_KEY`. A proof-only run no longer touches
+  the RPC at startup, and the `Optional` return is meaningful.
+- Other Devin notes were informational and intended: fee-payer is wired only for subscriptions (the
+  only access-key/spending-limit path: see the table in the PR), gas price is read once at startup
+  (fine for a dev harness), and the `private`->`internal` relaxation is the deliberate file split.
+
 ## Out of scope
 - Per-subscription sponsors / sponsor rotation: the renewer takes a single provider; a production
   caller can return different keys, but the conformance uses one.

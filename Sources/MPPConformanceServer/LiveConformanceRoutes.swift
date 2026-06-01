@@ -138,12 +138,22 @@ import MPPTempoServer
     }
 
     func makeSubscriptionLiveMiddleware() async throws -> MPPServerMiddleware? {
-        guard let rpcURL = URL(string: moderatoRPCURL) else { return nil }
+        // Opt-in like makeSessionMiddleware (CONFORMANCE_OPERATOR_KEY): this route settles
+        // on-chain,
+        // and the charge needs a gas sponsor (the access key's limit == the charge amount), so
+        // without CONFORMANCE_FEE_PAYER_KEY the route can't succeed. Returning nil here keeps a
+        // proof-only run from touching the RPC at startup. The harness sets the var before boot.
+        guard let feePayerKey = ProcessInfo.processInfo.environment["CONFORMANCE_FEE_PAYER_KEY"]
+            .flatMap({ Data(hexPrefixed: $0) }),
+            let rpcURL = URL(string: moderatoRPCURL)
+        else { return nil }
         let rpc = try EVMRPC(transport: URLSessionTransport(), url: rpcURL)
         let lookupKey = "conformance-subscription-live"
         let accessKeys = InMemoryAccessKeyStore()
         let accessKeyAddress = try await accessKeys.provision(forLookupKey: lookupKey)
-        let renewer = try await makeLiveRenewer(rpc: rpc, accessKeys: accessKeys)
+        let renewer = try await makeLiveRenewer(
+            rpc: rpc, accessKeys: accessKeys, feePayerKey: feePayerKey
+        )
         let engine = SubscriptionEngine(store: InMemorySubscriptionStore(), renewer: renewer)
         let identity: @Sendable (Credential) -> ActivatingSubscriptionVerifier
             .Identity = { credential in
@@ -179,14 +189,16 @@ import MPPTempoServer
         }
     }
 
-    /// Builds the on-chain renewer for the live route. A faucet-funded gas sponsor (fee payer)
-    /// pays gas so the access key's per-period spending limit (== the charge amount) only has to
-    /// cover the transfer: the chain meters gas in the fee token and would otherwise draw it from
-    /// that same limit, reverting with SpendingLimitExceeded. The shell harness funds
-    /// CONFORMANCE_FEE_PAYER_KEY's address before boot; absent the env var, the payer pays its own
-    /// gas (and the live charge would need limit > amount).
+    /// Builds the on-chain renewer for the live route. The faucet-funded gas sponsor
+    /// (`feePayerKey`,
+    /// resolved by the caller from CONFORMANCE_FEE_PAYER_KEY) pays gas so the access key's
+    /// per-period
+    /// spending limit (== the charge amount) only has to cover the transfer: the chain meters gas
+    /// in
+    /// the fee token and would otherwise draw it from that same limit, reverting with
+    /// SpendingLimitExceeded.
     private func makeLiveRenewer(
-        rpc: EVMRPC, accessKeys: InMemoryAccessKeyStore
+        rpc: EVMRPC, accessKeys: InMemoryAccessKeyStore, feePayerKey: Data
     ) async throws -> TempoSubscriptionRenewer {
         let gasPrice = try await rpc.gasPrice()
         let fee = TempoFeeParameters(
@@ -195,10 +207,7 @@ import MPPTempoServer
             gasLimit: 6_000_000, // provisioning is ~4M gas
             feeToken: nil
         )
-        let feePayerKey = ProcessInfo.processInfo.environment["CONFORMANCE_FEE_PAYER_KEY"]
-            .flatMap { Data(hexPrefixed: $0) }
-        let feePayer: (@Sendable () async -> Data?)? = feePayerKey
-            .map { key in { @Sendable in key } }
+        let feePayer: (@Sendable () async -> Data?)? = { @Sendable in feePayerKey }
         return TempoSubscriptionRenewer(
             builder: FFISubscriptionChargeTxBuilder(fee: fee) { try await rpc.transactionCount($0)
             },

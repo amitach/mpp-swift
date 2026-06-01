@@ -97,6 +97,23 @@ fn build_signed_tx(
     let hash = tx.signature_hash();
     let signing_key_result = SigningKey::from_bytes((&private_key).into());
     private_key.zeroize();
+
+    // Parse + wipe the fee-payer (sponsor) key eagerly too, before any fallible `?` below, so
+    // neither key's raw bytes can survive on an early-return path. The fee-payer signature itself
+    // is built after the sender's (it commits to the same tx); we only capture the parsed key and
+    // its hash here. A fee payer is honoured only with a keychain context (a sponsored access-key
+    // tx); the trailing `zeroize()` still wipes a stray key handed in on any other path.
+    let fee_payer_prep = match keychain_user_address {
+        Some(sender) => fee_payer_key.take().map(|mut key| {
+            let fee_payer_hash = tx.fee_payer_signature_hash(sender);
+            let parsed = SigningKey::from_bytes((&key).into());
+            key.zeroize();
+            (parsed, fee_payer_hash)
+        }),
+        None => None,
+    };
+    fee_payer_key.zeroize();
+
     let signing_key = signing_key_result.map_err(|_| BuildError::InvalidKey)?;
     // A keychain (access-key) signature signs `keccak256(0x04 || sig_hash || user_address)` (V2),
     // so the chain executes the tx for `user_address` (the root) on behalf of the signing access
@@ -121,13 +138,10 @@ fn build_signed_tx(
         None => TempoSignature::from(alloy_sig),
     };
 
-    // The fee payer signs `fee_payer_signature_hash(sender)`, where `sender` is the account the tx
-    // executes for (the keychain root). This commits the sponsor to the fee token and pays the gas.
-    if let (Some(mut key), Some(sender)) = (fee_payer_key.take(), keychain_user_address) {
-        let fee_payer_hash = tx.fee_payer_signature_hash(sender);
-        let fee_payer_key_result = SigningKey::from_bytes((&key).into());
-        key.zeroize();
-        let fee_payer_signing_key = fee_payer_key_result.map_err(|_| BuildError::InvalidKey)?;
+    // Build the fee-payer signature from the key parsed (and wiped) above. The fee payer signs
+    // `fee_payer_signature_hash(sender)`, committing the sponsor to the fee token and the gas.
+    if let Some((parsed, fee_payer_hash)) = fee_payer_prep {
+        let fee_payer_signing_key = parsed.map_err(|_| BuildError::InvalidKey)?;
         let (fee_sig, fee_recid) = fee_payer_signing_key
             .sign_prehash_recoverable(fee_payer_hash.as_slice())
             .map_err(|_| BuildError::SigningFailed)?;
@@ -304,7 +318,7 @@ pub fn build_subscription_charge_tx(
     amount: U256,
     memo: [u8; 32],
     key_authorization: Option<SignedKeyAuthorization>,
-    fee_payer_key: Option<[u8; 32]>,
+    mut fee_payer_key: Option<[u8; 32]>,
 ) -> Result<Vec<u8>, BuildError> {
     let transfer = transferWithMemoCall {
         recipient,
@@ -325,7 +339,10 @@ pub fn build_subscription_charge_tx(
         Some(root_address),
         fee_payer_key,
     );
+    // `[u8; 32]` is Copy, so `build_signed_tx` zeroized its own copy but this caller frame keeps
+    // one; wipe it too (parity with `private_key`).
     private_key.zeroize();
+    fee_payer_key.zeroize();
     result
 }
 
@@ -591,9 +608,10 @@ pub fn build_subscription_charge_transaction(
     let key = take_key(private_key)?;
     let authorization = decode_optional_key_authorization(key_authorization)?;
     // The optional sponsor key: when present, gas is paid by the fee payer (not drawn from the
-    // access key's spending limit).
+    // access key's spending limit). Kept in its `Zeroizing` wrapper (like `key`) so the bytes are
+    // wiped when this frame returns; only a Copy is handed down (and wiped there too).
     let fee_payer = match fee_payer_private_key {
-        Some(bytes) => Some(*take_key(bytes)?),
+        Some(bytes) => Some(take_key(bytes)?),
         None => None,
     };
     build_subscription_charge_tx(
@@ -610,7 +628,7 @@ pub fn build_subscription_charge_transaction(
         parse_u256("amount", &amount)?,
         parse_bytes32("memo", memo)?,
         authorization,
-        fee_payer,
+        fee_payer.as_deref().copied(),
     )
     .map_err(map_build_error)
 }
