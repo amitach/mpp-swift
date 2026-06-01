@@ -63,11 +63,19 @@ enum SessionAction: Hashable {
         }
     }
 
-    /// The `{channelId, cumulativeAmount, signature}` shared by voucher and close.
+    /// The `{channelId, cumulativeAmount, signature}` shared by voucher, close, and open.
+    ///
+    /// The signature is normalized through ``SignatureEnvelope`` at this deserialize boundary: a
+    /// Tempo magic trailer is stripped and only a bare 65-byte secp256k1 signature is accepted, so
+    /// everything downstream (verify, the stored highest voucher, and the on-chain settle relay)
+    /// sees the canonical bytes the escrow's `ecrecover` redeems. A keychain- or otherwise-wrapped
+    /// signature fails here and the action is rejected.
     private static func signedVoucher(_ payload: [String: JSONValue]) -> SignedVoucherFields? {
         guard let channelID = hex(payload["channelId"]),
               let cumulativeAmount = payload["cumulativeAmount"]?.stringValue,
-              let signature = hex(payload["signature"]) else { return nil }
+              let rawSignature = hex(payload["signature"]),
+              let signature = SignatureEnvelope.canonicalVoucherSignature(rawSignature)
+        else { return nil }
         return SignedVoucherFields(
             channelID: channelID, cumulativeAmount: cumulativeAmount, signature: signature
         )
