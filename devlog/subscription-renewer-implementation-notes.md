@@ -29,7 +29,10 @@ Option<SignedKeyAuthorization>` (provisions the access key into the AccountKeych
   `build_subscription_charge_transaction` (Option<Vec<u8>> serialized authorization, decimal-String
   amount, 32-byte memo). Mirrors the existing 3 exports' validation helpers.
 - **Swift seam:** `TempoSubscriptionChargeTxBuilder` protocol in MPPTempo (sibling of
-  TempoOpenTxBuilder); `FFITempoTxBuilder` conforms; un-gated method, FFI pulled only when injected.
+  TempoOpenTxBuilder), un-gated. The concrete conformer is a SEPARATE `FFISubscriptionChargeTxBuilder`
+  (not `FFITempoTxBuilder`): the signing key is the access key, which differs per subscription and
+  arrives per charge in the params, so it holds only fee + nonceProvider rather than a single held
+  key. FFI pulled only when injected.
 
 ## PR-1 progress (Rust FFI core: DONE, green)
 
