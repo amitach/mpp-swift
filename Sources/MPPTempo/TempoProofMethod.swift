@@ -82,6 +82,21 @@ public struct TempoProofMethod: PaymentMethodClient {
         return request.isZeroAmount
     }
 
+    /// The approval facts for `challenge`, filling amount/currency/recipient from the
+    /// decoded charge request (the same fields the per-method ``ChargeApproval`` carries).
+    /// An undecodable request falls back to the rail-agnostic facts.
+    public func approvalFacts(for challenge: Challenge) -> PaymentApprovalRequest {
+        guard let request = try? TempoChargeRequest(challenge: challenge) else {
+            return PaymentApprovalRequest(generic: challenge)
+        }
+        return PaymentApprovalRequest(
+            challengeId: challenge.id, realm: challenge.realm,
+            method: challenge.method, intent: challenge.intent,
+            amount: request.amount, currency: request.currency, recipient: request.recipient,
+            description: challenge.description, expires: challenge.expires
+        )
+    }
+
     /// Builds the zero-amount proof credential for `challenge`.
     ///
     /// Decodes the charge, runs the approval gate (no signature is produced if it

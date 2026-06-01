@@ -47,4 +47,17 @@ struct AmountTests {
         }
         #expect(try Amount("0").rawValue == "0")
     }
+
+    @Test("orders by numeric value at arbitrary precision, not lexically")
+    func ordersNumerically() throws {
+        // Lexical order would put "10" before "9"; numeric order does not.
+        #expect(try Amount("9") < Amount("10"))
+        #expect(try Amount("100") > Amount("99"))
+        #expect(try Amount("0") < Amount("1"))
+        #expect(try Amount("50") <= Amount("50"))
+        // Exact beyond any fixed-width integer (no parsing, no overflow).
+        let huge = try Amount("99999999999999999999999999999999")
+        let bigger = try Amount("100000000000000000000000000000000")
+        #expect(huge < bigger)
+    }
 }

@@ -13,13 +13,23 @@ import MPPCore
 public struct MCPPaymentClient: Sendable {
     private let client: Client
     private let methods: [any PaymentMethodClient]
+    private let authorizer: any PaymentAuthorizer
 
     /// - Parameters:
     ///   - client: a connected MCP `Client`.
     ///   - methods: the payment methods to pay an offered challenge with, in preference order.
-    public init(client: Client, methods: [any PaymentMethodClient]) {
+    ///   - authorizer: consulted once after a challenge is selected and before its credential is
+    ///     built; throwing denies the payment. Defaults to ``AllowAllAuthorizer`` (ungated, the
+    ///     prior behavior). The same seam the HTTP `PaymentClient` uses, so one injected authorizer
+    ///     gates both transports identically.
+    public init(
+        client: Client,
+        methods: [any PaymentMethodClient],
+        authorizer: any PaymentAuthorizer = AllowAllAuthorizer()
+    ) {
         self.client = client
         self.methods = methods
+        self.authorizer = authorizer
     }
 
     /// The result of a (possibly paid) tool call: the tool result, plus the receipt if one was
@@ -32,7 +42,8 @@ public struct MCPPaymentClient: Sendable {
     /// Calls `name`, paying a `-32042` challenge transparently if one is raised.
     ///
     /// - Throws: the underlying `MCPError` if no registered method supports the offered challenges,
-    ///   or if the retried call is itself rejected (a single retry; no payment loop).
+    ///   or if the retried call is itself rejected (a single retry; no payment loop); an authorizer
+    ///   denial propagates unwrapped.
     public func callTool(
         name: String,
         arguments: [String: Value]? = nil
@@ -46,6 +57,10 @@ public struct MCPPaymentClient: Sendable {
             guard let selection = selectPaymentMethod(for: challenges, from: methods) else {
                 throw error
             }
+            // Consult the authorizer before the method signs anything; a denial throws unwrapped.
+            try await authorizeSelection(
+                method: selection.method, challenge: selection.challenge, with: authorizer
+            )
             let credential = try await selection.method.buildCredential(for: selection.challenge)
             let meta = try Metadata(additionalFields: [
                 MCPPayment.credentialMetaKey: MCPPaymentCodec.value(for: credential),

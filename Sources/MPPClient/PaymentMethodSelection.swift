@@ -20,3 +20,18 @@ public func selectPaymentMethod(
     }
     return nil
 }
+
+/// Consults `authorizer` for the selected method and challenge, before any
+/// credential is built. The shared consent step of the 402 flow, used by
+/// `PaymentClient` (HTTP) and the JSON-RPC / MCP client, so exactly one
+/// authorization fires per payment and the two flows cannot drift.
+///
+/// Throws the authorizer's rejection unwrapped: a denied payment builds no
+/// credential and signs nothing.
+public func authorizeSelection(
+    method: any PaymentMethodClient,
+    challenge: Challenge,
+    with authorizer: any PaymentAuthorizer
+) async throws {
+    try await authorizer.authorize(method.approvalFacts(for: challenge))
+}
