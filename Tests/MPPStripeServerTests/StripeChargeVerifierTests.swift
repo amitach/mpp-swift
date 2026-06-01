@@ -111,6 +111,7 @@ struct StripeChargeVerifierTests {
         _ = try await verifier.verify(stripeCredential(challenge: challenge), now: now)
         let captured = await stub.captured
         let metadata = try #require(captured?.metadata)
+        #expect(metadata["challenge_id"] == "c1") // spec-required reconciliation key
         #expect(metadata["mpp_version"] == "1")
         #expect(metadata["mpp_intent"] == "charge")
         #expect(metadata["mpp_challenge_id"] == "c1")

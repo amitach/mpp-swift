@@ -1,14 +1,21 @@
-/// Builds the MPP analytics metadata attached to every Stripe PaymentIntent, then merges the
-/// charge's user metadata over it (user keys win on collision, matching the reference SDK; the
-/// `mpp_*` flags are best-effort, not a security boundary).
+/// Builds the metadata attached to every Stripe PaymentIntent, then merges the charge's user
+/// metadata over it (user keys win on collision, matching the reference SDK; these flags are
+/// best-effort, not a security boundary).
+///
+/// The spec (`draft-stripe-charge-00` §9) requires a `challenge_id` reconciliation key on the
+/// PaymentIntent; the `mpp_*` keys are the reference SDK's additional analytics namespace, kept
+/// alongside it.
 enum StripeAnalyticsMetadata {
-    /// The analytics keys, in the order the reference SDK emits them. `mpp_client_id` is included
-    /// only when a credential `source` is present (Stripe charges carry none, so it is usually
-    /// absent).
+    /// `challenge_id` is the spec-mandated reconciliation key. `mpp_client_id` is included only
+    /// when
+    /// a credential `source` is present (Stripe charges carry none, so it is usually absent).
     static func build(
         challengeID: String, realm: String, intent: String, source: String?
     ) -> [String: String] {
         var metadata: [String: String] = [
+            // Spec-required reconciliation key (draft-stripe-charge-00 §9).
+            "challenge_id": challengeID,
+            // Reference-SDK analytics namespace.
             "mpp_version": "1",
             "mpp_is_mpp": "true",
             "mpp_intent": intent,

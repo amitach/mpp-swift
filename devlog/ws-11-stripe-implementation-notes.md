@@ -126,6 +126,22 @@ US / non-export accounts, so live verification uses a US/non-export test key; we
 India-export customer/shipping plumbing to the rail. The live job's key must therefore be a
 non-export account.
 
+## Spec reconcile vs draft-stripe-charge-00 (updated; compared after the live run)
+Compared the implementation against `paymentauth.org/draft-stripe-charge-00`. The whole flow matches
+(method/intent, request + credential fields, verify ordering, challenge binding, PI params, status
+mapping, Connect + client-trust-boundary, receipt, no-receipt-on-error, TLS). Reconciled / noted:
+- **`challenge_id` metadata key (§9): FIXED here.** The spec mandates `metadata: { challenge_id:
+  challenge.id, ... }`; we emitted only `mpp_challenge_id` (reference-SDK analytics). Added the
+  spec-required `challenge_id` key (kept the `mpp_*` namespace alongside). Unit-tested.
+- **Idempotency key (§9, SHOULD):** spec shows `${challenge.id}_${spt}` (raw); we derive
+  `mpp-swift_{id}_{sha256(spt)}` for header/log hygiene (the SPT is a secret). "Derived from the
+  challenge ID and SPT" so arguably compliant, but diverges from the literal form (loses same-account
+  cross-SDK idempotency with the reference server). PENDING user decision (keep hash vs match spec).
+- **`request.externalId` (§6.1):** the spec lists it as a request (merchant) field; we don't decode
+  it (no consumer; the receipt echoes the credential's externalId). Minor completeness gap, deferred.
+- **`Stripe-Version` header:** spec is silent; required by the private-preview SPT field, so we add
+  it. Not a gap.
+
 ## Status
 - **PR-1 (client) MERGED (#103); PR-2 (server) MERGED (#104); PR-3 (conformance) MERGED (#105).**
   **WS-11 complete.** Follow-up: `description` forwarding (live-surfaced) + unit tests; live
