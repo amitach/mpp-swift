@@ -48,7 +48,10 @@ struct AttributionTests {
     func challengeBoundNonce() {
         let memoA = Attribution.encode(serverId: "api.example.com", challengeId: "challenge-a")
         let memoB = Attribution.encode(serverId: "api.example.com", challengeId: "challenge-b")
-        let memoARepeat = Attribution.encode(serverId: "api.example.com", challengeId: "challenge-a")
+        let memoARepeat = Attribution.encode(
+            serverId: "api.example.com",
+            challengeId: "challenge-a"
+        )
         #expect(memoA == memoARepeat)
         #expect(memoA != memoB)
         // Only the trailing nonce (bytes 25..31) differs; tag/version/server are identical.
