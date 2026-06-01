@@ -81,15 +81,20 @@ private func makeMiddleware() throws -> MPPServerMiddleware {
 // the access key OUR 402 issued, and OUR TempoSubscriptionVerifier verifies it. Offline (no
 // chain), so it is un-gated and always registered. The whole-second `.000Z` expiry is the form
 // `Date.toISOString()` emits, exercising the interop-tolerant parse in the reverse direction too.
-private let subscriptionAccessKeyHex = "0xf1f6619b38a98d6de0800f1defc0a6399eb6d30c"
 private let subscriptionCurrencyHex = "0x20c0000000000000000000000000000000000001"
 private let subscriptionRecipientHex = "0x1111111111111111111111111111111111111111"
+private let subscriptionLookupKey = "conformance-subscription"
 
-private func makeSubscriptionMiddleware() throws -> MPPServerMiddleware {
+private func makeSubscriptionMiddleware() async throws -> MPPServerMiddleware {
     let signer = ChallengeSigner(secret: secret)
     let binding = try RouteBinding(
         realm: "127.0.0.1", method: MethodName("tempo"), intent: .subscription
     )
+    // Provision the access key the subscription delegates to and embed its address in the 402; the
+    // mppx client reads it and signs a key authorization for it. The store also holds the private
+    // key for renewal signing (this offline reverse-conformance only verifies the authorization).
+    let accessKeys = InMemoryAccessKeyStore()
+    let accessKeyAddress = try await accessKeys.provision(forLookupKey: subscriptionLookupKey)
     let request = EncodedJSON(json: .object([
         "amount": .string("1000000"),
         "currency": .string(subscriptionCurrencyHex),
@@ -99,7 +104,7 @@ private func makeSubscriptionMiddleware() throws -> MPPServerMiddleware {
         "subscriptionExpires": .string("2030-01-01T00:00:00.000Z"),
         "methodDetails": .object([
             "accessKey": .object([
-                "accessKeyAddress": .string(subscriptionAccessKeyHex),
+                "accessKeyAddress": .string(accessKeyAddress.checksummed),
                 "keyType": .string("secp256k1"),
             ]),
             "chainId": .integer(Int64(chainId)),
@@ -243,7 +248,7 @@ enum ConformanceServer {
         register(proofResponder, on: router, path: "proof")
 
         // Subscription reverse conformance is offline, so it is always available.
-        let subscriptionGate = try makeSubscriptionMiddleware()
+        let subscriptionGate = try await makeSubscriptionMiddleware()
         let subscriptionResponder = GatedResponder<BasicRequestContext>(
             gate: subscriptionGate, handler: paidBody
         )
