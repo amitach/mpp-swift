@@ -185,7 +185,7 @@ public struct FFITempoTxBuilder: TempoCloseTxBuilder, TempoOpenTxBuilder, TempoT
         }
     }
 
-    private static func map(_ error: FfiError) -> FFITempoTxError {
+    static func map(_ error: FfiError) -> FFITempoTxError {
         switch error {
         case let .InvalidInput(message): .invalidInput(message)
         case .InvalidKey: .invalidSigningKey

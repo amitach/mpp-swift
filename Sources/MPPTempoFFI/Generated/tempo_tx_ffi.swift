@@ -660,6 +660,31 @@ public func buildOpenTransaction(chainId: UInt64, nonce: UInt64, maxFeePerGas: S
 })
 }
 /**
+ * UniFFI entry point: build + sign + RLP-encode a subscription-charge `0x76` tx (one
+ * `transferWithMemo` call). `amount` is a decimal `u256` string; `currency` / `recipient`
+ * are 20-byte addresses; `private_key` (the access key signing the tx) and `memo` are 32
+ * bytes; `key_authorization` is the serialized signed authorization on the provisioning
+ * charge, or `None` once the access key is provisioned.
+ */
+public func buildSubscriptionChargeTransaction(chainId: UInt64, nonce: UInt64, maxFeePerGas: String, maxPriorityFeePerGas: String, gasLimit: UInt64, feeToken: Data?, privateKey: Data, currency: Data, recipient: Data, amount: String, memo: Data, keyAuthorization: Data?)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_tempo_tx_ffi_fn_func_build_subscription_charge_transaction(
+        FfiConverterUInt64.lower(chainId),
+        FfiConverterUInt64.lower(nonce),
+        FfiConverterString.lower(maxFeePerGas),
+        FfiConverterString.lower(maxPriorityFeePerGas),
+        FfiConverterUInt64.lower(gasLimit),
+        FfiConverterOptionData.lower(feeToken),
+        FfiConverterData.lower(privateKey),
+        FfiConverterData.lower(currency),
+        FfiConverterData.lower(recipient),
+        FfiConverterString.lower(amount),
+        FfiConverterData.lower(memo),
+        FfiConverterOptionData.lower(keyAuthorization),$0
+    )
+})
+}
+/**
  * UniFFI entry point: build + sign + RLP-encode the escrow `topUp` `0x76` tx (a two-call
  * approve + topUp). `additional_deposit` is a decimal `u256` string; `escrow` / `token`
  * are 20-byte addresses; `private_key` and `channel_id` are 32 bytes.
@@ -701,6 +726,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tempo_tx_ffi_checksum_func_build_open_transaction() != 13165) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tempo_tx_ffi_checksum_func_build_subscription_charge_transaction() != 16146) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tempo_tx_ffi_checksum_func_build_top_up_transaction() != 53419) {

@@ -16,7 +16,8 @@
 use alloy_primitives::{Address, Bytes, FixedBytes, Signature, TxKind, U256};
 use alloy_sol_types::{sol, SolCall};
 use k256::ecdsa::SigningKey;
-use tempo_primitives::transaction::Call;
+use tempo_primitives::transaction::key_authorization::{KeyAuthorization, SignedKeyAuthorization};
+use tempo_primitives::transaction::{Call, PrimitiveSignature};
 use tempo_primitives::{TempoSignature, TempoTransaction};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -28,6 +29,9 @@ sol! {
     // additionalDeposit is uint256 here (close/open amounts are uint128); matches the escrow ABI.
     function topUp(bytes32 channelId, uint256 additionalDeposit);
     function close(bytes32 channelId, uint128 cumulativeAmount, bytes signature);
+    // TIP-20 recurring subscription charge: moves `amount` of the currency to `recipient`
+    // with an MPP attribution `memo`. Signed by the access key the subscription delegated.
+    function transferWithMemo(address recipient, uint256 amount, bytes32 memo);
 }
 
 /// A reason a transaction could not be built.
@@ -63,6 +67,7 @@ fn build_signed_tx(
     fee_token: Option<Address>,
     mut private_key: [u8; 32],
     calls: Vec<Call>,
+    key_authorization: Option<SignedKeyAuthorization>,
 ) -> Result<Vec<u8>, BuildError> {
     let tx = TempoTransaction {
         chain_id,
@@ -73,6 +78,9 @@ fn build_signed_tx(
         calls,
         nonce_key: U256::ZERO, // 0 = the protocol (sequential) nonce
         nonce,
+        // Present only for the provisioning charge: adds the access key to the
+        // AccountKeychain precompile before the tx signature is verified.
+        key_authorization,
         ..Default::default()
     };
 
@@ -130,6 +138,7 @@ pub fn build_close_tx(
         fee_token,
         private_key,
         vec![call(escrow, close)],
+        None,
     );
     private_key.zeroize();
     result
@@ -177,6 +186,7 @@ pub fn build_open_tx(
         fee_token,
         private_key,
         vec![call(token, approve), call(escrow, open)],
+        None,
     );
     private_key.zeroize();
     result
@@ -218,6 +228,49 @@ pub fn build_top_up_tx(
         fee_token,
         private_key,
         vec![call(token, approve), call(escrow, top_up)],
+        None,
+    );
+    private_key.zeroize();
+    result
+}
+
+/// Builds the signed `0x76` transaction for a recurring subscription charge: a single
+/// call to `currency.transferWithMemo(recipient, amount, memo)`, signed by the access
+/// key the subscription delegated. When `key_authorization` is present (the first,
+/// provisioning charge) it is attached so the chain adds the access key to the
+/// AccountKeychain precompile before verifying this tx's signature; later charges pass
+/// `None` (the key is already provisioned). `amount` is a `uint256`.
+#[allow(clippy::too_many_arguments)]
+pub fn build_subscription_charge_tx(
+    chain_id: u64,
+    nonce: u64,
+    max_fee_per_gas: u128,
+    max_priority_fee_per_gas: u128,
+    gas_limit: u64,
+    fee_token: Option<Address>,
+    mut private_key: [u8; 32],
+    currency: Address,
+    recipient: Address,
+    amount: U256,
+    memo: [u8; 32],
+    key_authorization: Option<SignedKeyAuthorization>,
+) -> Result<Vec<u8>, BuildError> {
+    let transfer = transferWithMemoCall {
+        recipient,
+        amount,
+        memo: FixedBytes::<32>::from(memo),
+    }
+    .abi_encode();
+    let result = build_signed_tx(
+        chain_id,
+        nonce,
+        max_fee_per_gas,
+        max_priority_fee_per_gas,
+        gas_limit,
+        fee_token,
+        private_key,
+        vec![call(currency, transfer)],
+        key_authorization,
     );
     private_key.zeroize();
     result
@@ -293,6 +346,59 @@ fn map_build_error(error: BuildError) -> FfiError {
     match error {
         BuildError::InvalidKey => FfiError::InvalidKey,
         BuildError::SigningFailed => FfiError::SigningFailed,
+    }
+}
+
+/// Decodes the subscription-credential wire form `RLP([authorizationTuple, 65-byte
+/// r‖s‖v])` (what Swift `TempoKeyAuthorization` and ox `KeyAuthorization.serialize`
+/// both emit) into a `SignedKeyAuthorization`. The crate's derived RLP encodes the
+/// signature field structurally (not as a 65-byte blob), so we decode the inner tuple
+/// with the canonical `KeyAuthorization` decoder and rebuild the signature from the 65
+/// bytes, then `into_signed`.
+fn decode_key_authorization(bytes: Vec<u8>) -> Result<SignedKeyAuthorization, FfiError> {
+    use alloy_rlp::{Decodable, Header};
+    let mut slice: &[u8] = &bytes;
+    let header = Header::decode(&mut slice)
+        .map_err(|_| FfiError::InvalidInput("key_authorization: not RLP".into()))?;
+    if !header.list {
+        return Err(FfiError::InvalidInput(
+            "key_authorization: not an RLP list".into(),
+        ));
+    }
+    // Bound inner decoding to exactly the list's declared payload (the canonical alloy-rlp
+    // pattern): decode the items from a sub-slice of `payload_length` bytes and reject any
+    // bytes trailing the list, so a header that over- or under-declares its length fails.
+    if slice.len() < header.payload_length {
+        return Err(FfiError::InvalidInput(
+            "key_authorization: truncated list".into(),
+        ));
+    }
+    let (mut payload, rest) = slice.split_at(header.payload_length);
+    if !rest.is_empty() {
+        return Err(FfiError::InvalidInput(
+            "key_authorization: trailing bytes after list".into(),
+        ));
+    }
+    let authorization = KeyAuthorization::decode(&mut payload)
+        .map_err(|_| FfiError::InvalidInput("key_authorization: bad authorization tuple".into()))?;
+    let signature_bytes = Bytes::decode(&mut payload)
+        .map_err(|_| FfiError::InvalidInput("key_authorization: missing signature".into()))?;
+    if !payload.is_empty() {
+        return Err(FfiError::InvalidInput(
+            "key_authorization: trailing bytes in list".into(),
+        ));
+    }
+    let signature = Signature::try_from(signature_bytes.as_ref())
+        .map_err(|_| FfiError::InvalidInput("key_authorization: signature not 65 bytes".into()))?;
+    Ok(authorization.into_signed(PrimitiveSignature::Secp256k1(signature)))
+}
+
+fn decode_optional_key_authorization(
+    bytes: Option<Vec<u8>>,
+) -> Result<Option<SignedKeyAuthorization>, FfiError> {
+    match bytes {
+        Some(bytes) => Ok(Some(decode_key_authorization(bytes)?)),
+        None => Ok(None),
     }
 }
 
@@ -402,6 +508,46 @@ pub fn build_top_up_transaction(
         parse_address("token", &token)?,
         parse_bytes32("channel_id", channel_id)?,
         parse_u256("additional_deposit", &additional_deposit)?,
+    )
+    .map_err(map_build_error)
+}
+
+/// UniFFI entry point: build + sign + RLP-encode a subscription-charge `0x76` tx (one
+/// `transferWithMemo` call). `amount` is a decimal `u256` string; `currency` / `recipient`
+/// are 20-byte addresses; `private_key` (the access key signing the tx) and `memo` are 32
+/// bytes; `key_authorization` is the serialized signed authorization on the provisioning
+/// charge, or `None` once the access key is provisioned.
+#[uniffi::export]
+#[allow(clippy::too_many_arguments)]
+pub fn build_subscription_charge_transaction(
+    chain_id: u64,
+    nonce: u64,
+    max_fee_per_gas: String,
+    max_priority_fee_per_gas: String,
+    gas_limit: u64,
+    fee_token: Option<Vec<u8>>,
+    private_key: Vec<u8>,
+    currency: Vec<u8>,
+    recipient: Vec<u8>,
+    amount: String,
+    memo: Vec<u8>,
+    key_authorization: Option<Vec<u8>>,
+) -> Result<Vec<u8>, FfiError> {
+    let key = take_key(private_key)?;
+    let authorization = decode_optional_key_authorization(key_authorization)?;
+    build_subscription_charge_tx(
+        chain_id,
+        nonce,
+        parse_u128("max_fee_per_gas", &max_fee_per_gas)?,
+        parse_u128("max_priority_fee_per_gas", &max_priority_fee_per_gas)?,
+        gas_limit,
+        parse_optional_address("fee_token", fee_token)?,
+        *key,
+        parse_address("currency", &currency)?,
+        parse_address("recipient", &recipient)?,
+        parse_u256("amount", &amount)?,
+        parse_bytes32("memo", memo)?,
+        authorization,
     )
     .map_err(map_build_error)
 }
@@ -686,4 +832,81 @@ mod tests {
             KeyAuthorization::decode(&mut bytes.as_slice()).expect("chain decodes our bytes");
         assert_eq!(decoded, mpp_swift_golden_key_authorization());
     }
+
+    // --- Subscription charge tx (PR-1) ---------------------------------------------
+    // Peer-pinned: the exact serialized signed key authorization the reference serializer
+    // (ox `KeyAuthorization.serialize`, which mppx uses) emits for the golden authorization
+    // signed by root key 0x..01. Its inner tuple is byte-identical to INNER_TUPLE; the
+    // trailing b841.. is the 65-byte r‖s‖v signature. Generated via ox/tempo, the same
+    // path mppx's subscription credential takes. The recovered signer is account #1's
+    // canonical address.
+    const PEER_GOLDEN_SIGNED_AUTH: &str = "f8b6f87182a5bf8094be95c3f554e9fc85ec51be69a3d807a0d55bcf2c8470dbd880dedd9420c0000000000000000000000000000000000001830f424083093a80f3f29420c0000000000000000000000000000000000001dcdb8495777d59d5941111111111111111111111111111111111111111b8412f8b4dba4eea0baaf11a6e6c75ddf3ac45e3884a189f8e0378237693c27caad82401fa516b307698e0c1ddb295b7b919f442dc68658b7357f3d70e2bd51f51d81c";
+
+    /// The FFI decodes the reference serializer's exact wire bytes back into the same
+    /// authorization our Swift encoder produces, and recovers the root (payer) that signed
+    /// it. This pins the signed-wrapper wire compatibility the offline conformance did not
+    /// exercise (it compared the inner tuple only).
+    #[test]
+    fn peer_golden_signed_authorization_decodes_and_recovers_root() {
+        use alloy_primitives::address;
+        let bytes = alloy_primitives::hex::decode(PEER_GOLDEN_SIGNED_AUTH).expect("hex");
+        let signed = decode_key_authorization(bytes).expect("decodes the peer wire form");
+        // SignedKeyAuthorization derefs to its KeyAuthorization.
+        assert_eq!(*signed, mpp_swift_golden_key_authorization());
+        let root = signed.recover_signer().expect("recovers the signer");
+        assert_eq!(root, address!("7e5f4552091a69125d5dfcb7b8c2659029395bdf"));
+    }
+
+    /// A stray byte after a well-formed authorization list is rejected: inner decoding is
+    /// bound to the list's declared payload, so trailing bytes do not pass silently.
+    #[test]
+    fn decode_rejects_trailing_bytes_after_the_authorization() {
+        let mut bytes = alloy_primitives::hex::decode(PEER_GOLDEN_SIGNED_AUTH).expect("hex");
+        bytes.push(0x00);
+        assert!(decode_key_authorization(bytes).is_err());
+    }
+
+    /// The provisioning charge attaches the key authorization (bytes grow, content differs);
+    /// both with and without are 0x76-typed Tempo transactions.
+    #[test]
+    fn subscription_charge_attaches_key_authorization() {
+        use alloy_primitives::{address, U256};
+        let access_key = [0x02u8; 32];
+        let currency = address!("20c0000000000000000000000000000000000001");
+        let recipient = address!("1111111111111111111111111111111111111111");
+        let memo = [0xabu8; 32];
+        // The same fixed inputs as the Swift test (FFISubscriptionChargeTxBuilderTests).
+        let build = |auth: Option<SignedKeyAuthorization>| {
+            build_subscription_charge_tx(
+                42431,
+                7,
+                1_000_000_000,
+                1_000_000,
+                100_000,
+                None,
+                access_key,
+                currency,
+                recipient,
+                U256::from(1_000_000u64),
+                memo,
+                auth,
+            )
+            .expect("builds")
+        };
+        let auth = decode_key_authorization(
+            alloy_primitives::hex::decode(PEER_GOLDEN_SIGNED_AUTH).unwrap(),
+        )
+        .unwrap();
+        let with_auth = build(Some(auth));
+        let without_auth = build(None);
+        assert_ne!(with_auth, without_auth);
+        assert!(with_auth.len() > without_auth.len());
+        assert_eq!(with_auth[0], 0x76);
+        // Byte-exact golden for the no-auth charge (the regression net the other builders
+        // have; the Swift test pins the identical bytes for cross-language equivalence).
+        let hex: String = without_auth.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, GOLDEN_SUBSCRIPTION_CHARGE_TX);
+    }
+
+    const GOLDEN_SUBSCRIPTION_CHARGE_TX: &str = "76f8db82a5bf830f4240843b9aca00830186a0f87ef87c9420c000000000000000000000000000000000000180b86495777d59000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000f4240ababababababababababababababababababababababababababababababababc0800780808080c0b841a4e841b650d9eb291850174d5038c4b2488414a8aa0da30acb002b76bd4318a96dd2920e6a9b74346aabc1ccb47292323160741ba1678bdc661aba90be3f0bfd1c";
 }
