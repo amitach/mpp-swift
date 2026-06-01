@@ -60,6 +60,18 @@ Option<SignedKeyAuthorization>` (provisions the access key into the AccountKeych
   regenerated (the FFI build / `MPP_TEMPO_FFI=1`), which CI does from source. Then it is the export's
   Swift caller (satisfies the no-zero-caller gate).
 
-## Open for later PRs (not PR-1)
-- Attribution memo builder (PR-2), AccessKeyStore + private-key storage (PR-3), the Swift
-  SubscriptionRenewer (PR-4), live Moderato e2e (PR-5). See the plan HTML.
+## PR-2 (Attribution memo): DONE
+
+- `Attribution.encode(serverId:challengeId:clientId:)` in MPPTempo, reusing `Keccak256` (MPPEVM):
+  32-byte memo = tag `keccak256("mpp")[0..3]` + version `0x01` + serverId fingerprint
+  `keccak256(serverId)[0..9]` + clientId fingerprint (or 10 zero bytes) + nonce
+  `keccak256(challengeId)[0..6]`. Pure Swift, no FFI, no release.
+- Peer-pinned: vectors generated from mppx@0.6.28's own `Attribution.encode` (imported from its dist
+  via file URL; not a public export) - tag `0xef1ed712`, the server-only and with-client memos.
+  The Swift keccak reproduces them byte-for-byte (6 tests). Cite the Tempo attribution-memo spec, not
+  the peer, in shipped doc.
+- No production caller yet; the renewer (PR-4) consumes it (the plan sequences it as the consumer).
+
+## Open for later PRs
+- AccessKeyStore + private-key storage (PR-3), the Swift SubscriptionRenewer (PR-4), live Moderato
+  e2e (PR-5). See the plan HTML.
