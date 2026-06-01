@@ -11,7 +11,6 @@ struct StripeChargeRequestTests {
             amount: .string("1000"),
             currency: .string("usd"),
             description: .string("a coffee"),
-            externalId: .string("order_9"),
             recipient: .string("acct_seller"),
             methodDetails: .object([
                 "networkId": .string("internal"),
@@ -23,7 +22,6 @@ struct StripeChargeRequestTests {
         #expect(decoded.amount.rawValue == "1000")
         #expect(decoded.currency == "usd")
         #expect(decoded.description == "a coffee")
-        #expect(decoded.externalId == "order_9")
         #expect(decoded.recipient == "acct_seller")
         #expect(decoded.networkId == "internal")
         #expect(decoded.paymentMethodTypes == ["card", "link"])
@@ -34,7 +32,6 @@ struct StripeChargeRequestTests {
     func optionalAbsent() throws {
         let decoded = try StripeChargeRequest(challenge: stripeChallenge())
         #expect(decoded.description == nil)
-        #expect(decoded.externalId == nil)
         #expect(decoded.recipient == nil)
         #expect(decoded.metadata == nil)
     }

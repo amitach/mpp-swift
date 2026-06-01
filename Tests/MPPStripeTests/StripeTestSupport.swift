@@ -11,7 +11,6 @@ func stripeRequest(
     amount: JSONValue? = .string("1000"),
     currency: JSONValue? = .string("usd"),
     description: JSONValue? = nil,
-    externalId: JSONValue? = nil,
     recipient: JSONValue? = nil,
     methodDetails: JSONValue? = .object([
         "networkId": .string("internal"),
@@ -22,7 +21,6 @@ func stripeRequest(
     if let amount { object["amount"] = amount }
     if let currency { object["currency"] = currency }
     if let description { object["description"] = description }
-    if let externalId { object["externalId"] = externalId }
     if let recipient { object["recipient"] = recipient }
     if let methodDetails { object["methodDetails"] = methodDetails }
     return .object(object)

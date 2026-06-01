@@ -29,9 +29,12 @@ not pull `MPPServer`+`swift-crypto`. Plan: `~/.claude/plans/nested-crafting-map.
   source never reads the payload back (only writes it).
 
 ## G3.6 subtraction
-- No approval-policy type (the token provider is the gate). No fields decoded that are unused. The
-  `paymentMethodTypes` is decoded and surfaced to the provider but is NOT sent to the PaymentIntent
-  (server-side, PR-2) - recorded so PR-2 does not add `payment_method_types`.
+- No approval-policy type (the token provider is the gate).
+- `StripeChargeRequest` does NOT decode the wire's server-side `externalId`: it has no client-side
+  consumer (the credential's `externalId` is a separate, client-set value), so decoding it would be
+  dead API. Removed after a PR-1 review flag.
+- `paymentMethodTypes` is decoded and surfaced to the provider but is NOT sent to the PaymentIntent
+  (server-side, PR-2); recorded so PR-2 does not add `payment_method_types`.
 
 ## Peer-test parity matrix (G7.5) - PR-1 (client) slice
 mppx `Methods.test.ts` + `client/Charge.test.ts`:

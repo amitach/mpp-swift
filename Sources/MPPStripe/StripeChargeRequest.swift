@@ -5,11 +5,13 @@ import MPPCore
 ///
 /// The challenge `request` is the post-mint wire shape: the charge `amount` is already in the
 /// currency's smallest unit (a canonical base-units decimal string, never re-scaled by a client
-/// `decimals`), alongside the `currency`, optional `description`/`externalId`/`recipient`, and a
+/// `decimals`), alongside the `currency`, optional `description`/`recipient`, and a
 /// `methodDetails` object carrying the Stripe Business Network `networkId`, the non-empty
 /// `paymentMethodTypes`, and optional `metadata`. `paymentMethodTypes` describes the charge but is
-/// not sent to the PaymentIntent (the server uses Stripe automatic payment methods). Unknown
-/// fields are ignored.
+/// not sent to the PaymentIntent (the server uses Stripe automatic payment methods). The wire's
+/// optional `externalId` is the server's own reference and has no client-side consumer, so it is
+/// not decoded (the credential's `externalId` is a separate, client-set value). Unknown fields are
+/// ignored.
 public struct StripeChargeRequest: Sendable, Hashable {
     /// The charge amount in the currency's smallest unit (already base units, no `decimals`).
     public let amount: Amount
@@ -17,8 +19,6 @@ public struct StripeChargeRequest: Sendable, Hashable {
     public let currency: String
     /// An optional human-readable description for the charge.
     public let description: String?
-    /// An optional server-side external reference carried on the challenge.
-    public let externalId: String?
     /// An optional recipient identifier (display/routing), surfaced to the token provider.
     public let recipient: String?
     /// The Stripe Business Network profile id the charge settles under.
@@ -56,7 +56,6 @@ public struct StripeChargeRequest: Sendable, Hashable {
         }
         currency = wire.currency
         description = wire.description
-        externalId = wire.externalId
         recipient = wire.recipient
         networkId = wire.methodDetails.networkId
         paymentMethodTypes = wire.methodDetails.paymentMethodTypes
@@ -85,7 +84,6 @@ private struct ChargeRequestWire: Decodable {
     let amount: String
     let currency: String
     let description: String?
-    let externalId: String?
     let recipient: String?
     let methodDetails: MethodDetailsWire
 }

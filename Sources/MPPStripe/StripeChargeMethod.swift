@@ -98,6 +98,10 @@ public struct StripeChargeMethod: PaymentMethodClient {
 }
 
 /// A reason ``StripeChargeMethod`` could not build a credential.
+///
+/// Unlike `TempoMethodError`, this is not `Hashable`: ``tokenProviderFailed(_:)`` wraps an
+/// arbitrary provider error (`any Error`), which is not `Hashable`. Callers match cases rather
+/// than use the error as a set member or dictionary key.
 public enum StripeMethodError: Error, Sendable {
     /// The challenge is not a Stripe charge (wrong `method` or `intent`).
     case wrongMethodOrIntent
