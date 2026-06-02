@@ -259,9 +259,16 @@ private actor Session {
         streamTask?.cancel()
         await streamTask?.value
         // Re-check after the await: actor reentrancy means the stream task may have reached its own
-        // terminal (sent close-ready + closed) while we were suspended on its value. If so, the
-        // handshake is already done; skip the now-redundant closeReceipt() read and terminal.
+        // terminal while we were suspended on its value. Two sub-cases:
+        //   - it fully closed (closed == true): nothing left to do.
+        //   - it sent its terminal close-ready (closeReadySent == true) but was cancelled before it
+        //     closed: the client already has its close-ready, so just close, with no redundant
+        //     closeReceipt() snapshot or second close-ready.
         guard !closed else { return }
+        guard !closeReadySent else {
+            await close(code: CloseCode.normal, reason: "payment session closed")
+            return
+        }
         do {
             let receipt = try await closeReceipt()
             await sendCloseReady(receipt)
