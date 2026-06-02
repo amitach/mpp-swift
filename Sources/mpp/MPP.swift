@@ -8,7 +8,10 @@ struct MPP: AsyncParsableCommand {
         commandName: "mpp",
         abstract: "Pay for 402-protected HTTP resources from the command line.",
         version: "0.1.0",
-        subcommands: [Pay.self, Sign.self, Discover.self, AccountCommand.self]
+        subcommands: [
+            Pay.self, Sign.self, Discover.self, AccountCommand.self, Services.self,
+            InitCommand.self,
+        ]
     )
 }
 

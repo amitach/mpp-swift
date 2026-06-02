@@ -122,14 +122,18 @@ struct Pay: AsyncParsableCommand {
     }
 
     private func execute() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        // Resolution order: flag > config file > built-in default.
+        let config = try loadConfig(explicitPath: globals.config, environment: environment)
         let request = try buildRequest()
-        let cap = try parseCap()
+        let resolvedApprove = try Self.resolveApprove(flag: approve, configValue: config?.approve)
+        let cap = try parseCap(maxAmount ?? config?.maxAmount)
         let authorizer = try AuthorizerFactory.make(
-            approve: approve, maxAmount: cap, interactive: Terminal.isInteractive
+            approve: resolvedApprove, maxAmount: cap, interactive: Terminal.isInteractive
         )
         let methods = try ClientKeyLoader.methods(
-            account: globals.account, store: makeAccountStore(),
-            environment: ProcessInfo.processInfo.environment
+            account: globals.account ?? config?.account, store: makeAccountStore(),
+            environment: environment
         )
         guard !methods.isEmpty else { throw CLIError.noPaymentMethod }
 
@@ -172,8 +176,20 @@ struct Pay: AsyncParsableCommand {
         return request
     }
 
-    private func parseCap() throws -> Amount? {
-        guard let value = maxAmount else { return nil }
+    /// Resolves the approve mode: the flag wins; a config value must be valid (an unrecognized one
+    /// fails closed rather than being silently ignored); else nil (the factory's interactive
+    /// default).
+    static func resolveApprove(flag: ApproveMode?, configValue: String?) throws -> ApproveMode? {
+        if let flag { return flag }
+        guard let configValue else { return nil }
+        guard let mode = ApproveMode(rawValue: configValue) else {
+            throw CLIError.invalidInput("config 'approve' must be auto, tty, or biometric")
+        }
+        return mode
+    }
+
+    private func parseCap(_ value: String?) throws -> Amount? {
+        guard let value else { return nil }
         do {
             return try Amount(value)
         } catch {
