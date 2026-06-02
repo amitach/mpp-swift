@@ -43,6 +43,21 @@ struct Secp256k1SignerTests {
         #expect(first == second)
     }
 
+    @Test("description and debugDescription redact the private key, showing only the public key")
+    func redactsPrivateKey() throws {
+        // The key is stored as [UInt8]; its default reflection would print "[171, 171, ...]"
+        // (171 == 0xAB). That comma-joined byte run cannot occur in the public key's hex, so its
+        // absence proves the private key is not leaked (per SECURITY.md §11.2.1).
+        let signer = try Secp256k1Signer(privateKey: Data(repeating: 0xAB, count: 32))
+        let leaked = String(describing: [UInt8](repeating: 0xAB, count: 32))
+        for rendered in [String(describing: signer), signer.debugDescription, "\(signer)"] {
+            #expect(!rendered.contains(leaked))
+            #expect(!rendered.contains("171, 171"))
+            #expect(rendered.contains("Secp256k1Signer"))
+            #expect(rendered.contains(signer.publicKey.hexPrefixed))
+        }
+    }
+
     @Test("a different hash yields a different signature")
     func differentHashDiffersSignature() throws {
         let signer = try Secp256k1Signer(privateKey: key())

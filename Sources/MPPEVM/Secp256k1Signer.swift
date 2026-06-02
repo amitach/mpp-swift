@@ -20,7 +20,7 @@ import libsecp256k1
 ///   lifetime and is **not** zeroized on release (Swift cannot reliably scrub a
 ///   copyable value). Scope a signer to the signing it performs, and source the
 ///   key from a secure store. Hardened key custody is a separate concern.
-public struct Secp256k1Signer: Sendable {
+public struct Secp256k1Signer: Sendable, CustomStringConvertible, CustomDebugStringConvertible {
     private let privateKey: [UInt8]
     private let context: Secp256k1Context
     private let publicKeyBytes: Data
@@ -45,6 +45,20 @@ public struct Secp256k1Signer: Sendable {
     /// The signer's public key, serialized uncompressed (65 bytes, `0x04` prefix).
     public var publicKey: Data {
         publicKeyBytes
+    }
+
+    /// A redacted description that never exposes the private key. The key is stored as `[UInt8]`,
+    /// whose default reflection would print the raw key bytes (unlike `Data`, whose description is
+    /// "<n> bytes"). Per SECURITY.md §11.2.1 a signing key must never appear in a description, log,
+    /// or trace, so only the non-secret public key is shown.
+    public var description: String {
+        "Secp256k1Signer(publicKey: \(publicKey.hexPrefixed))"
+    }
+
+    /// Same redaction as ``description``. `debugDescription` is what string interpolation and most
+    /// logging use, so it must omit the private key too.
+    public var debugDescription: String {
+        description
     }
 
     /// Signs a 32-byte message hash, returning a recoverable signature.
