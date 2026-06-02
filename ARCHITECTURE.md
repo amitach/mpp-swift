@@ -23,6 +23,13 @@ actual SwiftPM dependencies (verified against `Package.swift`):
 | `MPPMCP` | `MPPCore`, `MPPServer`, `MPPClient`, `MCP` | JSON-RPC / MCP payment binding (rail-agnostic): a server gate that reuses `MPPServerMiddleware` and maps its decision onto the `-32042`/`-32043` frame + `result._meta` receipt, and a client wrapper that pays transparently. Depends on the official MCP Swift SDK, which raises the package floor to Swift 6.2 |
 | `MPPProxy` | `MPPServer`, `MPPClient`, `MPPCore`, `MPPDiscovery` | framework-neutral 402 reverse-proxy engine: routes `/{service}/...` to upstream origins, gates each route with `MPPServerMiddleware`, scrubs credential/cookie/hop-by-hop headers both ways, forwards via the `MPPHTTPTransport` seam, and serves `/openapi.json` + `/llms.txt`. Pure request/response logic; no server dependency, no Rust |
 | `MPPHummingbird` | `MPPProxy`, `MPPServer`, `MPPCore` + `Hummingbird` | the live HTTP-server binding: bridges Hummingbird's `Request`/`Response` to the engine's `(HTTPRequest, Data)` and runs `MPPProxy` as a catch-all responder (or a single gated route via `GatedResponder`). The only product that links swift-nio; runtime entry points are `@available` macOS 14 / iOS 17 |
+| `MPPAuth` | `MPPClient`, `MPPCore` | the `mpp` CLI's approval implementations + key store: `TTYPaymentAuthorizer`, `BiometricPaymentAuthorizer` (`LocalAuthentication`, `#if canImport`-guarded), the `displaySafe` terminal sanitizer, and `KeychainAccountStore` (biometric-gated key items). The rails do not depend on it |
+| `MPPTempoFFI` | `MPPTempo`, `MPPEVM`, `MPPCore` + `TempoTxFFI` | opt-in: the FFI `0x76` builders (`FFITempoTxBuilder` open/topUp/close, `FFISubscriptionChargeTxBuilder`) + the `TempoChannelSession` actor. The only target linking the Rust `TempoTxFFI` xcframework; an `assert-ffi-isolation` guard keeps it out of the default graph |
+| `MPPStripe` | `MPPClient`, `MPPCore` | Stripe rail CLIENT: the Shared Payment Token charge method (no crypto, no Rust) |
+| `MPPStripeServer` | `MPPServer`, `MPPClient`, `MPPCore` | Stripe rail SERVER: `StripeChargeVerifier` + `StripePaymentIntentClient` (over the `MPPHTTPTransport` seam) |
+| `MPPWebSocket` | `MPPCore`, `MPPTempoServer` | metered-session WebSocket transport orchestration (server + client) driving `SessionStream` over the `SessionWebSocketFrame` codec. No external deps |
+| `MPPWebSocketLive` | `MPPWebSocket`, `MPPCore` + `swift-websocket` | the live socket adapters (`WSCore` inbound/outbound + `WSClient`); the only target linking the nio WebSocket graph |
+| `mpp` (executable) | `MPPClient`, `MPPAuth`, `MPPTempo`, `MPPStripe`, `MPPMCP`, `MPPEVM`, `MPPDiscovery` + `swift-argument-parser` | the shipped command-line tool |
 
 `MPPCore`, `MPPBodyDigest`, and `MPPEVM` are **independent roots** (no inter-MPP
 dependencies); `MPPEVM` in particular is standalone EVM crypto and does not depend on
@@ -34,8 +41,8 @@ the bespoke Tempo `0x76` transaction by binding Tempo's own `tempo-primitives`. 
 packaged into a `TempoTxFFI` xcframework and reached from Swift over a UniFFI boundary
 by the **opt-in `MPPTempoFFI`** product (see below).
 
-A non-EVM consumer (e.g. a future Stripe rail, or pure client/server/MCP) pulls
-**none** of `MPPEVM`/`MPPTempo` and **no Rust**.
+A non-EVM consumer (e.g. the Stripe rail `MPPStripe`/`MPPStripeServer`, or pure
+client/server/MCP/WebSocket) pulls **none** of `MPPEVM`/`MPPTempo` and **no Rust**.
 
 ## The two-layer EVM split
 
@@ -225,18 +232,23 @@ Rust.
 - **Verified:** a byte-exact golden test (deterministic RFC-6979 signing) locks the
   output and detects any format change; it runs in CI on macOS and Linux, and the
   bytes match on both. The live-Moderato test is the authoritative on-chain check.
-- **Packaging (in progress):** the crate is wrapped with UniFFI and built into an
-  Apple xcframework + a Linux `.so`. The artifact is built in CI from pinned source
-  (provenance), not committed as an opaque blob.
-- **Isolation - only linked when you build transactions (planned).** *Current state:*
-  the crate is standalone and **not yet wired into the Swift package** (`Package.swift`
-  references no Rust; `swift build` runs no `cargo`), so no Swift target links any Rust
-  today. *Design for the wiring slice:* the `TempoCloseTxBuilder` conformer that calls
-  the FFI will live in its **own opt-in product**, the only target depending on the FFI
-  binary; `MPPTempo` defines just the seam and everything else references the protocol
-  (injected), so a non-Tempo consumer or a verify/read-only Tempo server links no Rust.
-  A dependency-graph guard (a check that the core/server products do not transitively
-  pull the binary) lands with that wiring, so the isolation is enforced, not assumed.
+- **Packaging:** the crate is wrapped with UniFFI and built into an Apple `TempoTxFFI`
+  xcframework (+ a Linux static lib built from source). The Apple artifact is
+  **published as a checksum-pinned GitHub-release xcframework**
+  (`.github/workflows/release-ffi.yml`, tag `tempo-tx-ffi-v*`), built in CI from pinned
+  source, so an external Apple consumer installs it with no env var and no Rust
+  toolchain. A from-source `MPP_TEMPO_FFI` path remains for dev/CI; Linux always builds
+  from source (SwiftPM has no Linux binary-artifact mechanism).
+- **Isolation - only linked when you build transactions.** The FFI builders
+  (`FFITempoTxBuilder`, `FFISubscriptionChargeTxBuilder`) and the `TempoChannelSession`
+  actor live in the **opt-in `MPPTempoFFI` product**, the only target depending on the
+  FFI binary. `MPPTempo` defines just the `TempoOpenTxBuilder`/`TempoTopUpTxBuilder`/
+  `TempoCloseTxBuilder` (and subscription-charge) seams; everything else references the
+  protocol (injected), so a non-Tempo consumer or a verify/read-only Tempo server links
+  no Rust. The default graph linking zero Rust is **enforced, not assumed**:
+  `Scripts/assert-ffi-isolation.sh` runs in the required CI job and fails if the core /
+  server / Tempo products transitively pull the binary. The full write path is proven
+  on-chain (a gated live-Moderato e2e opens and closes a real channel through it).
 
 See [SECURITY.md](SECURITY.md) for the supply-chain controls around the Rust surface,
 and [REVIEW.md](REVIEW.md) for how to review changes.

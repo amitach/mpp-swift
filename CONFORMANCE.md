@@ -1,10 +1,11 @@
 # Cross-SDK conformance
 
 This SDK is verified to interoperate with the reference [`mppx`](https://github.com/wevm/mppx)
-(TypeScript) implementation over real HTTP, not just against fixed vectors, in **both directions**
-across every implemented Tempo flow: the zero-amount `tempo`/`charge` **proof**, the settled
-payment-**channel** session, **subscription** activation (key authorization), and the metered
-**streaming** codecs (SSE + WebSocket). Each is detailed below.
+(TypeScript) implementation over real transports, not just against fixed vectors, in **both
+directions** across every flow that has a reference peer: the zero-amount `tempo`/`charge`
+**proof**, the settled payment-**channel** session, **subscription** activation + on-chain renewal,
+the metered **streaming** codecs (SSE + WebSocket), the **JSON-RPC / MCP** payment binding, the
+**Stripe** rail (live-verified), and the shipped **`mpp` CLI** binary. Each is detailed below.
 
 ## Forward: our client pays the mppx server
 
@@ -39,6 +40,10 @@ Scripts/conformance/run-session-reverse.sh # reverse CHANNEL: mppx client open/v
 Scripts/conformance/run-subscription.sh         # forward SUBSCRIPTION: our client signs a key-auth vs the mppx subscription server (offline)
 Scripts/conformance/run-subscription-reverse.sh # reverse SUBSCRIPTION: mppx client signs a key-auth vs our TempoSubscriptionVerifier (offline)
 Scripts/conformance/run-subscription-live.sh     # reverse SUBSCRIPTION, LIVE: mppx client activates vs our server, which settles period 0 on-chain (Moderato)
+Scripts/conformance/run-mcp.sh                  # forward MCP: the mppx mcp-sdk client pays our Swift MCP server (stdio)
+Scripts/conformance/run-mcp-reverse.sh          # reverse MCP: our Swift MCP client pays the mppx mcp-sdk server (stdio)
+Scripts/conformance/run-cli.sh                  # CLI: the shipped `mpp` binary pays the mppx server over real HTTP
+Scripts/conformance/run-stripe-live.sh           # Stripe, LIVE: a real test-mode PaymentIntent (preview + secret gated)
 ```
 
 The forward Swift test is gated on `MPP_CONFORMANCE_URL` (skipped by the default
@@ -109,3 +114,48 @@ non-required live CI job alongside the channel-session live conformance, not the
 formatters emit (golden vectors captured from `mppx` `session/Sse.js` + `session/Ws.js`). The reverse
 direction (`mppx`'s own `parseEvent` / `parseMessage` accept our output) was verified directly
 against those parsers. Hermetic (no server), part of the default suite.
+
+## Live WebSocket transport (metered session over a real socket)
+
+Beyond the codec parity above, the live `MPPWebSocket` / `MPPWebSocketLive` transport is exercised
+over a real `ws://` socket by `MPPWebSocketLiveTests`: a live Hummingbird WebSocket server (our
+server adapter) and our client adapter run a full metered session end to end (authorization ->
+payment-receipt -> message chunks -> payment-close-ready). Gated on `MPP_WS_LIVE` and run isolated on
+the **Linux** CI job + local macOS dev (the GitHub macOS runner cannot reliably bind a localhost
+WebSocket listener via NIOTransportServices); the deterministic in-process `MPPWebSocket` suites are
+the required gate on both platforms.
+
+A standalone *cross-SDK* live ws session against the `mppx` ws server is deliberately **not** built:
+it rides the on-chain channel rail, so it would re-prove a composition already proven (the codec
+parity above + this live self round-trip + the on-chain channel that `run-session.sh` already proves
+cross-SDK against the same `mppx` server), with only the socket framing swapped.
+
+## JSON-RPC / MCP transport (both directions, stdio)
+
+The `MPPMCP` payment binding is verified against the reference `mppx` `mcp-sdk` over a real stdio
+transport, both directions, offline (a zero-amount proof, no chain):
+
+- **Forward** (`run-mcp.sh`): the `mppx` `mcp-sdk` **client** calls a payment-gated tool on our
+  `MPPMCPConformanceServer` (`MPPMCP` gate over `MPPServerMiddleware`), reads the `-32042` frame +
+  challenge, pays via `params._meta`, and reads the receipt from `result._meta`.
+- **Reverse** (`run-mcp-reverse.sh`): our Swift `MCPPaymentClient` pays the `mppx` `mcp-sdk`
+  **server** (reads its `-32042`, builds the credential, reads its receipt).
+
+Both run in the required `Conformance (local)` CI job (offline + deterministic).
+
+## CLI (the shipped `mpp` binary)
+
+`run-cli.sh` drives the **installed artifact**, not just the in-process library: it boots the same
+`mppx` reference server and runs the built `mpp` binary against it over real HTTP
+(`mpp pay <url> --approve auto --max-amount 0 --insecure --json` settles a zero-amount proof: exit
+0, `status:200`, `ok:true`, a receipt reference), and asserts the curl-like fail-closed exit-code
+contract (no key -> exit 69). Offline; runs in the required `Conformance (local)` CI job.
+
+## Stripe rail
+
+The `MPPStripeServer` charge path is conformance-checked at two levels. **Offline:** `StripeChargeVerifier`
+maps a Shared Payment Token credential to a PaymentIntent via an injected seam (stubbed, no account),
+covering status -> receipt/reject, Connect parity, and validation, in the default suite.
+**Live (`run-stripe-live.sh`):** a real `sk_test` settles a real test-mode PaymentIntent against
+`api.stripe.com` through `StripePaymentIntentClient`; preview + secret gated (`STRIPE_TEST_SK`), the
+test self-skips when the key is absent, so it runs only in the non-required `stripe-live` CI job.
