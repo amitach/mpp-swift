@@ -173,6 +173,37 @@ struct SessionWebSocketServerTests {
         #expect(socket.closeCode == 1000)
     }
 
+    @Test(
+        "a genuine stream error (not a cancellation) still fails closed with payment-error + 1011"
+    )
+    func genuineStreamErrorFailsClosed() async throws {
+        let socket = InProcessSocket()
+        // The companion to closeRequestCancelsThrowingStream: a stream that finishes-throwing a
+        // NON-cancellation error while the task is NOT cancelled (no close-request). This proves
+        // the
+        // `if Task.isCancelled { return }` guard in startStream's catch does not OVER-swallow: a
+        // real
+        // failure must still surface as payment-error(500) + close 1011 (the failStream path).
+        struct StreamFailure: Error {}
+        let failing = AsyncThrowingStream<SessionStreamEvent, any Error> { continuation in
+            continuation.finish(throwing: StreamFailure())
+        }
+
+        try socket.peerSend(authFrame())
+        await SessionWebSocketServer.serve(
+            inbound: socket.inbound, writer: socket,
+            verify: { _ in SessionAuthorization(receipt: makeReceipt("0xauth"), kind: .stream) },
+            makeStream: { failing },
+            closeReceipt: { makeReceipt("0xclose") }
+        )
+
+        #expect(socket.sent == [
+            .receipt(makeReceipt("0xauth")),
+            .error(status: 500, message: "websocket session failed"),
+        ])
+        #expect(socket.closeCode == 1011)
+    }
+
     @Test("a topUp acknowledges the receipt without streaming or closing")
     func topUpAck() async throws {
         let socket = InProcessSocket()
