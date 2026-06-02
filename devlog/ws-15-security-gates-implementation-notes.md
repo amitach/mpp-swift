@@ -36,8 +36,9 @@ trace, so this was a real (if low-likelihood) leak, verified empirically before 
 
 Fix (additive, no change to signing logic): `Secp256k1Signer` now conforms to
 `CustomStringConvertible` + `CustomDebugStringConvertible`, rendering only the non-secret public key
-(`Secp256k1Signer(publicKey: 0x...)`). `debugDescription` is included because string interpolation
-and most logging use it.
+(`Secp256k1Signer(publicKey: 0x...)`). `description` covers string interpolation, `print`, and
+`String(describing:)`; `debugDescription` (used by `debugPrint` and the debugger) is included so that
+path redacts too. Both return the same redacted rendering.
 
 Tests:
 - `Secp256k1SignerTests.redactsPrivateKey`: `description`/`debugDescription`/`"\(signer)"` never
