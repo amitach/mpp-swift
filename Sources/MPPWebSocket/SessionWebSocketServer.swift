@@ -176,6 +176,10 @@ private actor Session {
             await close(code: CloseCode.policyViolation, reason: rejection.message)
             return
         } catch {
+            // A cancellation here means the serve task was torn down (e.g. shutdown) while a verify
+            // was in flight, not a verification failure: don't emit a spurious payment-error frame
+            // (same cancellation-vs-error distinction as startStream's catch).
+            if Task.isCancelled { return }
             await emit(.error(status: 500, message: "session verification failed"))
             await close(code: CloseCode.internalError, reason: "session verification failed")
             return
