@@ -31,10 +31,12 @@ private final class StringBox: @unchecked Sendable {
     }
 }
 
-// Gated behind MPP_WS_LIVE: this boots a real WebSocket server (app.test(.live)), which is
-// unreliable under the full ~800-test parallel `swift test` run (it races other live ServiceGroup
-// servers during boot/teardown). The default suite skips it; CI runs it isolated with the env set.
-// The in-process MPPWebSocket suites cover the orchestration deterministically in the default run.
+// Gated behind MPP_WS_LIVE so the parallel default `swift test` skips it (the in-process
+// MPPWebSocket suites are the deterministic gate on both platforms). CI runs it isolated with the
+// env set on LINUX only: the GitHub macOS runner cannot reliably bind a localhost WebSocket
+// listener via NIOTransportServices (the Network.framework NWListener refuses connections in that
+// sandboxed runner), so the live socket is exercised on Linux CI and in local macOS dev, not on
+// the macOS runner. The connect must succeed on the first try: no retry, no sleep.
 @Suite("MPPWebSocketLive", .enabled(if: ProcessInfo.processInfo.environment["MPP_WS_LIVE"] != nil))
 struct LiveWebSocketSessionTests {
     @Test("a metered session runs end to end over a real WebSocket (server <-> client)")
@@ -68,31 +70,9 @@ struct LiveWebSocketSessionTests {
 
         try await app.test(.live) { client in
             let port = try #require(client.port)
-            let result = try await runSessionWithRetry(port: port)
-            #expect(result.receipt == finalReceipt)
-            #expect(result.messages == ["a", "b"])
-            #expect(result.receiptRefs == ["0xauth"])
-        }
-    }
-}
+            let messages = StringBox()
+            let receiptRefs = StringBox()
 
-/// The collected result of one client session.
-private struct SessionResult {
-    let receipt: Receipt
-    let messages: [String]
-    let receiptRefs: [String]
-}
-
-/// Runs the client session, retrying only a transport-level connect race: a live socket can
-/// transiently refuse a connection right at server-ready under the heavy parallel load of the
-/// full test run. A session-level `ClientError` is a real failure and is never retried. Fresh
-/// collectors per attempt, so a retried run never double-counts messages or receipts.
-private func runSessionWithRetry(port: Int, attempts: Int = 5) async throws -> SessionResult {
-    var lastError: (any Error)?
-    for attempt in 1 ... attempts {
-        let messages = StringBox()
-        let receiptRefs = StringBox()
-        do {
             let receipt = try await WebSocketSessionClient.run(
                 url: "ws://127.0.0.1:\(port)",
                 authorization: "init-cred",
@@ -106,15 +86,10 @@ private func runSessionWithRetry(port: Int, attempts: Int = 5) async throws -> S
                 ),
                 logger: Logger(label: "mpp.ws.test")
             )
-            return SessionResult(
-                receipt: receipt, messages: messages.values, receiptRefs: receiptRefs.values
-            )
-        } catch let error as SessionWebSocketClient.ClientError {
-            throw error // a session-level failure is real, never a flaky connect
-        } catch {
-            lastError = error
-            if attempt < attempts { try? await Task.sleep(for: .milliseconds(150)) }
+
+            #expect(receipt == finalReceipt)
+            #expect(messages.values == ["a", "b"])
+            #expect(receiptRefs.values == ["0xauth"])
         }
     }
-    throw lastError ?? SessionWebSocketClient.ClientError.closedWithoutReceipt
 }

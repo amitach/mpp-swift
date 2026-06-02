@@ -332,7 +332,9 @@ let package = Package(
         .target(
             name: "MPPWebSocketLive",
             dependencies: [
-                "MPPWebSocket", "MPPCore", "MPPTempoServer",
+                // MPPCore for Receipt; MPPWebSocket for the orchestration seams. MPPTempoServer is
+                // pulled transitively via MPPWebSocket and is not used here directly.
+                "MPPWebSocket", "MPPCore",
                 .product(name: "WSClient", package: "swift-websocket"),
                 .product(name: "WSCore", package: "swift-websocket"),
             ]
