@@ -85,6 +85,14 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+      - name: Live WebSocket session (isolated)
+        # The metered-session round-trip boots a real WebSocket server (app.test(.live)). It is
+        # gated behind MPP_WS_LIVE so the parallel default `swift test` above skips it, and run
+        # isolated here. LINUX ONLY (this job): the GitHub macOS runner cannot reliably bind a
+        # localhost WebSocket listener via NIOTransportServices (NWListener refuses connections in
+        # that sandboxed runner), so the live socket is exercised on Linux CI + local macOS dev;
+        # the in-process MPPWebSocket suites cover the orchestration on both platforms.
+        run: MPP_WS_LIVE=1 swift test --filter MPPWebSocketLiveTests
 
   conformance:
     # Name kept as "Conformance (local)" to match the required status check in branch

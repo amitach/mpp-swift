@@ -52,6 +52,7 @@ let package = Package(
         .library(name: "MPPProxy", targets: ["MPPProxy"]),
         .library(name: "MPPHummingbird", targets: ["MPPHummingbird"]),
         .library(name: "MPPWebSocket", targets: ["MPPWebSocket"]),
+        .library(name: "MPPWebSocketLive", targets: ["MPPWebSocketLive"]),
         .executable(name: "mpp", targets: ["mpp"]),
     ],
     dependencies: [
@@ -110,6 +111,23 @@ let package = Package(
         .package(
             url: "https://github.com/hummingbird-project/hummingbird.git",
             "2.25.0" ..< "3.0.0"
+        ),
+        // hummingbird-websocket: the Hummingbird server-side WebSocket upgrade, used only by the
+        // MPPWebSocketLive test target to boot a live server for the round-trip test (the adapter
+        // itself is written against the framework-agnostic swift-websocket primitives below).
+        // FLOOR range (Apple-ecosystem pinning policy); swift-nio is already in the graph.
+        .package(
+            url: "https://github.com/hummingbird-project/hummingbird-websocket.git",
+            "2.7.0" ..< "3.0.0"
+        ),
+        // swift-websocket: the framework-agnostic WebSocket primitives (WSCore inbound/outbound,
+        // WSClient). The MPPWebSocketLive adapter is written against these, not Hummingbird, so the
+        // server binding works with any host that exposes a WSCore upgrade. Already in the graph
+        // via
+        // hummingbird-websocket; declared directly so the products are importable.
+        .package(
+            url: "https://github.com/hummingbird-project/swift-websocket.git",
+            "1.6.0" ..< "2.0.0"
         ),
         // swift-argument-parser: the command-line surface for the shipped `mpp` executable. Apple
         // first-party with first-class Linux support, so the Linux CI builds it. FLOOR range
@@ -306,6 +324,29 @@ let package = Package(
         .testTarget(
             name: "MPPWebSocketTests",
             dependencies: ["MPPWebSocket", "MPPCore", "MPPTempoServer"]
+        ),
+        // MPPWebSocketLive: the live socket adapters that drive MPPWebSocket's orchestration over a
+        // real WebSocket - a hummingbird-websocket server upgrade handler and a WSClient consumer.
+        // The only target that links the swift-websocket / nio WebSocket graph, so the pure
+        // orchestration core (MPPWebSocket) stays dependency-free.
+        .target(
+            name: "MPPWebSocketLive",
+            dependencies: [
+                // MPPCore for Receipt; MPPWebSocket for the orchestration seams. MPPTempoServer is
+                // pulled transitively via MPPWebSocket and is not used here directly.
+                "MPPWebSocket", "MPPCore",
+                .product(name: "WSClient", package: "swift-websocket"),
+                .product(name: "WSCore", package: "swift-websocket"),
+            ]
+        ),
+        .testTarget(
+            name: "MPPWebSocketLiveTests",
+            dependencies: [
+                "MPPWebSocketLive", "MPPWebSocket", "MPPCore", "MPPTempoServer",
+                .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "HummingbirdWebSocket", package: "hummingbird-websocket"),
+                .product(name: "HummingbirdTesting", package: "hummingbird"),
+            ]
         ),
         // MPPStripe: the Stripe charge method, CLIENT side (StripeChargeMethod). Presents a
         // Shared Payment Token in the credential; no crypto (no MPPEVM) and no Stripe secret. The
