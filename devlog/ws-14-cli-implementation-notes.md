@@ -138,3 +138,51 @@ Review follow-ups (Devin): a missing `--account` now surfaces a clear "No such a
 Verified: full `swift test` green (795 tests; new suites: Config loading, services registry parsing - incl. a float field through `serviceObject` - and init). swiftformat + swiftlint --strict clean; no em dashes. **End-to-end on the binary:** `init` writes mpp.json; `pay -c cfg.json` with a config `maxAmount` and no key exits 69 (config read - the SpendingCap was set, so NOT the exit-2 unbounded-headless error you get without config); `services list --url <bad>` -> exit 2; `services --help` lists the three subcommands.
 
 Review follow-ups (Devin): an invalid `approve` value in the config now FAILS CLOSED (a clear error) instead of being silently ignored and falling to the default (`Pay.resolveApprove`, unit-tested); `serviceObject` now THROWS on a malformed registry (it used `try?`, which masked a parse failure as a misleading "no service with id"); and `resolveServicesURL` short-circuits an explicit `--url` / `MPP_SERVICES_URL` before loading config, so an absent/malformed `./mpp.json` cannot block an explicit URL. Trimmed the `init` template's trailing blank line. Affirmed (no change): CWD config auto-discovery is a known trust pattern; the optional-chaining produced `String?` correctly. (The non-required Rust-FFI macOS job's failure was the live Moderato `httpStatus(503)` testnet flake, not this PR.)
+
+A second review round raised one safety point worth a real fix: the `init` template shipped `approve: auto`, which silently downgraded the safe interactive default (a tty prompt) to no-prompt `AllowAll` once a user ran `mpp init`. Changed the template to `approve: null`, which defers to the context-aware default (prompt when interactive, fail-closed headless); headless behavior is identical either way (both fail closed via `unboundedHeadlessSpend` without `--max-amount`), so this is strictly safer. The remaining info nits were affirmed as deferred non-bugs: parameterizing `resolveServicesURL`'s env read to match `loadConfig` (testability), and adding a `catch ExitCode` pass-through to `InitCommand.run()` (inert today: its `execute()` only throws `CLIError`, never an `ExitCode`).
+
+## PR-G: `--mcp` mode - DROPPED (verified non-parity)
+
+The plan listed a `--mcp` mode that would expose the CLI's own subcommands as MCP tools for an agent to drive, on the assumption it was mppx parity. That assumption was wrong, verified at the reference source (`wevm/mppx@165bc9c`): `src/bin.ts` is only `cli.serve()`; `src/cli/cli.ts` registers exactly `account`, `discover`, `init`, `services`, `sign` plus the root `mppx <url>` (pay). There is **no `mcp` subcommand, no `--mcp` / `--serve` root flag**, and the README has no MCP-CLI mode. mppx's entire MCP surface is the payment-over-MCP rail (`src/Mcp.ts`: the `-32042` frame, the `org.paymentauth/credential` and `org.paymentauth/receipt` meta keys, and `src/mcp-sdk/server` - a transport that gates a tool behind `payment.charge`). That rail is **already shipped as our `MPPMCP` module** (PR merged earlier; both directions are conformance-tested in CI via `run-mcp.sh` / `run-mcp-reverse.sh` against the live mppx `mcp-sdk`).
+
+So a CLI-as-MCP-tools server would be (a) non-parity, (b) an unrequested abstraction, (c) the highest-risk surface (an agent-facing server able to spend funds and export keys), and (d) of no consumer value - the first consumer (Kapsicum, PRs #489/#539/#543) integrates the *library* (`MCPPaymentClient` + an injected authorizer) and explicitly must NOT shell out to `mpp --mcp` (a subprocess cannot own the biometric prompt). Dropped with the user's confirmation; the payment-over-MCP direction is complete.
+
+## PR-H: CLI conformance harness + CI + parity matrix
+
+- **`Scripts/conformance/run-cli.sh`** (new): boots the reference mppx server (`server.mjs`, the same one the library client's `run.sh` uses) and drives the **shipped `mpp` binary** against it over real HTTP. The library already has a cross-SDK test (`run.sh` -> `ConformanceProofTests`); this targets the *installed artifact* instead, so it proves the binary speaks the wire end to end (402 -> select -> authorize -> build credential -> re-send -> receipt) rather than just the in-process library over a stub transport. Two assertions: (1) `mpp pay <proof-url> --approve auto --max-amount 0 --insecure --json` exits 0 and the envelope reports `status:200` + `ok:true` + a receipt `reference` (the server returns 200 only once the proof verifies, the 402 challenge otherwise); (2) with no key it exits **69** (no payment method), the curl-like fail-closed contract on the real binary. `--max-amount 0` keeps headless `auto` bounded (never a silent unbounded approve); the zero-amount proof is identity-only ecrecover, so the run is fully offline.
+- **CI:** added as a step in the required `Conformance (local)` job (after the reverse-MCP step), reusing that job's `setup-node` + `npm ci --ignore-scripts` and the cached `.build`. No new runner, no secrets, `contents: read` only.
+
+### G7.5 peer-test parity matrix (mppx -> mpp-swift)
+
+| mppx surface | mpp-swift | parity | tested by |
+|---|---|---|---|
+| root `mppx <url>` (pay) | `mpp pay <url>` (subcommand) | behavioral match; invocation diverges (G3.5 #1) | `run-cli.sh` (binary vs mppx server) + `ConformanceProofTests` (library) + `MPPCLITests` (unit, injected transport) |
+| pay exit codes | 0/2/22/60/69/75/77 | match | `run-cli.sh` (no-key 69) + `MPPCLITests` |
+| `sign` (+ `--dry-run`) | `mpp sign` (+ `--dry-run`) | match (pure secp256k1, no FFI) | `SignDiscoverTests` |
+| `discover generate` / `validate` | `mpp discover generate` / `validate` | match; generate input format diverges (G3.5 #7) | `SignDiscoverTests` |
+| `account create/default/delete/list/view` | same | match (Keychain/env store) | `AccountTests` (in-memory store) |
+| `account export` | `mpp account export` | match, gated (Touch ID on Apple / `--yes` env) | `AccountTests` |
+| `account fund` | **stubbed** (prints faucet pointer, exit 2) | N/A - no Tempo faucet client (G3.6) | n/a |
+| `init` | `mpp init` (writes `mpp.json`) | match; config format diverges by design (G3.5 #3) | `ServicesInitConfigTests` |
+| `services list/show/endpoints` | same | match offline; more tolerant input (G3.5 #5) | `ServicesInitConfigTests`; live registry gated on `MPP_SERVICES_URL` |
+| config precedence + env | flag > env > file > default | match | `ConfigLoadingTests` + `ApproveResolutionTests` |
+| MCP payment rail (`src/Mcp.ts` + `mcp-sdk`) | `MPPMCP` module | match (already shipped) | `run-mcp.sh` / `run-mcp-reverse.sh` (live mppx mcp-sdk) |
+| CLI-as-MCP-tools mode | **does not exist in mppx** | N/A - dropped (see PR-G) | n/a |
+| live settled Tempo charge / channel / subscription | gated (Rust FFI + testnet) | gated, non-required | `Conformance (testnet)` / `Live Moderato` jobs |
+
+### G3.5 reconciliation (divergences, with reasons)
+
+1. **pay is a subcommand (`mpp pay <url>`), not the root** as in mppx (`mppx <url>`). swift-argument-parser models distinct behaviors as subcommands; a root positional URL fights subcommand dispatch and the `--help` is clearer this way.
+2. **Env prefix `MPP_*`** (`MPP_PRIVATE_KEY`, `MPP_STRIPE_SPT`, `MPP_SERVICES_URL`, `MPP_CONFIG`) vs mppx `MPPX_*` - this SDK's own namespace.
+3. **Config is `mpp.json`** (Codable JSON, zero-dep) vs mppx's executed TS config. JSON cannot run code (no eval surface) and Swift has no TS runtime; the precedence semantics match.
+4. **`MPP_STRIPE_SPT`** - the client presents a pre-obtained Shared Payment Token, never a Stripe `sk_` secret (a server-side value); `MPP_SECRET_KEY` (the server verification secret) is deliberately not read by the client.
+5. **services parsing is more tolerant** - we accept both a top-level array and `{ "services": [...] }`; mppx requires the wrapper. Strictly a superset; the wrapper still parses.
+6. **`account fund` is stubbed** (G3.6) - it needs a live Tempo faucet client we do not ship; it prints a pointer and exits 2 rather than pretending.
+7. **`discover generate` input** is a thin CLI-local `Decodable { info, routes, serviceInfo? }` (because `DiscoveryRoute` is not `Codable`) vs mppx's module default-export; the emitted `DiscoveryDocument` is the same.
+8. **`--mcp` mode dropped** (see PR-G) - not a real mppx feature.
+
+### G3.6 subtraction
+
+No dead code added: the conformance harness reuses the existing `server.mjs` and the shared `harness-http.mjs` (no new Node server), and the CI step reuses the existing job's node/`.build` setup. `account fund` stays a stub (no speculative faucet client). The dropped `--mcp` mode means no `MCPMode.swift` and no agent-facing tool registry were written. Deferred PR-F info nits remain explicitly out of scope (recorded above), not silently carried as half-built code.
+
+Verified: `run-cli.sh` passes end to end locally (exit 0; both assertions green) against the real mppx server, building and exercising the actual `.build` binary.

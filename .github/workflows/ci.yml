@@ -142,6 +142,12 @@ jobs:
       # -32042, build the credential, read its receipt). The symmetric direction; both now live.
       - name: Cross-SDK MCP conformance reverse (our Swift client -> mppx mcp-sdk server, stdio)
         run: Scripts/conformance/run-mcp-reverse.sh
+      # CLI: drive the SHIPPED mpp binary against the reference mppx server over real HTTP,
+      # proving the installed executable (not just the in-process library client) settles a
+      # zero-amount proof end to end and honors the curl-like exit-code contract (no key -> 69).
+      # Offline + deterministic (zero-amount proof is ecrecover, no RPC).
+      - name: Cross-SDK CLI conformance (mpp binary -> mppx server, offline)
+        run: Scripts/conformance/run-cli.sh
 
   conformance-testnet:
     name: Conformance (testnet)
