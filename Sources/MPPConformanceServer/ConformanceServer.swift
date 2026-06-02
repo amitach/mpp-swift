@@ -195,8 +195,12 @@ enum ConformanceServer {
 
         // Proxy conformance: the mppx client pays GET /proxy/echo/resource THROUGH our MPPProxy,
         // which forwards the verified request to a free in-server origin (see
-        // ProxyConformanceRoutes.swift).
-        try registerProxyConformance(on: router)
+        // ProxyConformanceRoutes.swift). The proxy pins its origin URL to the bound port, so it is
+        // mounted only for a fixed PORT (run-proxy.sh sets one); a PORT=0 ephemeral run, used only
+        // by the direct routes, skips it rather than mounting an unreachable :0 origin.
+        if requestedPort != 0 {
+            try registerProxyConformance(on: router)
+        }
 
         #if MPP_TEMPO_FFI_ENABLED
             if let sessionGate = try await makeSessionMiddleware() {

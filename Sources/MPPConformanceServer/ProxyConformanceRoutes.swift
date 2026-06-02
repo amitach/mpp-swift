@@ -54,7 +54,7 @@ func makeProxyConformance() throws -> MPPProxy {
 }
 
 /// Mounts the free origin (`GET /origin/resource`) and the proxy's paid route
-/// (`GET|POST /proxy/echo/resource`) on `router`. The mppx client pays the proxy route; the proxy
+/// (`GET /proxy/echo/resource`) on `router`. The mppx client pays the proxy route; the proxy
 /// verifies the foreign proof and forwards to the origin over loopback.
 @available(macOS 14, iOS 17, tvOS 17, visionOS 1, *)
 func registerProxyConformance(on router: Router<BasicRequestContext>) throws {
@@ -68,10 +68,11 @@ func registerProxyConformance(on router: Router<BasicRequestContext>) throws {
         )
     }
     let proxyResponder = try ProxyResponder<BasicRequestContext>(proxy: makeProxyConformance())
-    for method in [HTTPRequest.Method.get, .post] {
-        router.on("proxy/echo/resource", method: method) { request, context in
-            logIncoming(request.head)
-            return try await proxyResponder.respond(to: request, context: context)
-        }
+    // GET only: the proxy service declares a single GET /resource route and self-routes, so a POST
+    // here would pass Hummingbird but 404 in the engine (unlike the method-agnostic GatedResponder
+    // routes). Register exactly what the proxy serves.
+    router.on("proxy/echo/resource", method: .get) { request, context in
+        logIncoming(request.head)
+        return try await proxyResponder.respond(to: request, context: context)
     }
 }
