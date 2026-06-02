@@ -122,14 +122,18 @@ struct Pay: AsyncParsableCommand {
     }
 
     private func execute() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        // Resolution order: flag > config file > built-in default.
+        let config = try loadConfig(explicitPath: globals.config, environment: environment)
         let request = try buildRequest()
-        let cap = try parseCap()
+        let resolvedApprove = approve ?? config?.approve.flatMap(ApproveMode.init(rawValue:))
+        let cap = try parseCap(maxAmount ?? config?.maxAmount)
         let authorizer = try AuthorizerFactory.make(
-            approve: approve, maxAmount: cap, interactive: Terminal.isInteractive
+            approve: resolvedApprove, maxAmount: cap, interactive: Terminal.isInteractive
         )
         let methods = try ClientKeyLoader.methods(
-            account: globals.account, store: makeAccountStore(),
-            environment: ProcessInfo.processInfo.environment
+            account: globals.account ?? config?.account, store: makeAccountStore(),
+            environment: environment
         )
         guard !methods.isEmpty else { throw CLIError.noPaymentMethod }
 
@@ -172,8 +176,8 @@ struct Pay: AsyncParsableCommand {
         return request
     }
 
-    private func parseCap() throws -> Amount? {
-        guard let value = maxAmount else { return nil }
+    private func parseCap(_ value: String?) throws -> Amount? {
+        guard let value else { return nil }
         do {
             return try Amount(value)
         } catch {

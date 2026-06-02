@@ -52,4 +52,7 @@ struct GlobalOptions: ParsableArguments {
         help: "Use a stored account's key (macOS Keychain) instead of MPP_PRIVATE_KEY."
     )
     var account: String?
+
+    @Option(name: [.customShort("c"), .customLong("config")], help: "Config file path (mpp.json).")
+    var config: String?
 }

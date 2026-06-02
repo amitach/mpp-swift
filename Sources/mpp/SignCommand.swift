@@ -28,6 +28,9 @@ struct Sign: AsyncParsableCommand {
     )
     var account: String?
 
+    @Option(name: [.customShort("c"), .customLong("config")], help: "Config file path (mpp.json).")
+    var config: String?
+
     @Flag(name: .customLong("json"), help: "Emit a JSON result instead of plain text.")
     var json = false
 
@@ -56,9 +59,14 @@ struct Sign: AsyncParsableCommand {
             emitDryRun(challenges)
             return
         }
+        let environment = ProcessInfo.processInfo.environment
+        let resolvedAccount = try account ?? loadConfig(
+            explicitPath: config,
+            environment: environment
+        )?.account
         let signed = try await signedHeader(
-            forChallengeValue: challenge, environment: ProcessInfo.processInfo.environment,
-            account: account, store: makeAccountStore()
+            forChallengeValue: challenge, environment: environment,
+            account: resolvedAccount, store: makeAccountStore()
         )
         if json {
             emitJSON(SignResult(
