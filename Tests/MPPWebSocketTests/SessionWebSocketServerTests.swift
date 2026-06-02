@@ -204,6 +204,34 @@ struct SessionWebSocketServerTests {
         #expect(socket.closeCode == 1011)
     }
 
+    @Test("a close-request whose receipt snapshot fails surfaces payment-error + 1011")
+    func closeRequestReceiptFailureFailsClosed() async throws {
+        struct CloseReceiptFailure: Error {}
+        let socket = InProcessSocket()
+        // The close-request cancels a (production-shaped, finish-throwing-on-cancel) stream, then
+        // the closeReceipt snapshot THROWS. The handshake must fail closed: not a silent close 1000
+        // with no close-ready (indistinguishable from a clean settled close), but payment-error +
+        // close 1011. Guards against the prior `try?` that silently swallowed the failure.
+        let throwingOnCancel = AsyncThrowingStream<SessionStreamEvent, any Error> { continuation in
+            continuation.onTermination = { _ in continuation.finish(throwing: CancellationError()) }
+        }
+
+        try socket.peerSend(authFrame())
+        try socket.peerSend(closeRequestFrame())
+        await SessionWebSocketServer.serve(
+            inbound: socket.inbound, writer: socket,
+            verify: { _ in SessionAuthorization(receipt: makeReceipt("0xauth"), kind: .stream) },
+            makeStream: { throwingOnCancel },
+            closeReceipt: { throw CloseReceiptFailure() }
+        )
+
+        #expect(socket.sent == [
+            .receipt(makeReceipt("0xauth")),
+            .error(status: 500, message: "close failed"),
+        ])
+        #expect(socket.closeCode == 1011)
+    }
+
     @Test("a topUp acknowledges the receipt without streaming or closing")
     func topUpAck() async throws {
         let socket = InProcessSocket()

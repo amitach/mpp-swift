@@ -258,10 +258,18 @@ private actor Session {
         closeRequested = true
         streamTask?.cancel()
         await streamTask?.value
-        if let receipt = try? await closeReceipt() {
+        do {
+            let receipt = try await closeReceipt()
             await sendCloseReady(receipt)
+            await close(code: CloseCode.normal, reason: "payment session closed")
+        } catch {
+            // The settlement-receipt snapshot failed (e.g. the channel store is unavailable). Fail
+            // closed: do NOT close 1000 with no close-ready (which the client cannot distinguish
+            // from a clean settled close); surface it as a payment-error + close 1011 so the client
+            // learns the close did not settle. (Was a `try?` that silently swallowed this.)
+            await emit(.error(status: 500, message: "close failed"))
+            await close(code: CloseCode.internalError, reason: "close failed")
         }
-        await close(code: CloseCode.normal, reason: "payment session closed")
     }
 
     private func sendCloseReady(_ receipt: Receipt) async {

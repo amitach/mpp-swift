@@ -301,7 +301,19 @@ transport + the on-chain channel rail already cross-SDK-proven by `run-session.s
 socket framing swapped, so the marginal coverage does not justify a new blind/flaky non-required job;
 documented as a transport-substituted variant to build only if a ws-specific channel regression appears.
 
-### Closeout (thermonuclear pass) - one real bug found + fixed
+### Closeout (thermonuclear pass) - three issues found + fixed
+
+Summary of the closeout fixes (detail below): (1) the close-request-mid-stream bug; (2) the same
+cancellation-vs-error distinction applied to `processAuthorization`'s verify catch (bug-class
+completeness); (3) a pre-existing `try? await closeReceipt()` in `requestClose` that silently swallowed
+a settlement-receipt snapshot failure - now fails closed (payment-error + close 1011) instead of a
+silent close 1000 with no close-ready, pinned by `closeRequestReceiptFailureFailsClosed`. A
+companion test `genuineStreamErrorFailsClosed` pins that the cancellation guard does NOT over-swallow
+a genuine stream error (it still fails closed with payment-error + 1011). Full WS-9 suite: 14
+in-process tests + the gated live round-trip, all green. An independent second review pass returned
+clean.
+
+#1 - the close-request-mid-stream bug:
 
 The closeout adversarial pass found a real bug the in-process tests had MASKED via a test-double
 fidelity gap (review rule 24). The original `clientCloseRequest` test used a stream that returns a
