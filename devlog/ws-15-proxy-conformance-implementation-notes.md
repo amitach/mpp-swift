@@ -28,7 +28,8 @@ end (a conformance test should use the production transport, not a test double).
     (`makeMiddleware`, reused, now internal), `basePath` "/proxy", default `URLSessionTransport`. Its
     origin baseURL is `http://127.0.0.1:<requestedPort>/origin`.
   - `registerProxyConformance(on:)`: mounts a free `GET /origin/resource` (returns
-    `{"ok":true,"origin":"hit"}`) and the proxy responder on `GET|POST /proxy/echo/resource`.
+    `{"ok":true,"origin":"hit"}`) and the proxy responder on `GET /proxy/echo/resource` (GET only:
+    the proxy declares a single GET route and self-routes, so a POST would 404 in the engine).
 - `ConformanceServer.swift`: `main()` calls `registerProxyConformance(on: router)`. `requestedPort`,
   `makeMiddleware`, and `logIncoming` made internal so the new file reuses them. (`main()` kept under
   the 50-line `function_body_length` cap by extracting the helper.)
@@ -55,8 +56,11 @@ end (a conformance test should use the production transport, not a test double).
 
 ## Notes / fork residue
 
-- The proxy route is always mounted (no env gate); for the non-proxy run scripts it simply sits
-  unused. Its origin URL uses `requestedPort`, so those runs (which set a fixed PORT) are unaffected.
+- The proxy route is mounted only when PORT is fixed (`requestedPort != 0`); a PORT=0 ephemeral run
+  (used only by the direct routes) skips it rather than mounting an unreachable `:0/origin`. The
+  proxy gate shares the `/proof` gate's secret and binding but a separate replay store, which is
+  harmless here: each gate is single-use within itself and no conformance run exercises cross-gate
+  replay (real cross-route isolation is unit-tested by `MPPProxyTests.crossRouteReplayRejected`).
 - Discovery surfaces (`/proxy/openapi.json`, `/proxy/llms.txt`) are reachable by the engine but not
   exercised by this conformance (the paid-route 402 flow is the cross-SDK boundary); a discovery
   conformance could be a later addition.
