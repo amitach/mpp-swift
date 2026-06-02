@@ -421,6 +421,10 @@ let package = Package(
                 "MPPTempo",
                 "MPPTempoServer",
                 "MPPHummingbird",
+                // MPPProxy + MPPDiscovery back the proxy conformance route: the proxy engine
+                // gates a paid route, and PaymentInfo/Info come from the discovery model.
+                "MPPProxy",
+                "MPPDiscovery",
                 // The reverse session route's deps (MPPClient/MPPEVM for live RPC + the
                 // operator key, MPPTempoFFI for the close builder) are added only under the
                 // FFI gate via conformanceServerFFIDeps, so the default proof-only server
