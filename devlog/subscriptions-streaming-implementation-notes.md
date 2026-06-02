@@ -222,3 +222,81 @@ builder either rides PR-3's seam impl or a follow-up; the hermetic engine is the
 - The tuple builder targets the subscription shape (always emits expiry+limits+calls). A fully
   general KeyAuthorization (ox omits expiry/limits/calls conditionally when absent) is not needed
   yet; documented in the type doc. Revisit only if a non-subscription key-auth consumer appears.
+
+## WS-9: the standalone live WebSocket transport (PRs #114, #115, #116)
+
+The metered-session METERING CORE and WIRE CODECS shipped earlier (#86 SSE, #90 the WS
+`{mpp:...}` `SessionWebSocketFrame` codec + offline cross-SDK codec parity vs mppx
+`session/Sse.js` + `session/Ws.js`, all in `MPPTempoServer`). WS-9 proper is the LIVE socket
+transport that drives that core over a real WebSocket.
+
+**Architecture (two layers, decoupled):**
+- `MPPWebSocket` (no external deps) - the transport-agnostic orchestration. `SessionWebSocketServer`
+  (an actor that serializes every socket write; bridges an `AsyncStream<String>` inbound + a
+  `SessionSocketWriter`) and `SessionWebSocketClient` (consumes the stream, auto-answers
+  `payment-need-voucher` with a fresh voucher, returns the terminal receipt). Frame mapping matched
+  to the reference `session/Ws`: auth/voucher receipt -> `payment-receipt`, chunk -> `message`,
+  shortfall -> `payment-need-voucher`, stream-end / client close-request -> `payment-close-ready`,
+  reject -> `payment-error` + close 1008.
+- `MPPWebSocketLive` - the live adapters, written against the framework-agnostic `swift-websocket`
+  primitives (`WSCore` inbound/outbound, `WSClient`), so the server binding works with any host
+  exposing a WSCore upgrade; Hummingbird appears only in the test (to boot `app.test(.live)`).
+
+**Conformance reconciliation (the key decision).** Three distinct things, proven three ways:
+1. **Wire-format parity vs mppx** - PROVEN OFFLINE and required (`ConformanceStreamCodecTests`, #90):
+   `SessionWebSocketFrame` round-trips the exact `{mpp:...}` forms mppx `session/Ws.js` emits/parses.
+2. **Live transport over a real socket (both directions)** - PROVEN by the hermetic self round-trip
+   (`MPPWebSocketLiveTests`, #116): a live Hummingbird WS server (our server adapter) <-> our client
+   adapter over a real `ws://` socket, full metered session end to end. Gated behind `MPP_WS_LIVE`
+   and run isolated on the Linux CI job + local macOS dev (see G3.5 below).
+3. **Cross-SDK LIVE ws session vs mppx (our ws client <-> mppx ws server on a real socket)** - this
+   rides the Tempo payment CHANNEL, whose open/voucher/close is settled ON-CHAIN (mppx's session
+   server relays the open tx and settles close on Moderato; there is no in-memory/hermetic mppx
+   channel mode - verified in `session-server.mjs`). So it could only run TESTNET-gated, the same rail
+   and faucet setup as the existing `run-session.sh`. It is NOT separately built (deliberate, see
+   G3.6): a standalone testnet ws rig (an mppx `Ws.serve` server + our client opening an on-chain
+   channel via the Rust FFI + faucet) would re-exercise a composition that is ALREADY proven - the
+   frame format (1, codec parity), the live socket mechanics (2, the self round-trip), and the
+   on-chain channel open/voucher/close that `run-session.sh` ALREADY proves cross-SDK against the
+   same mppx session server (over the SSE/HTTP transport) - with only the socket framing swapped. The
+   marginal coverage (the swapped framing) is the one part already covered by (1)+(2), so the rig
+   would add a blind, flaky, non-required job for no new assurance. Documented as a transport-
+   substituted variant of `run-session.sh`, to build only if a ws-specific channel regression appears.
+
+### G7.5 peer-test parity matrix (mppx `session/Ws` -> mpp-swift)
+
+| mppx ws surface | mpp-swift | parity | proven by |
+|---|---|---|---|
+| `{mpp:...}` frame format (authorization/message/need-voucher/receipt/close-request/close-ready/error) | `SessionWebSocketFrame` | exact | `ConformanceStreamCodecTests` (#90, offline, required) |
+| server `serve()` loop (auth-frame verify, stream, need-voucher, close handshake, error) | `SessionWebSocketServer` | match | `SessionWebSocketServerTests` (in-process, required, 6 tests) |
+| client consume loop (send auth, auto-voucher on shortfall, receipt, close) | `SessionWebSocketClient` | match | `SessionWebSocketClientTests` (in-process, required, 4 tests) |
+| live socket round-trip (server + client) | `MPPWebSocketLive` adapters | match | `MPPWebSocketLiveTests` (#116, real socket; Linux CI + local) |
+| cross-SDK live ws session (on-chain channel) | covered by composition | deferred-redundant | (1) codec parity + (2) self round-trip + `run-session.sh` (on-chain channel, cross-SDK, same mppx server); standalone ws rig deferred, see conformance note 3 / G3.6 |
+| metering loop (pay-as-you-go, voucher top-up, receipt) | `SessionStream` | match | merged #86/#90 + the above |
+
+### G3.5 reconciliation (deviations, with reasons)
+
+1. **`MPPWebSocketLive` is written on `swift-websocket` (WSCore/WSClient), not Hummingbird** - keeps
+   the adapter framework-agnostic; the server binding works with any WSCore upgrade. Hummingbird is a
+   test-only dep (boots the live server).
+2. **No explicit queued-message cap / 429** (the reference SDK has one) - the server read loop awaits
+   each frame before reading the next, so the transport's own backpressure bounds in-flight work; the
+   reference cap is an artifact of its single-threaded runtime. Documented on `serve()`.
+3. **The live round-trip test runs on the LINUX CI job only** - the GitHub macOS runner cannot reliably
+   bind a localhost WS listener via NIOTransportServices (`NWListener` refuses connections in that
+   sandboxed runner; the test passes on Linux CI and in local macOS dev). The in-process suites cover
+   the orchestration deterministically on both platforms as the required gate.
+4. **No retry / `Task.sleep` in the live test** - a Devin flag (the repo's no-sleep / no-papering
+   rules). The connect must succeed first try; the macOS-runner limitation is handled by (3), not by
+   retrying.
+
+### G3.6 subtraction
+
+No new module for the metering/codec core (it lives in `MPPTempoServer`, not a separate `MPPStreaming`).
+`MPPWebSocketLive` dropped its unused `MPPTempoServer` dependency (transitive via `MPPWebSocket`). The
+unstructured pump task is deliberate (a structured child awaited by the scope would deadlock - the
+pump's inbound only closes when the handler/scope returns). No retry/sleep. The standalone cross-SDK
+testnet ws harness is deliberately NOT added: it would re-prove a composition (codec parity + live
+transport + the on-chain channel rail already cross-SDK-proven by `run-session.sh`) with only the
+socket framing swapped, so the marginal coverage does not justify a new blind/flaky non-required job;
+documented as a transport-substituted variant to build only if a ws-specific channel regression appears.
