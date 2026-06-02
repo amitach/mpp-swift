@@ -51,6 +51,7 @@ let package = Package(
         .library(name: "MPPMCP", targets: ["MPPMCP"]),
         .library(name: "MPPProxy", targets: ["MPPProxy"]),
         .library(name: "MPPHummingbird", targets: ["MPPHummingbird"]),
+        .library(name: "MPPWebSocket", targets: ["MPPWebSocket"]),
         .executable(name: "mpp", targets: ["mpp"]),
     ],
     dependencies: [
@@ -292,6 +293,19 @@ let package = Package(
                 "MPPClient",
                 .product(name: "HTTPTypes", package: "swift-http-types"),
             ]
+        ),
+        // MPPWebSocket: the live WebSocket transport for metered Tempo sessions. This first cut is
+        // the transport-agnostic SERVER orchestration over a `SessionSocket` abstraction, atop the
+        // MPPTempoServer metering core (SessionStream) + the SessionWebSocketFrame codec. The live
+        // hummingbird-websocket socket adapter and the cross-SDK conformance land in later PRs, so
+        // the nio dependency is added when it is first exercised over a real socket, not before.
+        .target(
+            name: "MPPWebSocket",
+            dependencies: ["MPPCore", "MPPTempoServer"]
+        ),
+        .testTarget(
+            name: "MPPWebSocketTests",
+            dependencies: ["MPPWebSocket", "MPPCore", "MPPTempoServer"]
         ),
         // MPPStripe: the Stripe charge method, CLIENT side (StripeChargeMethod). Presents a
         // Shared Payment Token in the credential; no crypto (no MPPEVM) and no Stripe secret. The
