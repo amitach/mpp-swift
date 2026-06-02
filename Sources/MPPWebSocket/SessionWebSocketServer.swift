@@ -263,10 +263,15 @@ private actor Session {
             await sendCloseReady(receipt)
             await close(code: CloseCode.normal, reason: "payment session closed")
         } catch {
-            // The settlement-receipt snapshot failed (e.g. the channel store is unavailable). Fail
-            // closed: do NOT close 1000 with no close-ready (which the client cannot distinguish
-            // from a clean settled close); surface it as a payment-error + close 1011 so the client
-            // learns the close did not settle. (Was a `try?` that silently swallowed this.)
+            // A cancellation here is serve-task teardown (shutdown), not a close-receipt failure:
+            // unwind quietly and let shutdown close, consistent with the startStream and
+            // processAuthorization catches (parallel-path parity).
+            if Task.isCancelled { return }
+            // The settlement-receipt snapshot genuinely failed (e.g. the channel store is
+            // unavailable). Fail closed: do NOT close 1000 with no close-ready (which the client
+            // cannot distinguish from a clean settled close); surface it as a payment-error + close
+            // 1011 so the client learns the close did not settle. (Was a `try?` that swallowed
+            // this.)
             await emit(.error(status: 500, message: "close failed"))
             await close(code: CloseCode.internalError, reason: "close failed")
         }
