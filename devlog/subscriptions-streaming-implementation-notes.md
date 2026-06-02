@@ -300,3 +300,19 @@ testnet ws harness is deliberately NOT added: it would re-prove a composition (c
 transport + the on-chain channel rail already cross-SDK-proven by `run-session.sh`) with only the
 socket framing swapped, so the marginal coverage does not justify a new blind/flaky non-required job;
 documented as a transport-substituted variant to build only if a ws-specific channel regression appears.
+
+### Closeout (thermonuclear pass) - one real bug found + fixed
+
+The closeout adversarial pass found a real bug the in-process tests had MASKED via a test-double
+fidelity gap (review rule 24). The original `clientCloseRequest` test used a stream that returns a
+clean `nil` when the consuming task is cancelled. PRODUCTION `SessionStream.serve` does NOT: it cancels
+its poll loop and `continuation.finish(throwing: CancellationError)`. So a client `payment-close-request`
+mid-stream made the server's `startStream` `for try await` THROW into its `catch -> failStream`,
+emitting a spurious `payment-error` (500) + close `1011` AND pre-empting the `payment-close-ready` -
+instead of the clean close-ready + `1000`. Fix (`SessionWebSocketServer.startStream`): the `catch` now
+short-circuits on `Task.isCancelled` exactly like the post-loop guard, so a close-request-induced throw
+is treated as the close-request path (requestClose owns the handshake), not a session failure. Pinned by
+a new test (`closeRequestCancelsThrowingStream`) whose stream finishes-throwing on cancel, modeling the
+real `SessionStream` shape; it FAILED before the fix (payment-error + 1011) and passes after - the
+failing-before/passing-after is the mutation proof that the test traps the regression. The full WS-9
+suite is 12 in-process tests + the gated live round-trip, all green.

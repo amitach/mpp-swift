@@ -141,6 +141,38 @@ struct SessionWebSocketServerTests {
         #expect(socket.closeCode == 1000)
     }
 
+    @Test(
+        "close-request cancelling a stream that finishes-throwing emits close-ready, not an error"
+    )
+    func closeRequestCancelsThrowingStream() async throws {
+        let socket = InProcessSocket()
+        // Production shape: SessionStream.serve finishes by THROWING CancellationError on cancel
+        // (its poll loop is cancelled), not by returning a clean nil. This stream models that - it
+        // never yields, and on termination (the close-request cancels the consuming task) it
+        // finishes throwing. The guarantee being pinned: consumer-cancellation wins, so the stream
+        // task does NOT take its catch -> failStream path (no spurious payment-error / close 1011);
+        // the close-request handshake owns the single payment-close-ready + normal close.
+        let throwingOnCancel = AsyncThrowingStream<SessionStreamEvent, any Error> { continuation in
+            continuation.onTermination = { _ in continuation.finish(throwing: CancellationError()) }
+        }
+
+        try socket.peerSend(authFrame())
+        try socket.peerSend(closeRequestFrame())
+        await SessionWebSocketServer.serve(
+            inbound: socket.inbound, writer: socket,
+            verify: { _ in SessionAuthorization(receipt: makeReceipt("0xauth"), kind: .stream) },
+            makeStream: { throwingOnCancel },
+            closeReceipt: { makeReceipt("0xready") }
+        )
+
+        // Exactly the auth receipt then one close-ready (no payment-error frame, no double close).
+        #expect(socket.sent == [
+            .receipt(makeReceipt("0xauth")),
+            .closeReady(makeReceipt("0xready")),
+        ])
+        #expect(socket.closeCode == 1000)
+    }
+
     @Test("a topUp acknowledges the receipt without streaming or closing")
     func topUpAck() async throws {
         let socket = InProcessSocket()

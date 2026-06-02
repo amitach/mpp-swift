@@ -222,6 +222,13 @@ private actor Session {
                 if Task.isCancelled { return }
                 await finishStreamNormally()
             } catch {
+                // The cancellation that a `payment-close-request` triggers surfaces HERE when the
+                // metered stream finishes by throwing (production `SessionStream.serve` cancels its
+                // poll loop and `finish(throwing: CancellationError)`). That is the close-request
+                // path, not a session failure: `requestClose` owns the close-ready handshake, so
+                // returning (vs `failStream`) avoids a spurious `payment-error` + close 1011 that
+                // would also pre-empt the close-ready.
+                if Task.isCancelled { return }
                 await failStream(error)
             }
         }
