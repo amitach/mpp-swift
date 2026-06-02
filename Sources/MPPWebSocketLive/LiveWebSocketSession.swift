@@ -102,23 +102,31 @@ public enum WebSocketSessionClient {
         maxFrameSize: Int = 1 << 20
     ) async throws -> Receipt {
         let outcome = OutcomeBox()
-        _ = try await WebSocketClient.connect(
-            url: url, configuration: configuration, logger: logger
-        ) { inbound, outbound, _ in
-            let bridge = bridgeInbound(inbound, maxFrameSize: maxFrameSize)
-            let writer = WSCoreSessionSocketWriter(
-                outbound: outbound, inboundContinuation: bridge.continuation
-            )
-            do {
-                let receipt = try await SessionWebSocketClient.run(
-                    inbound: bridge.stream, writer: writer, authorization: authorization,
-                    makeVoucher: makeVoucher, handlers: handlers
+        do {
+            _ = try await WebSocketClient.connect(
+                url: url, configuration: configuration, logger: logger
+            ) { inbound, outbound, _ in
+                let bridge = bridgeInbound(inbound, maxFrameSize: maxFrameSize)
+                let writer = WSCoreSessionSocketWriter(
+                    outbound: outbound, inboundContinuation: bridge.continuation
                 )
-                outcome.set(.success(receipt))
-            } catch {
-                outcome.set(.failure(error))
+                do {
+                    let receipt = try await SessionWebSocketClient.run(
+                        inbound: bridge.stream, writer: writer, authorization: authorization,
+                        makeVoucher: makeVoucher, handlers: handlers
+                    )
+                    outcome.set(.success(receipt))
+                } catch {
+                    outcome.set(.failure(error))
+                }
+                bridge.pump.cancel()
             }
-            bridge.pump.cancel()
+        } catch {
+            // The captured session result is authoritative. Once the session produced an outcome,
+            // a connection-level teardown error (e.g. a CancellationError when the peer closes the
+            // socket, which NIOPosix and NIOTransportServices surface differently) is not the
+            // session's result. Propagate the connect error only if the session never produced one.
+            if !outcome.isSet { throw error }
         }
         return try outcome.take()
     }
@@ -131,6 +139,10 @@ private final class OutcomeBox: @unchecked Sendable {
 
     func set(_ value: Result<Receipt, any Error>) {
         lock.withLock { if outcome == nil { outcome = value } }
+    }
+
+    var isSet: Bool {
+        lock.withLock { outcome != nil }
     }
 
     func take() throws -> Receipt {
