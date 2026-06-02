@@ -46,6 +46,13 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+      - name: Live WebSocket session (isolated, off the parallel suite)
+        # The metered-session round-trip boots a real WebSocket server (app.test(.live)).
+        # Under the full ~800-test parallel `swift test` above it races other live servers
+        # (ServiceGroup boot/teardown), so it is gated behind MPP_WS_LIVE there and run here
+        # on its own, where the server has no contention. The in-process MPPWebSocket suites
+        # cover the orchestration deterministically in the main run.
+        run: MPP_WS_LIVE=1 swift test --filter MPPWebSocketLiveTests
       - name: Dependency audit (OSV advisory scan)
         # Folded in from the former standalone `audit` job (one fewer runner + one fewer
         # resolve). `swift build` above already wrote Package.resolved. Fails the build if
@@ -85,6 +92,10 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+      - name: Live WebSocket session (isolated, off the parallel suite)
+        # Same gating as the macOS job: the live round-trip server is unreliable under the
+        # full parallel suite, so it is gated behind MPP_WS_LIVE there and run isolated here.
+        run: MPP_WS_LIVE=1 swift test --filter MPPWebSocketLiveTests
 
   conformance:
     # Name kept as "Conformance (local)" to match the required status check in branch
