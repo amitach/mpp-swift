@@ -97,7 +97,9 @@ struct InitTests {
         command.force = true
         try command.run()
         let config = try JSONDecoder().decode(Config.self, from: Data(contentsOf: file))
-        #expect(config.approve == "auto")
+        // approve is intentionally null in the starter config (defers to the safe context-aware
+        // default), so it must not silently downgrade the interactive prompt to no-prompt.
+        #expect(config.approve == nil)
         #expect(config.servicesURL == "https://mpp.dev/api/services")
     }
 }
