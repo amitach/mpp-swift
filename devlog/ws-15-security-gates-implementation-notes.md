@@ -47,9 +47,19 @@ Tests:
   `SecretStore` (both `Data`-backed) do not leak the secret via reflection, so a future refactor to
   a byte array (the exact bug class found above) fails here.
 
-## Documented hardening item (not fixed here)
+## Documented hardening items (not fixed here)
 
-`Credential` has no type-level redacting description, so `String(describing: credential)` would
+**Mirror / dump reflection path.** The redaction above (and `Data`'s `"<n> bytes"` description) covers
+the §11.2.1 surfaces: `description`/`debugDescription`, hence string interpolation, `print`,
+`String(describing:)`, errors, and logs. The explicit debug-only reflection path (`dump(x)` /
+`Mirror(reflecting: x).children`) still enumerates raw secret bytes for EVERY reflectable secret type,
+`Data`-backed ones included (verified: `Data`'s deep mirror exposes its `bytes`). This is outside
+§11.2.1's logging/error/trace threat model (no production code calls `dump`/`Mirror`), so a
+`CustomReflectable` pass across the secret-holding types is recorded as a uniform defense-in-depth
+follow-up rather than gold-plating a debug API in this closeout.
+
+**Credential type-level description.** `Credential` has no type-level redacting description, so
+`String(describing: credential)` would
 reflect its `payload` (the method-specific proof, e.g. a signature). This is lower severity than a
 key: the proof is single-use and already crosses the wire to the server, and credential redaction is
 enforced and tested at the layers that actually emit (`MPPCLITests`, `EVMRPCTests`). A type-level

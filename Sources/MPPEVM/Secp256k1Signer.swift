@@ -55,8 +55,10 @@ public struct Secp256k1Signer: Sendable, CustomStringConvertible, CustomDebugStr
         "Secp256k1Signer(publicKey: \(publicKey.hexPrefixed))"
     }
 
-    /// Same redaction as ``description``. `debugDescription` is what string interpolation and most
-    /// logging use, so it must omit the private key too.
+    /// Same redaction as ``description``. String interpolation and `print` use `description`;
+    /// `debugPrint` and the debugger's `po` use `debugDescription`. Both must omit the private key,
+    /// so they share one rendering. (`dump`/`Mirror` are a separate, debug-only reflection path,
+    /// outside the §11.2.1 logging/error/trace scope; see SECURITY.md note.)
     public var debugDescription: String {
         description
     }
