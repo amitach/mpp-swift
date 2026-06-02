@@ -92,3 +92,22 @@ assertion.
 - Lint (CI parity): `swiftformat` clean; `swiftlint --strict` 0 violations (fixed: no-em-dash in two
   comments, `n`→`reps`, `lf`→`lfForm`, one trailing comma).
 - Linux build/test: relies on CI matrix (the gate is macOS+Linux+Lint+Devin all green before merge).
+
+## Review rounds (Devin)
+
+All findings were Info-level (no bugs). Dispositions:
+
+- **Round 1 (4):** (a) `CredentialFuzzTests` reached the all-optionals challenge by hard-coded
+  `validCorpus()[3]` — *fixed*: now selected by property (digest+expires+opaque) via `#require`, so a
+  reorder cannot silently weaken it. (b) SSE `neverTraps` round-trips only `.message` — intentional;
+  JSON events covered by `jsonEventsRoundTrip`. (c) duplicate `controlChars` across two targets —
+  acknowledged (a shared module for one constant is not worth it). (d) deep-nesting relies on
+  Foundation's cap — acknowledged, safe either way and documented.
+- **Round 2 (2):** (a) the control-char SSE block carries CR/LF, which SSE folding splits, so only
+  0x00–0x09 survived the round-trip — *addressed*: added `controlCharsNoLineBreaks` (C0 range minus the
+  LF/CR terminators) as a message round-trip case, so the full non-terminator control range now
+  survives encode→parse. (b) `Int.min`/`Int.max` error statuses exceed JS `MAX_SAFE_INTEGER` —
+  acknowledged with an in-code comment: these pin the Swift codec's full-range integer round-trip, not
+  a cross-SDK claim (realistic small statuses are covered by `SessionWebSocketFrameTests`).
+
+Every Devin thread was replied to and resolved (mpp-swift's merge gate requires all threads resolved).

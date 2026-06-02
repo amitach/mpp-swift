@@ -20,6 +20,14 @@ import Testing
 private let controlChars = String(String
     .UnicodeScalarView((0 ... 0x1F).map { Unicode.Scalar(UInt8($0)) }))
 
+// C0 control characters excluding the SSE line terminators (LF 0x0A, CR 0x0D). These survive
+// an SSE message round-trip intact; the terminators would split the `data:` line by the WHATWG
+// folding rule (exercised by the adversarial corpus and the `folding` test), so a round-trip of
+// the full control range belongs here, with the terminators removed.
+private let controlCharsNoLineBreaks = String(String.UnicodeScalarView(
+    (0 ... 0x1F).filter { $0 != 0x0A && $0 != 0x0D }.map { Unicode.Scalar(UInt8($0)) }
+))
+
 private func method() throws -> MethodName {
     try MethodName("tempo")
 }
@@ -68,7 +76,7 @@ struct SSEFuzzTests {
     @Test("SSE message events round-trip for newline-only payloads", arguments: [
         "", "hello", "line1\nline2\nline3", "\n\n\n", "trailing\n", "\nleading",
         "café ☃ 🔥", "data: looks like a field", "event: also looks like a field",
-        String(repeating: "x", count: 10000),
+        controlCharsNoLineBreaks, String(repeating: "x", count: 10000),
     ])
     func messageRoundTrip(_ text: String) throws {
         let event = SessionStreamEvent.message(text)
@@ -142,6 +150,9 @@ struct WebSocketFrameFuzzTests {
             .receipt(receipt),
             .closeRequest,
             .closeReady(receipt),
+            // Int.min/Int.max pin the Swift codec's full-range integer round-trip. They are
+            // not a cross-SDK claim: realistic HTTP-style statuses (small ints, JS-safe) are
+            // what interoperate and are covered by SessionWebSocketFrameTests.
             .error(status: Int.min, message: ""),
             .error(status: Int.max, message: "boom"),
             .error(status: -1, message: "negative"),
