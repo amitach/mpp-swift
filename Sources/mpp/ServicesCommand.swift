@@ -112,9 +112,13 @@ private let defaultServicesURL = "https://mpp.dev/api/services"
 /// Resolves the registry URL: flag > MPP_SERVICES_URL env > config `servicesURL` > built-in
 /// default.
 func resolveServicesURL(urlFlag: String?, configPath: String?) throws -> String {
+    // Short-circuit higher-precedence tiers so an explicit flag / env value is honored even when a
+    // (lower-precedence) config file is absent or malformed.
+    if let urlFlag { return urlFlag }
     let environment = ProcessInfo.processInfo.environment
+    if let fromEnv = environment["MPP_SERVICES_URL"] { return fromEnv }
     let config = try loadConfig(explicitPath: configPath, environment: environment)
-    return urlFlag ?? environment["MPP_SERVICES_URL"] ?? config?.servicesURL ?? defaultServicesURL
+    return config?.servicesURL ?? defaultServicesURL
 }
 
 func fetchRegistry(_ urlString: String) async throws -> Data {
@@ -144,7 +148,14 @@ struct ServicesWrapper: Decodable { let services: [RegistryEntry] }
 /// floating-point
 /// or other fields anywhere in the document do not trip the integer-only JSONValue).
 func serviceObject(in data: Data, id: String) throws -> [String: Any]? {
-    let root = try? JSONSerialization.jsonObject(with: data)
+    // A malformed registry throws (a distinct, clear failure), rather than a misleading
+    // "no service with id" the caller would otherwise report.
+    let root: Any
+    do {
+        root = try JSONSerialization.jsonObject(with: data)
+    } catch {
+        throw CLIError.invalidInput("unrecognized services registry response")
+    }
     let array: [Any]
     if let topArray = root as? [Any] {
         array = topArray

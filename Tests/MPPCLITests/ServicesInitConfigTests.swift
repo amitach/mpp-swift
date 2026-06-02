@@ -72,6 +72,19 @@ struct ServicesParsingTests {
     }
 }
 
+@Suite("approve resolution")
+struct ApproveResolutionTests {
+    @Test("the flag wins; a valid config value is used; an invalid one fails closed; nil otherwise")
+    func resolution() throws {
+        #expect(try Pay.resolveApprove(flag: .tty, configValue: "biometric") == .tty)
+        #expect(try Pay.resolveApprove(flag: nil, configValue: "auto") == .auto)
+        #expect(try Pay.resolveApprove(flag: nil, configValue: nil) == nil)
+        #expect(throws: CLIError.self) {
+            _ = try Pay.resolveApprove(flag: nil, configValue: "bogus")
+        }
+    }
+}
+
 @Suite("init")
 struct InitTests {
     @Test("init writes a config file that decodes back to Config")

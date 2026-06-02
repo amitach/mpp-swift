@@ -126,7 +126,7 @@ struct Pay: AsyncParsableCommand {
         // Resolution order: flag > config file > built-in default.
         let config = try loadConfig(explicitPath: globals.config, environment: environment)
         let request = try buildRequest()
-        let resolvedApprove = approve ?? config?.approve.flatMap(ApproveMode.init(rawValue:))
+        let resolvedApprove = try Self.resolveApprove(flag: approve, configValue: config?.approve)
         let cap = try parseCap(maxAmount ?? config?.maxAmount)
         let authorizer = try AuthorizerFactory.make(
             approve: resolvedApprove, maxAmount: cap, interactive: Terminal.isInteractive
@@ -174,6 +174,18 @@ struct Pay: AsyncParsableCommand {
             request.headerFields[name] = value
         }
         return request
+    }
+
+    /// Resolves the approve mode: the flag wins; a config value must be valid (an unrecognized one
+    /// fails closed rather than being silently ignored); else nil (the factory's interactive
+    /// default).
+    static func resolveApprove(flag: ApproveMode?, configValue: String?) throws -> ApproveMode? {
+        if let flag { return flag }
+        guard let configValue else { return nil }
+        guard let mode = ApproveMode(rawValue: configValue) else {
+            throw CLIError.invalidInput("config 'approve' must be auto, tty, or biometric")
+        }
+        return mode
     }
 
     private func parseCap(_ value: String?) throws -> Amount? {

@@ -40,9 +40,8 @@ struct InitCommand: ParsableCommand {
           "maxAmount": null,
           "servicesURL": "https://mpp.dev/api/services"
         }
-
         """
-        try Data(template.utf8).write(to: URL(fileURLWithPath: output))
+        try Data((template + "\n").utf8).write(to: URL(fileURLWithPath: output))
         FileHandle.standardError.write(Data("Wrote \(output)\n".utf8))
     }
 }
