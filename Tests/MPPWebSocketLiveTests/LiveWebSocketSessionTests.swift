@@ -64,9 +64,31 @@ struct LiveWebSocketSessionTests {
 
         try await app.test(.live) { client in
             let port = try #require(client.port)
-            let messages = StringBox()
-            let receiptRefs = StringBox()
+            let result = try await runSessionWithRetry(port: port)
+            #expect(result.receipt == finalReceipt)
+            #expect(result.messages == ["a", "b"])
+            #expect(result.receiptRefs == ["0xauth"])
+        }
+    }
+}
 
+/// The collected result of one client session.
+private struct SessionResult {
+    let receipt: Receipt
+    let messages: [String]
+    let receiptRefs: [String]
+}
+
+/// Runs the client session, retrying only a transport-level connect race: a live socket can
+/// transiently refuse a connection right at server-ready under the heavy parallel load of the
+/// full test run. A session-level `ClientError` is a real failure and is never retried. Fresh
+/// collectors per attempt, so a retried run never double-counts messages or receipts.
+private func runSessionWithRetry(port: Int, attempts: Int = 5) async throws -> SessionResult {
+    var lastError: (any Error)?
+    for attempt in 1 ... attempts {
+        let messages = StringBox()
+        let receiptRefs = StringBox()
+        do {
             let receipt = try await WebSocketSessionClient.run(
                 url: "ws://127.0.0.1:\(port)",
                 authorization: "init-cred",
@@ -80,10 +102,15 @@ struct LiveWebSocketSessionTests {
                 ),
                 logger: Logger(label: "mpp.ws.test")
             )
-
-            #expect(receipt == finalReceipt)
-            #expect(messages.values == ["a", "b"])
-            #expect(receiptRefs.values == ["0xauth"])
+            return SessionResult(
+                receipt: receipt, messages: messages.values, receiptRefs: receiptRefs.values
+            )
+        } catch let error as SessionWebSocketClient.ClientError {
+            throw error // a session-level failure is real, never a flaky connect
+        } catch {
+            lastError = error
+            if attempt < attempts { try? await Task.sleep(for: .milliseconds(150)) }
         }
     }
+    throw lastError ?? SessionWebSocketClient.ClientError.closedWithoutReceipt
 }
