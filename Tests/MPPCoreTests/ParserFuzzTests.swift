@@ -184,7 +184,12 @@ struct CredentialFuzzTests {
 
     @Test("valid credentials round-trip through the header")
     func roundTrip() throws {
-        let challenge = try ChallengeFuzzTests.validCorpus()[3] // the all-optionals challenge
+        // The all-optionals challenge (digest + expires + opaque), selected by property
+        // so a reorder of validCorpus() can never silently swap in a weaker challenge.
+        let challenge = try #require(
+            ChallengeFuzzTests.validCorpus()
+                .first { $0.digest != nil && $0.expires != nil && $0.opaque != nil }
+        )
         let corpus: [Credential] = [
             Credential(challenge: challenge, payload: [:]),
             Credential(
