@@ -176,6 +176,10 @@ private actor Session {
             await close(code: CloseCode.policyViolation, reason: rejection.message)
             return
         } catch {
+            // A cancellation here means the serve task was torn down (e.g. shutdown) while a verify
+            // was in flight, not a verification failure: don't emit a spurious payment-error frame
+            // (same cancellation-vs-error distinction as startStream's catch).
+            if Task.isCancelled { return }
             await emit(.error(status: 500, message: "session verification failed"))
             await close(code: CloseCode.internalError, reason: "session verification failed")
             return
@@ -222,6 +226,13 @@ private actor Session {
                 if Task.isCancelled { return }
                 await finishStreamNormally()
             } catch {
+                // The cancellation that a `payment-close-request` triggers surfaces HERE when the
+                // metered stream finishes by throwing (production `SessionStream.serve` cancels its
+                // poll loop and `finish(throwing: CancellationError)`). That is the close-request
+                // path, not a session failure: `requestClose` owns the close-ready handshake, so
+                // returning (vs `failStream`) avoids a spurious `payment-error` + close 1011 that
+                // would also pre-empt the close-ready.
+                if Task.isCancelled { return }
                 await failStream(error)
             }
         }
@@ -247,10 +258,34 @@ private actor Session {
         closeRequested = true
         streamTask?.cancel()
         await streamTask?.value
-        if let receipt = try? await closeReceipt() {
-            await sendCloseReady(receipt)
+        // Re-check after the await: actor reentrancy means the stream task may have reached its own
+        // terminal while we were suspended on its value. Two sub-cases:
+        //   - it fully closed (closed == true): nothing left to do.
+        //   - it sent its terminal close-ready (closeReadySent == true) but was cancelled before it
+        //     closed: the client already has its close-ready, so just close, with no redundant
+        //     closeReceipt() snapshot or second close-ready.
+        guard !closed else { return }
+        guard !closeReadySent else {
+            await close(code: CloseCode.normal, reason: "payment session closed")
+            return
         }
-        await close(code: CloseCode.normal, reason: "payment session closed")
+        do {
+            let receipt = try await closeReceipt()
+            await sendCloseReady(receipt)
+            await close(code: CloseCode.normal, reason: "payment session closed")
+        } catch {
+            // A cancellation here is serve-task teardown (shutdown), not a close-receipt failure:
+            // unwind quietly and let shutdown close, consistent with the startStream and
+            // processAuthorization catches (parallel-path parity).
+            if Task.isCancelled { return }
+            // The settlement-receipt snapshot genuinely failed (e.g. the channel store is
+            // unavailable). Fail closed: do NOT close 1000 with no close-ready (which the client
+            // cannot distinguish from a clean settled close); surface it as a payment-error + close
+            // 1011 so the client learns the close did not settle. (Was a `try?` that swallowed
+            // this.)
+            await emit(.error(status: 500, message: "close failed"))
+            await close(code: CloseCode.internalError, reason: "close failed")
+        }
     }
 
     private func sendCloseReady(_ receipt: Receipt) async {
