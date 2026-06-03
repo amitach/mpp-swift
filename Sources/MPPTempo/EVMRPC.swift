@@ -32,8 +32,7 @@ public struct EVMRPC: Sendable {
         ) else {
             // Redact path/query: the URL may carry an API key, which must not reach
             // an error value. Identify the endpoint by scheme + host only.
-            let endpoint = "\(url.scheme ?? "")://\(url.host(percentEncoded: false) ?? "")"
-            throw .insecureTransport(url: endpoint)
+            throw .insecureTransport(url: MPPHTTPEndpoint(url).redactedEndpoint)
         }
         self.transport = transport
         self.url = url
@@ -222,11 +221,6 @@ public struct EVMRPC: Sendable {
     private func httpRequest() -> HTTPRequest {
         var fields = HTTPFields()
         fields[.contentType] = "application/json"
-        // Bracket an IPv6 literal host (`[::1]`); percentEncoded:false matches the
-        // 402 flow's host handling.
-        let host = url.host(percentEncoded: false) ?? ""
-        let bracketedHost = host.contains(":") ? "[\(host)]" : host
-        let authority = url.port.map { "\(bracketedHost):\($0)" } ?? bracketedHost
         // Preserve the query (some RPC endpoints carry an API key there); default an
         // empty path to "/".
         let basePath = url.path.isEmpty ? "/" : url.path
@@ -234,7 +228,7 @@ public struct EVMRPC: Sendable {
         return HTTPRequest(
             method: .post,
             scheme: url.scheme ?? "https",
-            authority: authority,
+            authority: MPPHTTPEndpoint(url).authority,
             path: path,
             headerFields: fields
         )

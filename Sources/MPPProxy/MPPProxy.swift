@@ -148,7 +148,7 @@ public struct MPPProxy: Sendable {
         var upstream = HTTPRequest(
             method: request.method,
             scheme: service.baseURL.scheme ?? "https",
-            authority: authority(of: service.baseURL),
+            authority: MPPHTTPEndpoint(service.baseURL).authority,
             path: upstreamPath,
             headerFields: ProxyHeaders.scrub(request.headerFields)
         )
@@ -173,11 +173,6 @@ public struct MPPProxy: Sendable {
         guard !basePath.isEmpty, basePath != "/" else { return path }
         let trimmed = basePath.hasSuffix("/") ? String(basePath.dropLast()) : basePath
         return "\(trimmed)\(path)"
-    }
-
-    private func authority(of url: URL) -> String {
-        let host = url.host ?? ""
-        return url.port.map { "\(host):\($0)" } ?? host
     }
 
     // MARK: - Responses

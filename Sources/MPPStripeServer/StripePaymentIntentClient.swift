@@ -32,8 +32,7 @@ public struct StripePaymentIntentClient: StripePaymentIntentCreating {
             scheme: baseURL.scheme, host: baseURL.host(percentEncoded: false),
             allowInsecureLocal: allowInsecureLocal
         ) else {
-            let endpoint = "\(baseURL.scheme ?? "")://\(baseURL.host(percentEncoded: false) ?? "")"
-            throw .insecureTransport(url: endpoint)
+            throw .insecureTransport(url: MPPHTTPEndpoint(baseURL).redactedEndpoint)
         }
         self.transport = transport
         self.secretKey = secretKey
@@ -164,14 +163,11 @@ public struct StripePaymentIntentClient: StripePaymentIntentCreating {
         if let account = request.settlement?.stripeAccount {
             fields[Self.stripeAccount] = account
         }
-        let host = baseURL.host(percentEncoded: false) ?? ""
-        let bracketedHost = host.contains(":") ? "[\(host)]" : host
-        let authority = baseURL.port.map { "\(bracketedHost):\($0)" } ?? bracketedHost
         let prefix = baseURL.path == "/" ? "" : baseURL.path
         return HTTPRequest(
             method: .post,
             scheme: baseURL.scheme ?? "https",
-            authority: authority,
+            authority: MPPHTTPEndpoint(baseURL).authority,
             path: prefix + StripeAPI.paymentIntentsPath,
             headerFields: fields
         )
