@@ -113,10 +113,7 @@ public struct SubscriptionRequest: Sendable, Hashable {
             let fraction = iso[iso.index(after: dot)...].prefix { $0.isNumber }
             guard fraction.allSatisfy({ $0 == "0" }) else { throw .invalidExpiry }
         }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = formatter.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
-        guard let date else { throw .invalidExpiry }
+        guard let date = RFC3339DateTime.parse(iso) else { throw .invalidExpiry }
         let seconds = date.timeIntervalSince1970
         // Strict `<`: `Double(UInt64.max)` rounds UP to `2^64`, so `<=` would let `UInt64(seconds)`
         // trap at the boundary. The largest Double below it is well within `UInt64`.
