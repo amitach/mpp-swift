@@ -43,8 +43,8 @@ public struct EthereumAddress: Sendable, Hashable {
     /// when the corresponding nibble of `keccak256(lowercase-hex-without-0x)` is
     /// >= 8. This is the canonical address rendering used in a `did:pkh` source.
     public var checksummed: String {
-        let lower = bytes.map { String(format: "%02x", $0) }.joined()
-        let hashHex = Keccak256.hash(Data(lower.utf8)).map { String(format: "%02x", $0) }.joined()
+        let lower = bytes.hexString
+        let hashHex = Keccak256.hash(Data(lower.utf8)).hexString
         var out = "0x"
         for (character, hashNibble) in zip(lower, hashHex) {
             if character.isLetter, let value = hashNibble.hexDigitValue, value >= 8 {
