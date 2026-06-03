@@ -34,17 +34,14 @@ public struct StripeChargeRequest: Sendable, Hashable {
     /// - Throws: ``DecodingFailure`` if the `request` is not base64url, not a JSON object of the
     ///   expected shape, carries a non-canonical `amount`, or has an empty `paymentMethodTypes`.
     public init(challenge: Challenge) throws(DecodingFailure) {
-        let data: Data
-        do {
-            data = try challenge.request.decodedData()
-        } catch {
-            throw .notBase64URL(error)
-        }
         let wire: ChargeRequestWire
         do {
-            wire = try JSONDecoder().decode(ChargeRequestWire.self, from: data)
+            wire = try challenge.request.decode(as: ChargeRequestWire.self)
         } catch {
-            throw .invalidJSON(reason: String(describing: error))
+            switch error {
+            case let .notBase64URL(cause): throw .notBase64URL(cause)
+            case let .invalidJSON(reason): throw .invalidJSON(reason: reason)
+            }
         }
         do {
             amount = try Amount(wire.amount)

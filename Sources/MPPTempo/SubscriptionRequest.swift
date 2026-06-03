@@ -45,17 +45,14 @@ public struct SubscriptionRequest: Sendable, Hashable {
     /// field
     /// (a `SubscriptionRequest` that exists is well-formed).
     public init(challenge: Challenge) throws(DecodingFailure) {
-        let data: Data
-        do {
-            data = try challenge.request.decodedData()
-        } catch {
-            throw .notBase64URL(error)
-        }
         let wire: Wire
         do {
-            wire = try JSONDecoder().decode(Wire.self, from: data)
+            wire = try challenge.request.decode(as: Wire.self)
         } catch {
-            throw .invalidJSON(reason: String(describing: error))
+            switch error {
+            case let .notBase64URL(cause): throw .notBase64URL(cause)
+            case let .invalidJSON(reason): throw .invalidJSON(reason: reason)
+            }
         }
         do {
             amount = try Amount(wire.amount)

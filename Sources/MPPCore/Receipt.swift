@@ -88,16 +88,13 @@ public struct Receipt: Sendable, Hashable {
     /// - Parameter headerValue: The base64url-encoded JSON object.
     /// - Throws: ``ParsingError``.
     public init(headerValue: String) throws(ParsingError) {
-        let data: Data
         do {
-            data = try Base64URL.decode(headerValue)
+            self = try EncodedJSON(headerValue).decode(as: Receipt.self)
         } catch {
-            throw .notBase64URL(error)
-        }
-        do {
-            self = try JSONDecoder().decode(Receipt.self, from: data)
-        } catch {
-            throw .invalidJSON(reason: String(describing: error))
+            switch error {
+            case let .notBase64URL(cause): throw .notBase64URL(cause)
+            case let .invalidJSON(reason): throw .invalidJSON(reason: reason)
+            }
         }
     }
 
