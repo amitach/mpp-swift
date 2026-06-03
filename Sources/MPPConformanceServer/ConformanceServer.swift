@@ -71,7 +71,7 @@ func makeMiddleware() throws -> MPPServerMiddleware {
                 + " intent=\(challenge.intent.rawValue)")
             log("[server]              request(b64url)=\(challenge.request.rawValue)")
         case let .paymentVerified(verified):
-            log("[server] VERIFIED     source=\(verified.credential.source ?? "nil")")
+            log("[server] VERIFIED     source=\(verified.credential?.source ?? "nil")")
         case let .paymentRejected(rejection):
             log("[server] rejected     \(rejection)")
         }
@@ -136,7 +136,7 @@ private func makeSubscriptionMiddleware() async throws -> MPPServerMiddleware {
         case let .challengeIssued(challenge):
             log("[server] issued 402 (subscription) id=\(challenge.id)")
         case let .paymentVerified(verified):
-            log("[server] ACTIVATED (subscription) source=\(verified.credential.source ?? "nil")")
+            log("[server] ACTIVATED (subscription) source=\(verified.credential?.source ?? "nil")")
         case let .paymentRejected(rejection):
             log("[server] rejected (subscription) \(rejection)")
         }

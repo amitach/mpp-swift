@@ -93,7 +93,7 @@ import MPPTempoServer
             case let .challengeIssued(challenge):
                 log("[server] issued 402 (session) id=\(challenge.id)")
             case let .paymentVerified(verified):
-                log("[server] VERIFIED (session) source=\(verified.credential.source ?? "nil")")
+                log("[server] VERIFIED (session) source=\(verified.credential?.source ?? "nil")")
             case let .paymentRejected(rejection):
                 log("[server] rejected (session) \(rejection)")
             }
@@ -181,7 +181,7 @@ import MPPTempoServer
             case let .challengeIssued(challenge):
                 log("[server] issued 402 (subscription-live) id=\(challenge.id)")
             case let .paymentVerified(verified):
-                let source = verified.credential.source ?? "nil"
+                let source = verified.credential?.source ?? "nil"
                 log("[server] ACTIVATED (subscription-live) source=\(source)")
             case let .paymentRejected(rejection):
                 log("[server] rejected (subscription-live) \(rejection)")

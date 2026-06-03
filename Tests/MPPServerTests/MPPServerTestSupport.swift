@@ -26,6 +26,7 @@ func makeMiddleware(
     store: any ReplayStore = InMemoryReplayStore(),
     methods: [any PaymentMethodServer] = [],
     maxBodyBytes: Int = 10 * 1024 * 1024,
+    authorizer: (any RequestAuthorizer)? = nil,
     onEvent: @escaping @Sendable (ServerEvent) -> Void = { _ in }
 ) throws -> MPPServerMiddleware {
     let signer = ChallengeSigner(secret: secret)
@@ -36,6 +37,7 @@ func makeMiddleware(
         request: EncodedJSON("e30"),
         expiresIn: 300,
         maxBodyBytes: maxBodyBytes,
+        authorizer: authorizer,
         onEvent: onEvent
     )
 }

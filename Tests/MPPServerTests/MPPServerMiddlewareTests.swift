@@ -246,7 +246,7 @@ struct MPPServerMiddlewareTests {
         let (response, body) = await middleware.handle(
             request, body: Data(), now: now
         ) { _, verified in
-            #expect(verified.credential.challenge.method.rawValue == "tempo")
+            #expect(verified.credential?.challenge.method.rawValue == "tempo")
             return (HTTPResponse(status: .ok), Data("ok".utf8))
         }
         #expect(response.status.code == 200)

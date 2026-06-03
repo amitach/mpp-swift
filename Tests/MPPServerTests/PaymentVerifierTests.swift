@@ -90,7 +90,7 @@ struct PaymentVerifierTests {
             authorization: header, body: Data(), now: now, expecting: expected()
         )
         let token = try #require(verified(outcome))
-        #expect(token.credential.challenge.method.rawValue == "tempo")
+        #expect(token.credential?.challenge.method.rawValue == "tempo")
         // Protocol-only verification (no method registered) settles nothing, so
         // it mints no receipt.
         #expect(token.receipt == nil)
