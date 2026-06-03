@@ -15,7 +15,6 @@ import Foundation
 enum StripeIdempotencyKey {
     static func derive(challengeID: String, spt: String) -> String {
         let digest = SHA256.hash(data: Data(spt.utf8))
-        let hex = digest.map { String(format: "%02x", $0) }.joined()
-        return "mpp-swift_\(challengeID)_\(hex)"
+        return "mpp-swift_\(challengeID)_\(digest.hexString)"
     }
 }

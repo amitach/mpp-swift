@@ -5,17 +5,11 @@ import MPPCore
 
 // Shared test fixtures for the MPPClient suites (one home, not duplicated).
 
+// Builds an arbitrary test header name. The `Accept-Payment` / `Payment-Receipt`
+// names are PaymentClient's own constants, which tests reference directly.
 func fieldName(_ token: String) -> HTTPField.Name {
     guard let name = HTTPField.Name(token) else { preconditionFailure("valid field name") }
     return name
-}
-
-func paymentReceiptName() -> HTTPField.Name {
-    fieldName("Payment-Receipt")
-}
-
-func acceptPaymentName() -> HTTPField.Name {
-    fieldName("Accept-Payment")
 }
 
 enum StubError: Error { case boom }

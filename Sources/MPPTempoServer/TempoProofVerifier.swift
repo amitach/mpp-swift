@@ -51,10 +51,7 @@ public struct TempoProofVerifier: PaymentMethodServer {
     /// Whether this is a `tempo` / `charge` challenge with a decodable zero-amount
     /// request (the proof path).
     public func supports(_ challenge: Challenge) -> Bool {
-        guard challenge.method == TempoMethod.name, challenge.intent == .charge,
-              let request = try? TempoChargeRequest(challenge: challenge)
-        else { return false }
-        return request.isZeroAmount
+        TempoChargeRequest.supportsZeroAmountProof(challenge)
     }
 
     /// Verifies the zero-amount proof carried by `credential` and mints its receipt.
@@ -102,17 +99,10 @@ public struct TempoProofVerifier: PaymentMethodServer {
     private func recovers(
         challenge: Challenge, chainId: UInt64, signature: Data, to wallet: EthereumAddress
     ) -> Bool {
-        for variant in acceptedVariants {
-            let proof: ZeroAmountProof = switch variant {
-            case .v2Realm: .v2Realm(challengeId: challenge.id, realm: challenge.realm)
-            case .v1Wallet: .v1Wallet(challengeId: challenge.id, wallet: wallet)
-            case .specChallengeId: .v1ChallengeId(challengeId: challenge.id)
-            }
-            if proof.recoverSigner(chainId: chainId, signature: signature) == wallet {
-                return true
-            }
+        acceptedVariants.contains { variant in
+            variant.proof(challengeId: challenge.id, realm: challenge.realm, wallet: wallet)
+                .recoverSigner(chainId: chainId, signature: signature) == wallet
         }
-        return false
     }
 
     /// A reason ``TempoProofVerifier`` rejected a credential.

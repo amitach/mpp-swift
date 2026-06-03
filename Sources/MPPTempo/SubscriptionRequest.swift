@@ -45,17 +45,14 @@ public struct SubscriptionRequest: Sendable, Hashable {
     /// field
     /// (a `SubscriptionRequest` that exists is well-formed).
     public init(challenge: Challenge) throws(DecodingFailure) {
-        let data: Data
-        do {
-            data = try challenge.request.decodedData()
-        } catch {
-            throw .notBase64URL(error)
-        }
         let wire: Wire
         do {
-            wire = try JSONDecoder().decode(Wire.self, from: data)
+            wire = try challenge.request.decode(as: Wire.self)
         } catch {
-            throw .invalidJSON(reason: String(describing: error))
+            switch error {
+            case let .notBase64URL(cause): throw .notBase64URL(cause)
+            case let .invalidJSON(reason): throw .invalidJSON(reason: reason)
+            }
         }
         do {
             amount = try Amount(wire.amount)
@@ -76,6 +73,15 @@ public struct SubscriptionRequest: Sendable, Hashable {
         chainId = wire.methodDetails?.chainId
         description = wire.description
         externalId = wire.externalId
+    }
+
+    /// Whether `challenge` is a `tempo`/`subscription` challenge carrying a decodable request.
+    ///
+    /// The rail's applicability contract, shared by the client method and the server verifier
+    /// so the two cannot disagree on what this rail handles.
+    public static func supports(_ challenge: Challenge) -> Bool {
+        challenge.method == TempoMethod.name && challenge.intent == .subscription
+            && (try? SubscriptionRequest(challenge: challenge)) != nil
     }
 
     /// `periodCount` x the unit's seconds, rejecting a non-canonical count, an unknown unit, or a
@@ -116,10 +122,7 @@ public struct SubscriptionRequest: Sendable, Hashable {
             let fraction = iso[iso.index(after: dot)...].prefix { $0.isNumber }
             guard fraction.allSatisfy({ $0 == "0" }) else { throw .invalidExpiry }
         }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = formatter.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
-        guard let date else { throw .invalidExpiry }
+        guard let date = RFC3339DateTime.parse(iso) else { throw .invalidExpiry }
         let seconds = date.timeIntervalSince1970
         // Strict `<`: `Double(UInt64.max)` rounds UP to `2^64`, so `<=` would let `UInt64(seconds)`
         // trap at the boundary. The largest Double below it is well within `UInt64`.
