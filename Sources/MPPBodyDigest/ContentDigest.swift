@@ -22,19 +22,22 @@ public enum ContentDigest {
     /// Whether `body` matches the `sha-256` digest in an RFC 9530 Content-Digest
     /// header value.
     ///
+    /// Returns `false` for a malformed value or one carrying no `sha-256` member:
+    /// a digest the server cannot parse cannot vouch for the body, so verification
+    /// fails closed. (``parse(_:)`` is the parser and reports the specific reason.)
+    ///
     /// A plain comparison is correct here: the content digest is public integrity
     /// data, not a keyed MAC, and the expected digest travels in the header, so
     /// no secret's compare time can leak. (Constant-time comparison is reserved
     /// for the keyed challenge-id HMAC.)
-    ///
-    /// - Throws: ``ParseError`` if the value is malformed or carries no `sha-256`
-    ///   member.
-    public static func verify(
-        _ body: Data,
-        matches headerValue: String
-    ) throws(ParseError) -> Bool {
-        let members = try parse(headerValue)
-        guard let expected = members[algorithm] else { throw .missingAlgorithm }
+    public static func verify(_ body: Data, matches headerValue: String) -> Bool {
+        let members: [String: Data]
+        do {
+            members = try parse(headerValue)
+        } catch {
+            return false
+        }
+        guard let expected = members[algorithm] else { return false }
         return Data(SHA256.hash(data: body)) == expected
     }
 
@@ -63,12 +66,10 @@ public enum ContentDigest {
     }
 
     /// A reason an RFC 9530 Content-Digest value could not be parsed.
-    public enum ParseError: Error, Sendable, Hashable {
+    enum ParseError: Error, Hashable {
         /// A member was not of the form `key=:base64:`.
         case malformed(String)
         /// A member's byte sequence was not valid base64.
         case invalidBase64(String)
-        /// No `sha-256` member was present to verify against.
-        case missingAlgorithm
     }
 }

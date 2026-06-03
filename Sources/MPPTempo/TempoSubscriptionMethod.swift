@@ -65,8 +65,7 @@ public struct TempoSubscriptionMethod: PaymentMethodClient {
 
     /// Whether this is a `tempo` / `subscription` challenge with a decodable request.
     public func supports(_ challenge: Challenge) -> Bool {
-        challenge.method == TempoMethod.name && challenge.intent == .subscription
-            && (try? SubscriptionRequest(challenge: challenge)) != nil
+        SubscriptionRequest.supports(challenge)
     }
 
     /// The approval facts for `challenge`, filling amount/currency/recipient from the
@@ -109,13 +108,11 @@ public struct TempoSubscriptionMethod: PaymentMethodClient {
         // The pre-sign gate sees the resolved charge facts (the existing approval surface; the
         // recurring period/expiry are not part of it).
         let facts = ChargeApproval(
-            challengeId: challenge.id,
-            realm: challenge.realm,
+            challenge: challenge,
             chainId: chainID,
             amount: request.amount,
             currency: request.currency.checksummed,
-            recipient: request.recipient.checksummed,
-            validUntil: challenge.expires
+            recipient: request.recipient.checksummed
         )
         guard await approval.approves(facts) else {
             throw TempoSubscriptionMethodError.approvalDenied

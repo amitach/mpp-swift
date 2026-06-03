@@ -60,10 +60,7 @@ public struct StripeChargeVerifier: PaymentMethodServer {
 
     /// Whether this is a `stripe`/`charge` challenge with a decodable request.
     public func supports(_ challenge: Challenge) -> Bool {
-        guard challenge.method == StripeMethod.name, challenge.intent == .charge,
-              (try? StripeChargeRequest(challenge: challenge)) != nil
-        else { return false }
-        return true
+        StripeChargeRequest.supports(challenge)
     }
 
     /// Verifies the credential by settling a PaymentIntent and returns the receipt.
@@ -82,14 +79,10 @@ public struct StripeChargeVerifier: PaymentMethodServer {
         // The only crossing out of the canonical-string amount domain; fail closed on overflow.
         guard let amount = Int(request.amount.rawValue) else { throw .amountOverflow }
 
-        guard case let .string(spt)? = credential.payload["spt"], !spt.isEmpty else {
+        guard let spt = credential.payload["spt"]?.stringValue, !spt.isEmpty else {
             throw .missingSPT
         }
-        let externalID: String? = if case let .string(value)? = credential.payload["externalId"] {
-            value
-        } else {
-            nil
-        }
+        let externalID = credential.payload["externalId"]?.stringValue
 
         let settlement = await resolveSettlement(
             challenge: challenge,

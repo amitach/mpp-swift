@@ -22,9 +22,13 @@ struct OpenFields: Hashable {
 }
 
 /// The fields of a channel top-up credential payload.
+///
+/// The wire also carries `additionalDeposit`, but the server settles the new
+/// deposit from the on-chain value `broadcastTopUp` reports rather than the
+/// client's asserted amount, so it is not carried here; it is only required to
+/// be present as a well-formedness check (see ``SessionAction/parse(_:)``).
 struct TopUpFields: Hashable {
     let channelID: Data
-    let additionalDeposit: String
     let transaction: Data
 }
 
@@ -53,12 +57,12 @@ enum SessionAction: Hashable {
                 signature: voucher.signature, transaction: transaction, authorizedSigner: signer
             ))
         case "topUp":
+            // `additionalDeposit` is required on the wire but advisory to the server
+            // (the deposit is read on-chain), so it is checked for presence, not stored.
             guard let channelID = hex(payload["channelId"]),
-                  let additionalDeposit = payload["additionalDeposit"]?.stringValue,
+                  payload["additionalDeposit"]?.stringValue != nil,
                   let transaction = hex(payload["transaction"]) else { return nil }
-            return .topUp(TopUpFields(
-                channelID: channelID, additionalDeposit: additionalDeposit, transaction: transaction
-            ))
+            return .topUp(TopUpFields(channelID: channelID, transaction: transaction))
         default: return nil
         }
     }
