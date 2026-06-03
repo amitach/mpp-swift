@@ -67,9 +67,9 @@ public struct StripePaymentIntentClient: StripePaymentIntentCreating {
         } catch {
             throw .malformedResponse(String(describing: error))
         }
-        guard case let .object(fields) = decoded,
-              case let .string(id)? = fields["id"],
-              case let .string(status)? = fields["status"]
+        guard let fields = decoded.objectValue,
+              let id = fields["id"]?.stringValue,
+              let status = fields["status"]?.stringValue
         else {
             throw .malformedResponse("PaymentIntent response is not {id, status}")
         }
@@ -144,9 +144,9 @@ public struct StripePaymentIntentClient: StripePaymentIntentCreating {
 
     private static func errorMessage(from data: Data) -> String {
         guard let decoded = try? JSONDecoder().decode(JSONValue.self, from: data),
-              case let .object(fields) = decoded,
-              case let .object(error)? = fields["error"],
-              case let .string(message)? = error["message"]
+              let fields = decoded.objectValue,
+              let error = fields["error"]?.objectValue,
+              let message = error["message"]?.stringValue
         else {
             return "Stripe returned a non-success status"
         }
