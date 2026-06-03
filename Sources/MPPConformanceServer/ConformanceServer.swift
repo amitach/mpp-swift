@@ -48,21 +48,14 @@ private let paidBody: @Sendable (HTTPRequest, MPPVerified) async -> (HTTPRespons
 // same zero-amount Tempo charge gate, so a proxy-gated route verifies an mppx proof exactly as the
 // direct /proof route does.
 func makeMiddleware() throws -> MPPServerMiddleware {
-    let signer = ChallengeSigner(secret: secret)
-    let binding = try RouteBinding(
-        realm: "127.0.0.1", method: MethodName("tempo"), intent: .charge
-    )
     let request = EncodedJSON(json: .object([
         "amount": .string("0"),
         "methodDetails": .object(["chainId": .integer(Int64(chainId))]),
     ]))
-    return MPPServerMiddleware(
-        minter: ChallengeMinter(signer: signer),
-        verifier: PaymentVerifier(
-            signer: signer, replayStore: InMemoryReplayStore(), methods: [TempoProofVerifier()]
-        ),
-        binding: binding,
-        request: request
+    return try MPPServerMiddleware.make(
+        secret: secret,
+        binding: RouteBinding(realm: "127.0.0.1", method: MethodName("tempo"), intent: .charge),
+        request: request, methods: [TempoProofVerifier()]
     ) { event in
         switch event {
         case let .challengeIssued(challenge):
@@ -88,10 +81,6 @@ let subscriptionRecipientHex = "0x1111111111111111111111111111111111111111"
 private let subscriptionLookupKey = "conformance-subscription"
 
 private func makeSubscriptionMiddleware() async throws -> MPPServerMiddleware {
-    let signer = ChallengeSigner(secret: secret)
-    let binding = try RouteBinding(
-        realm: "127.0.0.1", method: MethodName("tempo"), intent: .subscription
-    )
     // Provision the access key the subscription delegates to and embed its address in the 402; the
     // mppx client reads it and signs a key authorization for it. The store also holds the private
     // key for renewal signing (this offline reverse-conformance only verifies the authorization).
@@ -123,14 +112,14 @@ private func makeSubscriptionMiddleware() async throws -> MPPServerMiddleware {
     ) { credential in
         .init(subscriptionID: credential.challenge.id, lookupKey: subscriptionLookupKey)
     }
-    return MPPServerMiddleware(
-        minter: ChallengeMinter(signer: signer),
-        verifier: PaymentVerifier(
-            signer: signer, replayStore: InMemoryReplayStore(),
-            methods: [activating]
+    return try MPPServerMiddleware.make(
+        secret: secret,
+        binding: RouteBinding(
+            realm: "127.0.0.1",
+            method: MethodName("tempo"),
+            intent: .subscription
         ),
-        binding: binding,
-        request: request
+        request: request, methods: [activating]
     ) { event in
         switch event {
         case let .challengeIssued(challenge):

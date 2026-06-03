@@ -62,10 +62,6 @@ import MPPTempoServer
         let sessionMethod = SessionMethod(
             provider: provider, store: InMemoryChannelStore(), defaultChainID: chainId
         )
-        let signer = ChallengeSigner(secret: secret)
-        let binding = try RouteBinding(
-            realm: "127.0.0.1", method: MethodName("tempo"), intent: .session
-        )
         // The session 402 the mppx client opens against: amount + payee (our operator) +
         // currency + a top-level suggestedDeposit + methodDetails.{chainId, escrowContract}.
         let request = EncodedJSON(json: .object([
@@ -78,16 +74,17 @@ import MPPTempoServer
                 "escrowContract": .string(sessionEscrowHex),
             ]),
         ]))
-        return MPPServerMiddleware(
-            minter: ChallengeMinter(signer: signer),
-            // A normal one-time replay store is fine: SessionMethod.reusesChallenge tells the
-            // verifier not to consume the challenge id (the channel cumulative is the
-            // anti-replay), so the same challenge serves open, vouchers, and close.
-            verifier: PaymentVerifier(
-                signer: signer, replayStore: InMemoryReplayStore(), methods: [sessionMethod]
+        // make's default in-memory replay store is fine: SessionMethod.reusesChallenge tells the
+        // verifier not to consume the challenge id (the channel cumulative is the anti-replay),
+        // so the same challenge serves open, vouchers, and close.
+        return try MPPServerMiddleware.make(
+            secret: secret,
+            binding: RouteBinding(
+                realm: "127.0.0.1",
+                method: MethodName("tempo"),
+                intent: .session
             ),
-            binding: binding,
-            request: request
+            request: request, methods: [sessionMethod]
         ) { event in
             switch event {
             case let .challengeIssued(challenge):
@@ -165,17 +162,14 @@ import MPPTempoServer
             ) { identity($0) },
             engine: engine
         ) { identity($0) }
-        let signer = ChallengeSigner(secret: secret)
-        let binding = try RouteBinding(
-            realm: "127.0.0.1", method: MethodName("tempo"), intent: .subscription
-        )
-        return MPPServerMiddleware(
-            minter: ChallengeMinter(signer: signer),
-            verifier: PaymentVerifier(
-                signer: signer, replayStore: InMemoryReplayStore(), methods: [method]
+        return try MPPServerMiddleware.make(
+            secret: secret,
+            binding: RouteBinding(
+                realm: "127.0.0.1",
+                method: MethodName("tempo"),
+                intent: .subscription
             ),
-            binding: binding,
-            request: subscriptionLiveRequest(accessKeyAddress: accessKeyAddress)
+            request: subscriptionLiveRequest(accessKeyAddress: accessKeyAddress), methods: [method]
         ) { event in
             switch event {
             case let .challengeIssued(challenge):
