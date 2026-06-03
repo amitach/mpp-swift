@@ -32,8 +32,7 @@ public struct EVMRPC: Sendable {
         ) else {
             // Redact path/query: the URL may carry an API key, which must not reach
             // an error value. Identify the endpoint by scheme + host only.
-            let endpoint = "\(url.scheme ?? "")://\(url.host(percentEncoded: false) ?? "")"
-            throw .insecureTransport(url: endpoint)
+            throw .insecureTransport(url: MPPHTTPEndpoint(url).redactedEndpoint)
         }
         self.transport = transport
         self.url = url
@@ -91,17 +90,17 @@ public struct EVMRPC: Sendable {
     /// receipt). Shared by `transactionReceipt` and `sendRawTransactionSync`.
     private func decodeReceipt(_ result: JSONValue) throws(EVMRPCError) -> TransactionReceipt? {
         if case .null = result { return nil }
-        guard case let .object(fields) = result else {
+        guard let fields = result.objectValue else {
             throw .malformedResponse("receipt is not an object")
         }
-        guard case let .string(statusHex)? = fields["status"] else {
+        guard let statusHex = fields["status"]?.stringValue else {
             throw .malformedResponse("receipt has no status")
         }
-        guard case let .string(hash)? = fields["transactionHash"] else {
+        guard let hash = fields["transactionHash"]?.stringValue else {
             throw .malformedResponse("receipt has no transactionHash")
         }
         var blockNumber: UInt64?
-        if case let .string(blockHex)? = fields["blockNumber"] {
+        if let blockHex = fields["blockNumber"]?.stringValue {
             // Absent is fine (nil); present-but-unparseable is malformed, not nil
             // (consistent with the status check: never silently drop a bad field).
             guard let parsed = UInt64(hexQuantity: blockHex) else {
@@ -156,7 +155,7 @@ public struct EVMRPC: Sendable {
 
     /// Decodes a JSON-RPC `QUANTITY` result (a `0x`-hex integer) into a `UInt64`.
     private func quantity(_ value: JSONValue) throws(EVMRPCError) -> UInt64 {
-        guard case let .string(hex) = value, let number = UInt64(hexQuantity: hex) else {
+        guard let hex = value.stringValue, let number = UInt64(hexQuantity: hex) else {
             throw .malformedResponse("result is not a hex quantity")
         }
         return number
@@ -199,14 +198,14 @@ public struct EVMRPC: Sendable {
         } catch {
             throw .malformedResponse(String(describing: error))
         }
-        guard case let .object(envelope) = decoded else {
+        guard let envelope = decoded.objectValue else {
             throw .malformedResponse("response is not a JSON object")
         }
-        if case let .object(error)? = envelope["error"] {
+        if let error = envelope["error"]?.objectValue {
             var code = 0
-            if case let .integer(value)? = error["code"] { code = Int(value) }
+            if let value = error["code"]?.integerValue { code = Int(value) }
             var message = ""
-            if case let .string(value)? = error["message"] { message = value }
+            if let value = error["message"]?.stringValue { message = value }
             throw .rpc(code: code, message: message)
         }
         guard let result = envelope["result"] else {
@@ -222,11 +221,6 @@ public struct EVMRPC: Sendable {
     private func httpRequest() -> HTTPRequest {
         var fields = HTTPFields()
         fields[.contentType] = "application/json"
-        // Bracket an IPv6 literal host (`[::1]`); percentEncoded:false matches the
-        // 402 flow's host handling.
-        let host = url.host(percentEncoded: false) ?? ""
-        let bracketedHost = host.contains(":") ? "[\(host)]" : host
-        let authority = url.port.map { "\(bracketedHost):\($0)" } ?? bracketedHost
         // Preserve the query (some RPC endpoints carry an API key there); default an
         // empty path to "/".
         let basePath = url.path.isEmpty ? "/" : url.path
@@ -234,7 +228,7 @@ public struct EVMRPC: Sendable {
         return HTTPRequest(
             method: .post,
             scheme: url.scheme ?? "https",
-            authority: authority,
+            authority: MPPHTTPEndpoint(url).authority,
             path: path,
             headerFields: fields
         )

@@ -27,6 +27,17 @@ public extension Data {
     /// ``init(hexPrefixed:)``). The shared `0x`-hex encoder for the EVM layer:
     /// call data, raw transactions, and signatures all go on the wire this way.
     var hexPrefixed: String {
-        "0x" + map { String(format: "%02x", $0) }.joined()
+        "0x" + hexString
+    }
+}
+
+extension Data {
+    /// The bytes as a lowercase hex string with no prefix.
+    ///
+    /// Internal to MPPEVM: MPPCore ships the public cross-module `hexString`, and
+    /// MPPEVM stays dependency-free of MPPCore, so each dependency island carries
+    /// its own one-line encoder. Used by ``hexPrefixed`` and the EIP-55 checksum.
+    var hexString: String {
+        map { String(format: "%02x", $0) }.joined()
     }
 }

@@ -127,6 +127,30 @@ struct ReceiptTests {
         #expect(decoded.extras["channelId"] == .string("0xfeed"))
     }
 
+    @Test("matches the fixed canonical receipt wire vector byte-for-byte, both directions")
+    func crossSDKGoldenVector() throws {
+        // A fixed base64url(JSON) Payment-Receipt wire vector (draft-httpauth-payment-00
+        // §5.1), pinned as a shared cross-SDK oracle: a conforming peer both produces and
+        // consumes these exact bytes. Keys are in sorted order (method, reference, status,
+        // timestamp), which any sorted-key encoder yields, so the encoding interoperates.
+        let wire = "eyJtZXRob2QiOiJ0ZW1wbyIsInJlZmVyZW5jZSI6IjB4MTIzNCIsInN0YXR1cyI6"
+            + "InN1Y2Nlc3MiLCJ0aW1lc3RhbXAiOiIyMDI1LTAxLTIxVDEyOjAwOjAwLjAwMFoifQ"
+        // We can consume the vector.
+        let decoded = try Receipt(headerValue: wire)
+        #expect(decoded.status == .success)
+        #expect(decoded.method.rawValue == "tempo")
+        #expect(decoded.reference == "0x1234")
+        #expect(decoded.timestamp.rawValue == "2025-01-21T12:00:00.000Z")
+        #expect(decoded.extras.isEmpty)
+        // And we produce the identical bytes.
+        let built = try Receipt(
+            method: MethodName("tempo"),
+            timestamp: RFC3339DateTime("2025-01-21T12:00:00.000Z"),
+            reference: "0x1234"
+        )
+        #expect(try built.headerValue == wire)
+    }
+
     @Test("an integer extra above Int64.max round-trips (full u64 fidelity)")
     func largeUnsignedExtraRoundTrips() throws {
         // The reference `units` is a u64; a value past Int64.max must not narrow/drop.

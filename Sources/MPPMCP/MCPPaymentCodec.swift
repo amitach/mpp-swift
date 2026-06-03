@@ -180,13 +180,11 @@ enum MCPPaymentCodec {
 
     /// Decodes an `EncodedJSON` (base64url of JCS) to the native JSON `Value` the MCP wire carries.
     private static func nativeValue(from encoded: EncodedJSON) throws -> Value {
-        let data: Data
-        do { data = try encoded.decodedData() } catch { throw CodecError.malformedRequest }
-        let json: JSONValue
-        do { json = try JSONDecoder().decode(JSONValue.self, from: data) } catch {
+        do {
+            return try Value(encoded.decode(as: JSONValue.self))
+        } catch {
             throw CodecError.malformedRequest
         }
-        return Value(json)
     }
 
     /// Re-encodes a native JSON `Value` to `EncodedJSON`; the JCS form is recomputed so the

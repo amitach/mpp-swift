@@ -255,7 +255,6 @@ public actor FileReplayStore: ReplayStore {
 
     private func fileURL(for id: String) -> URL {
         let digest = SHA256.hash(data: Data(id.utf8))
-        let name = digest.map { String(format: "%02x", $0) }.joined()
-        return directoryURL.appendingPathComponent(name, isDirectory: false)
+        return directoryURL.appendingPathComponent(digest.hexString, isDirectory: false)
     }
 }

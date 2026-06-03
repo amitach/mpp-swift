@@ -83,9 +83,17 @@ enum ProxyDiscovery {
     /// Prefixes `path` with the normalized `basePath` (leading slash ensured, trailing slashes
     /// trimmed), or returns `path` unchanged when there is no base path.
     static func withBasePath(_ basePath: String?, _ path: String) -> String {
-        guard let basePath, !basePath.isEmpty else { return path }
-        let leading = basePath.hasPrefix("/") ? basePath : "/\(basePath)"
-        let trimmed = leading.hasSuffix("/") ? String(leading.dropLast()) : leading
-        return "\(trimmed)\(path)"
+        guard let normalized = normalizedBasePath(basePath) else { return path }
+        return "\(normalized)\(path)"
     }
+}
+
+/// Normalizes a configured base path to its mount prefix: a non-empty path with a
+/// leading slash and no trailing slash, or `nil` for no base path. The single
+/// normalization shared by request stripping (`MPPProxy`) and advertised-path
+/// prefixing (`ProxyDiscovery`).
+func normalizedBasePath(_ basePath: String?) -> String? {
+    guard let basePath, !basePath.isEmpty else { return nil }
+    let leading = basePath.hasPrefix("/") ? basePath : "/\(basePath)"
+    return leading.hasSuffix("/") ? String(leading.dropLast()) : leading
 }

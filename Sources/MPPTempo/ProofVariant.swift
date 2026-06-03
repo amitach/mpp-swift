@@ -1,3 +1,5 @@
+import MPPEVM
+
 /// Selects which zero-amount proof shape the Tempo charge method emits.
 ///
 /// A `draft-tempo-charge-00` zero-amount proof is EIP-712 typed data, and three
@@ -17,4 +19,21 @@ public enum ProofVariant: Sendable, Hashable {
     /// `draft-tempo-charge-00` spec defines as normative. Select it to target a
     /// server implemented to the published spec rather than a peer SDK.
     case specChallengeId
+}
+
+public extension ProofVariant {
+    /// The ``ZeroAmountProof`` this variant signs and verifies for a challenge.
+    ///
+    /// Both the client (which signs) and the server (which recovers) derive the
+    /// proof here, so the two sides cannot drift when a variant is added or its
+    /// message shape changes.
+    func proof(
+        challengeId: String, realm: String, wallet: EthereumAddress
+    ) -> ZeroAmountProof {
+        switch self {
+        case .v2Realm: .v2Realm(challengeId: challengeId, realm: realm)
+        case .v1Wallet: .v1Wallet(challengeId: challengeId, wallet: wallet)
+        case .specChallengeId: .v1ChallengeId(challengeId: challengeId)
+        }
+    }
 }
