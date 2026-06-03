@@ -1,8 +1,8 @@
 import Foundation
 import HTTPTypes
-import MPPClient
 import MPPCore
 import Testing
+@testable import MPPClient
 
 // Spec: draft-httpauth-payment-00 §4 (402 flow). The client sends, and on a 402
 // parses WWW-Authenticate, selects a supported challenge, has the method build a
@@ -34,7 +34,7 @@ struct PaymentClientTests {
             method: tempo(), timestamp: RFC3339DateTime("2026-01-02T00:00:00Z"), reference: "0xabc"
         )
         var paid = HTTPFields()
-        paid[paymentReceiptName()] = try receipt.headerValue
+        paid[PaymentClient.paymentReceipt] = try receipt.headerValue
 
         let transport = StubTransport([
             response(402, headers: offered),
@@ -122,26 +122,26 @@ struct PaymentClientTests {
         let allowed = StubTransport([response(200)])
         _ = try await PaymentClient(transport: allowed, methods: methods, advertise: "tempo/charge")
             .send(request())
-        #expect(allowed.sent[0].headerFields[acceptPaymentName()] == "tempo/charge")
+        #expect(allowed.sent[0].headerFields[PaymentClient.acceptPayment] == "tempo/charge")
         // policy .never -> not injected.
         let denied = StubTransport([response(200)])
         _ = try await PaymentClient(
             transport: denied, methods: methods, acceptPaymentPolicy: .never,
             advertise: "tempo/charge"
         ).send(request())
-        #expect(denied.sent[0].headerFields[acceptPaymentName()] == nil)
+        #expect(denied.sent[0].headerFields[PaymentClient.acceptPayment] == nil)
     }
 
     @Test("a caller-set Accept-Payment header is not overwritten by advertise")
     func doesNotOverwriteCallerAcceptPayment() async throws {
         let transport = StubTransport([response(200)])
         var caller = request()
-        caller.headerFields[acceptPaymentName()] = "stripe/charge"
+        caller.headerFields[PaymentClient.acceptPayment] = "stripe/charge"
         _ = try await PaymentClient(
             transport: transport, methods: [StubMethod(methodName: tempo())],
             advertise: "tempo/charge"
         ).send(caller)
-        #expect(transport.sent[0].headerFields[acceptPaymentName()] == "stripe/charge")
+        #expect(transport.sent[0].headerFields[PaymentClient.acceptPayment] == "stripe/charge")
     }
 
     // MARK: - Multi-challenge selection
@@ -254,7 +254,7 @@ struct PaymentClientTests {
         var offered = HTTPFields()
         offered[.wwwAuthenticate] = try challenge(method: tempo()).headerValue
         var paid = HTTPFields()
-        paid[paymentReceiptName()] = "!!!not-base64url!!!"
+        paid[PaymentClient.paymentReceipt] = "!!!not-base64url!!!"
         let transport = StubTransport([
             response(402, headers: offered),
             response(200, headers: paid),

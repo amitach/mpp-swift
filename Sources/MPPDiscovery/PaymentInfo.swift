@@ -106,6 +106,11 @@ public struct PaymentInfo: Sendable, Hashable, Codable {
         case offers
     }
 
+    /// The flat offer fields; their presence alongside `offers` is rejected.
+    private enum FlatKey: String, CodingKey {
+        case amount, currency, description, intent, method
+    }
+
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         if container.contains(.offers) {
@@ -119,8 +124,7 @@ public struct PaymentInfo: Sendable, Hashable, Codable {
                 throw DecodingFailure.emptyOffers
             }
             // Offers must not be mixed with flat fields (the only key may be `offers`).
-            let flat = try decoder.singleValueContainer().decode(PaymentInfoFlatProbe.self)
-            guard !flat.hasFlatFields else {
+            guard try decoder.container(keyedBy: FlatKey.self).allKeys.isEmpty else {
                 throw DecodingFailure.mixedOffersAndFlatFields
             }
             offers = parsed
@@ -133,15 +137,5 @@ public struct PaymentInfo: Sendable, Hashable, Codable {
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(offers, forKey: .offers)
-    }
-}
-
-/// Probe for any flat offer field alongside `offers` (mixing is rejected).
-private struct PaymentInfoFlatProbe: Decodable {
-    let hasFlatFields: Bool
-    private enum Keys: String, CodingKey { case amount, currency, description, intent, method }
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: Keys.self)
-        hasFlatFields = !container.allKeys.isEmpty
     }
 }

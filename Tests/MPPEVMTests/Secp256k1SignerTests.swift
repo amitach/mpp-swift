@@ -22,7 +22,11 @@ struct Secp256k1SignerTests {
         let signature = try Secp256k1Signer(privateKey: key()).sign(hash: hash())
         #expect(signature.compact.count == 64)
         #expect(signature.recoveryID <= 3)
-        #expect(signature.serialized.count == 65)
+        // The 65-byte Ethereum wire form carries v = recoveryID + 27 and round-trips.
+        let wire = signature.ethereumWire
+        #expect(wire.count == 65)
+        #expect(wire[wire.startIndex + 64] == signature.recoveryID + 27)
+        #expect(RecoverableSignature(ethereumWire: wire) == signature)
     }
 
     @Test("the recovered public key matches the signer's (sign -> recover round-trip)")
@@ -41,6 +45,21 @@ struct Secp256k1SignerTests {
         let first = try signer.sign(hash: hash())
         let second = try signer.sign(hash: hash())
         #expect(first == second)
+    }
+
+    @Test("description and debugDescription redact the private key, showing only the public key")
+    func redactsPrivateKey() throws {
+        // The key is stored as [UInt8]; its default reflection would print "[171, 171, ...]"
+        // (171 == 0xAB). That comma-joined byte run cannot occur in the public key's hex, so its
+        // absence proves the private key is not leaked (per SECURITY.md §11.2.1).
+        let signer = try Secp256k1Signer(privateKey: Data(repeating: 0xAB, count: 32))
+        let leaked = String(describing: [UInt8](repeating: 0xAB, count: 32))
+        for rendered in [String(describing: signer), signer.debugDescription, "\(signer)"] {
+            #expect(!rendered.contains(leaked))
+            #expect(!rendered.contains("171, 171"))
+            #expect(rendered.contains("Secp256k1Signer"))
+            #expect(rendered.contains(signer.publicKey.hexPrefixed))
+        }
     }
 
     @Test("a different hash yields a different signature")

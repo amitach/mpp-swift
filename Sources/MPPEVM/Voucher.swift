@@ -59,7 +59,7 @@ public struct Voucher: Sendable, Hashable {
         let signature = try signer.sign(
             hash: signingHash(escrowContract: escrowContract, chainId: chainId)
         )
-        return signature.compact + Data([signature.recoveryID + 27])
+        return signature.ethereumWire
     }
 
     /// Verifies that `signature` over this voucher recovers to `expectedSigner`.

@@ -76,6 +76,30 @@ public indirect enum JSONValue: Sendable, Hashable {
     }
 }
 
+// Case accessors: the canonical way to read a single case off a decoded
+// `JSONValue`, so a consumer reaches for `value.stringValue` instead of
+// re-deriving `if case let .string(x) = value` at every call site. They live
+// with the type rather than as per-module extensions.
+public extension JSONValue {
+    /// The wrapped string when this is a `.string`, else `nil`.
+    var stringValue: String? {
+        if case let .string(value) = self { return value }
+        return nil
+    }
+
+    /// The wrapped members when this is an `.object`, else `nil`.
+    var objectValue: [String: JSONValue]? {
+        if case let .object(members) = self { return members }
+        return nil
+    }
+
+    /// The wrapped value when this is an `.integer`, else `nil`.
+    var integerValue: Int64? {
+        if case let .integer(value) = self { return value }
+        return nil
+    }
+}
+
 extension JSONValue: ExpressibleByStringLiteral {
     public init(stringLiteral value: String) {
         self = .string(value)

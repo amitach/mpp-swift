@@ -52,10 +52,6 @@ public enum DiscoveryValidator {
         }
     }
 
-    private static let httpMethods: Set<String> = [
-        "get", "put", "post", "delete", "options", "head", "patch", "trace",
-    ]
-
     /// Spec semantic checks per payment-gated operation: a `402` response is REQUIRED (error), a
     /// `requestBody` is RECOMMENDED (warning). Walks the raw JSON (the parsed `DiscoveryDocument`
     /// projects away `responses` / `requestBody`); uses JSONSerialization so a number anywhere in
@@ -68,7 +64,7 @@ public enum DiscoveryValidator {
         var errors: [DiscoveryValidationError] = []
         for (path, item) in paths {
             guard let methods = item as? [String: Any] else { continue }
-            for (method, value) in methods where httpMethods.contains(method.lowercased()) {
+            for (method, value) in methods where HTTPMethod(rawValue: method.lowercased()) != nil {
                 guard let operation = value as? [String: Any],
                       operation["x-payment-info"] != nil
                 else { continue }

@@ -30,11 +30,7 @@ public struct Expires: Sendable, Hashable {
     ///   fractional seconds, using `Z` or a numeric UTC offset.
     /// - Throws: ``ParsingError/malformed`` if the value is not RFC 3339.
     public init(_ rawValue: String) throws(ParsingError) {
-        do {
-            instant = try RFC3339DateTime(rawValue)
-        } catch {
-            throw .malformed
-        }
+        instant = try RFC3339DateTime(rawValue)
     }
 
     /// Creates an expiry from an instant, formatting it as RFC 3339 (`Z`, no
@@ -61,11 +57,9 @@ public struct Expires: Sendable, Hashable {
         }
     }
 
-    /// The value was not a valid RFC 3339 timestamp.
-    public enum ParsingError: Error, Sendable, Hashable {
-        /// The string did not parse as an RFC 3339 `date-time`.
-        case malformed
-    }
+    /// An `Expires` parse failure is exactly an RFC 3339 parse failure: the only
+    /// thing an expiry can fail to be is a valid RFC 3339 `date-time`.
+    public typealias ParsingError = RFC3339DateTime.ParsingError
 
     /// The challenge had already expired.
     public struct ExpiredError: Error, Sendable, Hashable {

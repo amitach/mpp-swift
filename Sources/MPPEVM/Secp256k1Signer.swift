@@ -20,7 +20,7 @@ import libsecp256k1
 ///   lifetime and is **not** zeroized on release (Swift cannot reliably scrub a
 ///   copyable value). Scope a signer to the signing it performs, and source the
 ///   key from a secure store. Hardened key custody is a separate concern.
-public struct Secp256k1Signer: Sendable {
+public struct Secp256k1Signer: Sendable, CustomStringConvertible, CustomDebugStringConvertible {
     private let privateKey: [UInt8]
     private let context: Secp256k1Context
     private let publicKeyBytes: Data
@@ -45,6 +45,22 @@ public struct Secp256k1Signer: Sendable {
     /// The signer's public key, serialized uncompressed (65 bytes, `0x04` prefix).
     public var publicKey: Data {
         publicKeyBytes
+    }
+
+    /// A redacted description that never exposes the private key. The key is stored as `[UInt8]`,
+    /// whose default reflection would print the raw key bytes (unlike `Data`, whose description is
+    /// "<n> bytes"). Per SECURITY.md §11.2.1 a signing key must never appear in a description, log,
+    /// or trace, so only the non-secret public key is shown.
+    public var description: String {
+        "Secp256k1Signer(publicKey: \(publicKey.hexPrefixed))"
+    }
+
+    /// Same redaction as ``description``. String interpolation and `print` use `description`;
+    /// `debugPrint` and the debugger's `po` use `debugDescription`. Both must omit the private key,
+    /// so they share one rendering. (`dump`/`Mirror` are a separate, debug-only reflection path,
+    /// outside the §11.2.1 logging/error/trace scope; see SECURITY.md note.)
+    public var debugDescription: String {
+        description
     }
 
     /// Signs a 32-byte message hash, returning a recoverable signature.
@@ -157,11 +173,22 @@ public struct RecoverableSignature: Sendable, Hashable {
         self.recoveryID = recoveryID
     }
 
-    /// The 65-byte `r || s || recoveryID` form (raw recovery id, not Ethereum's
-    /// `27`-offset `v`; the offset is applied by the layer that knows the wire
-    /// convention).
-    public var serialized: Data {
-        compact + Data([recoveryID])
+    /// Parses a 65-byte Ethereum wire signature `r || s || v` (with `v` in `27...30`)
+    /// into the compact `r || s` and the `0...3` recovery id, or `nil` if it is not
+    /// 65 bytes or `v` is out of range. The inverse of ``ethereumWire``.
+    public init?(ethereumWire: Data) {
+        guard ethereumWire.count == 65 else { return nil }
+        let recoveryByte = ethereumWire[ethereumWire.startIndex + 64]
+        guard (27 ... 30).contains(recoveryByte) else { return nil }
+        self.init(compact: Data(ethereumWire.prefix(64)), recoveryID: recoveryByte - 27)
+    }
+
+    /// The 65-byte Ethereum wire form `r || s || v`, where `v = recoveryID + 27`
+    /// (the offset every EVM `ecrecover` consumer expects). The inverse of
+    /// ``init?(ethereumWire:)``; this type owns the `27` offset so the producing
+    /// and consuming sides cannot drift.
+    public var ethereumWire: Data {
+        compact + Data([recoveryID + 27])
     }
 }
 

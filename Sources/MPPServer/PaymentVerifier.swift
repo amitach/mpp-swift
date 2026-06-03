@@ -137,7 +137,7 @@ public struct PaymentVerifier: Sendable {
     /// carries no digest, otherwise the body must match (a malformed digest fails closed).
     private func digestMatches(_ challenge: Challenge, body: Data) -> Bool {
         guard let digest = challenge.digest else { return true }
-        return (try? ContentDigest.verify(body, matches: digest)) == true
+        return ContentDigest.verify(body, matches: digest)
     }
 
     /// The result of verifying a credential.

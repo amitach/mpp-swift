@@ -20,8 +20,9 @@ import NIOCore
 
 // The requested port (PORT=0 asks the OS for an ephemeral one). UInt16's failable
 // string initializer returns nil for a non-numeric or out-of-range PORT, so a bad
-// value falls back to the default rather than trapping.
-private let requestedPort = ProcessInfo.processInfo.environment["PORT"]
+// value falls back to the default rather than trapping. Internal (not private): the
+// proxy conformance route pins the in-server origin URL to this port.
+let requestedPort = ProcessInfo.processInfo.environment["PORT"]
     .flatMap(UInt16.init) ?? 8799
 // Moderato testnet chain id, put in the challenge so a Tempo client signs for it.
 // `chainId`/`secret`/`log` are internal (not private): the live routes in
@@ -43,7 +44,10 @@ private let paidBody: @Sendable (HTTPRequest, MPPVerified) async -> (HTTPRespons
     (HTTPResponse(status: .ok), Data(#"{"ok":true,"paid":true}"#.utf8))
 }
 
-private func makeMiddleware() throws -> MPPServerMiddleware {
+// Internal (not private): the proxy conformance route in ProxyConformanceRoutes.swift reuses this
+// same zero-amount Tempo charge gate, so a proxy-gated route verifies an mppx proof exactly as the
+// direct /proof route does.
+func makeMiddleware() throws -> MPPServerMiddleware {
     let signer = ChallengeSigner(secret: secret)
     let binding = try RouteBinding(
         realm: "127.0.0.1", method: MethodName("tempo"), intent: .charge
@@ -149,7 +153,7 @@ private struct ConformanceNoopRenewer: SubscriptionRenewer {
 
 /// Logs what the server received on a request: the method/path, and (when a
 /// credential is present) the decoded challenge id, source DID, and proof payload.
-private func logIncoming(_ request: HTTPRequest) {
+func logIncoming(_ request: HTTPRequest) {
     guard verbose else { return }
     guard let auth = request.headerFields[.authorization] else {
         log("[server] <- \(request.method.rawValue) \(request.path ?? "") (no credential)")
@@ -188,6 +192,15 @@ enum ConformanceServer {
             gate: subscriptionGate, handler: paidBody
         )
         register(subscriptionResponder, on: router, path: "subscription")
+
+        // Proxy conformance: the mppx client pays GET /proxy/echo/resource THROUGH our MPPProxy,
+        // which forwards the verified request to a free in-server origin (see
+        // ProxyConformanceRoutes.swift). The proxy pins its origin URL to the bound port, so it is
+        // mounted only for a fixed PORT (run-proxy.sh sets one); a PORT=0 ephemeral run, used only
+        // by the direct routes, skips it rather than mounting an unreachable :0 origin.
+        if requestedPort != 0 {
+            try registerProxyConformance(on: router)
+        }
 
         #if MPP_TEMPO_FFI_ENABLED
             if let sessionGate = try await makeSessionMiddleware() {

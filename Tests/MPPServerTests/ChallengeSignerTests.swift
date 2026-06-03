@@ -25,6 +25,21 @@ struct ChallengeSignerTests {
         challenge.withID(signer.computeID(for: challenge))
     }
 
+    @Test("a signer and its secret store never leak the secret via reflection")
+    func secretIsNotReflected() throws {
+        // The challenge secret is stored as Data (description "<n> bytes"), so reflection must not
+        // print the raw key. This pins that invariant (SECURITY.md §11.2.1): a refactor to a byte
+        // array ([UInt8], whose reflection prints the bytes) would regress it and fail here.
+        let raw = Data(repeating: 0xAB, count: 32)
+        let leaked = String(describing: [UInt8](raw)) // "[171, 171, ...]"
+        let signer = ChallengeSigner(secret: raw)
+        let store = try SecretStore(current: raw, previous: [raw])
+        for rendered in [String(describing: signer), String(describing: store)] {
+            #expect(!rendered.contains(leaked))
+            #expect(!rendered.contains("171, 171"))
+        }
+    }
+
     @Test("matches the known-answer id for every optional-slot shape")
     func knownAnswerVectors() throws {
         // Expected ids computed independently with openssl over the exact binding
