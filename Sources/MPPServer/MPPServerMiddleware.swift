@@ -78,6 +78,30 @@ public struct MPPServerMiddleware: Sendable {
         self.onEvent = onEvent
     }
 
+    /// Wires the standard single-route gate: a `secret`-keyed ``ChallengeSigner``
+    /// feeding a ``ChallengeMinter`` and a ``PaymentVerifier``, bound to `binding`'s
+    /// route. The common-case shortcut for the signer → minter/verifier wiring every
+    /// gated route repeats; `replayStore` defaults to an in-memory store (override
+    /// for a persistent one), and the full initializer remains for control over
+    /// expiry, body limits, or an authorizer.
+    public static func make(
+        secret: Data,
+        binding: RouteBinding,
+        request: EncodedJSON,
+        methods: [any PaymentMethodServer],
+        replayStore: any ReplayStore = InMemoryReplayStore(),
+        onEvent: @escaping @Sendable (ServerEvent) -> Void = { _ in }
+    ) -> MPPServerMiddleware {
+        let signer = ChallengeSigner(secret: secret)
+        return MPPServerMiddleware(
+            minter: ChallengeMinter(signer: signer),
+            verifier: PaymentVerifier(signer: signer, replayStore: replayStore, methods: methods),
+            binding: binding,
+            request: request,
+            onEvent: onEvent
+        )
+    }
+
     /// The HTTP-free outcome of evaluating a request.
     public enum Decision: Sendable {
         /// The body exceeded `maxBodyBytes`; answer `413` before any payment work.

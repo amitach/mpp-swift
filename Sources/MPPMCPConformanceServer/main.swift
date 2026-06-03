@@ -14,13 +14,8 @@ import MPPTempoServer
 // Fixed HMAC secret for a deterministic harness (a test-only secret, not a real credential).
 let secret = Data("mpp-swift-conformance-harness-fixed-secret-key-0123456789".utf8)
 
-let middleware = try MPPServerMiddleware(
-    minter: ChallengeMinter(signer: ChallengeSigner(secret: secret)),
-    verifier: PaymentVerifier(
-        signer: ChallengeSigner(secret: secret),
-        replayStore: InMemoryReplayStore(),
-        methods: [TempoProofVerifier()]
-    ),
+let middleware = try MPPServerMiddleware.make(
+    secret: secret,
     binding: RouteBinding(realm: "mpp-swift", method: MethodName("tempo"), intent: .charge),
     // The zero-amount charge request (the EIP-712 proof path): amount "0" plus the
     // recipient/currency/chainId a tempo charge carries, matching the reference server's shape.
@@ -29,7 +24,8 @@ let middleware = try MPPServerMiddleware(
         "recipient": .string("0xC0ffee0000000000000000000000000000000001"),
         "currency": .string("0x20c0000000000000000000000000000000000000"),
         "methodDetails": .object(["chainId": .integer(42431)]),
-    ]))
+    ])),
+    methods: [TempoProofVerifier()]
 )
 
 let gate = MCPPaymentServer(middleware: middleware)
