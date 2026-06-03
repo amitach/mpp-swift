@@ -61,10 +61,11 @@ public struct SubscriptionAuthorizer: RequestAuthorizer {
         let outcome: RenewalOutcome
         do {
             outcome = try await engine.renew(subscriptionID: subscriptionID, now: seconds)
-        } catch is SubscriptionError {
+        } catch SubscriptionError.notFound {
             // The record vanished between the active-subscription read and renew (a TOCTOU window,
             // e.g. a concurrent removal). That is permanent, not transient, so fall through to the
-            // 402 / activation path rather than telling the client to retry forever.
+            // 402 / activation path rather than telling the client to retry forever. Caught
+            // specifically (not `is SubscriptionError`) so any other engine error stays transient.
             return nil
         } catch {
             // A transient charge failure: the engine released its claim, so a later attempt
