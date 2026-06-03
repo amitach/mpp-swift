@@ -137,11 +137,7 @@ public struct TempoProofMethod: PaymentMethodClient {
         )
         guard await approval.approves(facts) else { throw TempoMethodError.approvalDenied }
 
-        let proof: ZeroAmountProof = switch variant {
-        case .v2Realm: .v2Realm(challengeId: challenge.id, realm: challenge.realm)
-        case .v1Wallet: .v1Wallet(challengeId: challenge.id, wallet: wallet)
-        case .specChallengeId: .v1ChallengeId(challengeId: challenge.id)
-        }
+        let proof = variant.proof(challengeId: challenge.id, realm: challenge.realm, wallet: wallet)
         let signature: Data
         do {
             signature = try proof.sign(chainId: chainId, with: signer)

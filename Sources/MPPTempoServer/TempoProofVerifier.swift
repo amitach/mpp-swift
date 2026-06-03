@@ -102,17 +102,10 @@ public struct TempoProofVerifier: PaymentMethodServer {
     private func recovers(
         challenge: Challenge, chainId: UInt64, signature: Data, to wallet: EthereumAddress
     ) -> Bool {
-        for variant in acceptedVariants {
-            let proof: ZeroAmountProof = switch variant {
-            case .v2Realm: .v2Realm(challengeId: challenge.id, realm: challenge.realm)
-            case .v1Wallet: .v1Wallet(challengeId: challenge.id, wallet: wallet)
-            case .specChallengeId: .v1ChallengeId(challengeId: challenge.id)
-            }
-            if proof.recoverSigner(chainId: chainId, signature: signature) == wallet {
-                return true
-            }
+        acceptedVariants.contains { variant in
+            variant.proof(challengeId: challenge.id, realm: challenge.realm, wallet: wallet)
+                .recoverSigner(chainId: chainId, signature: signature) == wallet
         }
-        return false
     }
 
     /// A reason ``TempoProofVerifier`` rejected a credential.
