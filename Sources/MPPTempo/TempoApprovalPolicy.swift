@@ -45,6 +45,30 @@ public struct ChargeApproval: Sendable, Hashable {
         self.recipient = recipient
         self.validUntil = validUntil
     }
+
+    /// Builds the approval facts from a `challenge` and the resolved charge fields.
+    ///
+    /// `challengeId`, `realm`, and `validUntil` always come from the challenge, so
+    /// the proof, channel, and subscription pre-sign gates state only what varies
+    /// (the resolved `chainId` and the transfer's `amount`/`currency`/`recipient`)
+    /// and the challenge→facts mapping lives in one place.
+    public init(
+        challenge: Challenge,
+        chainId: UInt64,
+        amount: Amount,
+        currency: String?,
+        recipient: String?
+    ) {
+        self.init(
+            challengeId: challenge.id,
+            realm: challenge.realm,
+            chainId: chainId,
+            amount: amount,
+            currency: currency,
+            recipient: recipient,
+            validUntil: challenge.expires
+        )
+    }
 }
 
 /// A pre-sign spending control: the method calls it with the ``ChargeApproval``

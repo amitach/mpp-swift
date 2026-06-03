@@ -109,13 +109,11 @@ public struct TempoSubscriptionMethod: PaymentMethodClient {
         // The pre-sign gate sees the resolved charge facts (the existing approval surface; the
         // recurring period/expiry are not part of it).
         let facts = ChargeApproval(
-            challengeId: challenge.id,
-            realm: challenge.realm,
+            challenge: challenge,
             chainId: chainID,
             amount: request.amount,
             currency: request.currency.checksummed,
-            recipient: request.recipient.checksummed,
-            validUntil: challenge.expires
+            recipient: request.recipient.checksummed
         )
         guard await approval.approves(facts) else {
             throw TempoSubscriptionMethodError.approvalDenied

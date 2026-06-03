@@ -129,13 +129,11 @@ public struct TempoProofMethod: PaymentMethodClient {
         // on and which challenge it attests, not only the display-only transfer
         // fields.
         let facts = ChargeApproval(
-            challengeId: challenge.id,
-            realm: challenge.realm,
+            challenge: challenge,
             chainId: chainId,
             amount: request.amount,
             currency: request.currency,
-            recipient: request.recipient,
-            validUntil: challenge.expires
+            recipient: request.recipient
         )
         guard await approval.approves(facts) else { throw TempoMethodError.approvalDenied }
 
