@@ -36,8 +36,9 @@ struct RequestAuthorizerTests {
     func authorizedServes() async throws {
         let middleware =
             try makeMiddleware(authorizer: StubAuthorizer(outcome: .authorized(receipt())))
-        let (response, body) = await middleware.handle(makeRequest(), body: Data(), now: now) {
-            _, verified in
+        let (response, body) = await middleware.handle(
+            makeRequest(), body: Data(), now: now
+        ) { _, verified in
             #expect(verified.credential == nil) // the authorize path carries no credential
             #expect(verified.receipt != nil)
             return (HTTPResponse(status: .ok), ran)
@@ -156,7 +157,7 @@ private final class EventSink: @unchecked Sendable {
     var verifiedCount: Int {
         lock.lock()
         defer { lock.unlock() }
-        return events.filter { if case .paymentVerified = $0 { return true } else { return false } }
-            .count
+        return events
+            .count(where: { if case .paymentVerified = $0 { return true } else { return false } })
     }
 }
