@@ -132,8 +132,11 @@ public struct PaymentClient: Sendable {
         return URL(string: "\(scheme)://\(authority)\(request.path ?? "")")
     }
 
-    private static let acceptPayment = fieldName("Accept-Payment")
-    private static let paymentReceipt = fieldName("Payment-Receipt")
+    /// The canonical `Accept-Payment` and `Payment-Receipt` field names this client
+    /// reads and writes. Internal (not private) so tests assert against the same
+    /// constants instead of re-deriving the header strings, which could drift.
+    static let acceptPayment = fieldName("Accept-Payment")
+    static let paymentReceipt = fieldName("Payment-Receipt")
 
     /// A non-standard field name from a compile-time-known-valid token.
     private static func fieldName(_ token: String) -> HTTPField.Name {

@@ -90,7 +90,16 @@ public actor TempoChannelSession {
 
     private var deposit: ChannelAmount = .zero
     private var cumulative: ChannelAmount = .zero
-    private var lastVoucher: SignedVoucher?
+
+    /// A freshly issued voucher kept in both forms: the public ``SignedVoucher``
+    /// credential and the already-parsed ``Voucher``, so ``close()`` reuses the
+    /// parse rather than reconstructing it from the amount string.
+    private struct IssuedVoucher {
+        let voucher: Voucher
+        let signed: SignedVoucher
+    }
+
+    private var lastVoucher: IssuedVoucher?
     private var opened = false
     private var finalized = false
     // Set/checked synchronously (no await between), so it serializes the async lifecycle
@@ -210,10 +219,10 @@ public actor TempoChannelSession {
         }
         guard amount > cumulative else { throw TempoChannelSessionError.nonMonotonicVoucher }
         guard amount <= deposit else { throw TempoChannelSessionError.voucherExceedsDeposit }
-        let signed = try sign(cumulativeAmount: cumulativeAmount)
+        let issued = try sign(cumulativeAmount: cumulativeAmount)
         cumulative = amount
-        lastVoucher = signed
-        return signed
+        lastVoucher = issued
+        return issued.signed
     }
 
     /// Closes (settles + finalizes) the channel on-chain using the latest issued voucher
@@ -223,15 +232,12 @@ public actor TempoChannelSession {
         try beginOperation()
         defer { inFlight = false }
         try requireOpen()
-        let voucher = try lastVoucher ?? sign(cumulativeAmount: "0")
-        guard let parsed = Voucher(
-            channelID: channelID,
-            cumulativeAmount: voucher.cumulativeAmount
-        ) else {
-            throw TempoChannelSessionError.invalidAmount("cumulativeAmount")
-        }
+        // The amount in any issued voucher already built a Voucher when it was signed
+        // (a zero voucher here if none was issued), so the parse is reused, never redone.
+        let issued = try lastVoucher ?? sign(cumulativeAmount: "0")
         let transaction = try await builder.buildCloseTransaction(
-            voucher: parsed, signature: voucher.signature, escrow: escrow, chainID: chainID
+            voucher: issued.voucher, signature: issued.signed.signature,
+            escrow: escrow, chainID: chainID
         )
         try await broadcast(transaction)
         finalized = true
@@ -254,7 +260,7 @@ public actor TempoChannelSession {
         guard opened else { throw .notOpen }
     }
 
-    private func sign(cumulativeAmount: String) throws(TempoChannelSessionError) -> SignedVoucher {
+    private func sign(cumulativeAmount: String) throws(TempoChannelSessionError) -> IssuedVoucher {
         guard let voucher = Voucher(channelID: channelID, cumulativeAmount: cumulativeAmount) else {
             throw .invalidAmount("cumulativeAmount")
         }
@@ -264,9 +270,10 @@ public actor TempoChannelSession {
         } catch {
             throw .signingFailed
         }
-        return SignedVoucher(
+        let signed = SignedVoucher(
             channelID: channelID, cumulativeAmount: cumulativeAmount, signature: signature
         )
+        return IssuedVoucher(voucher: voucher, signed: signed)
     }
 
     /// Submits a raw transaction with `eth_sendRawTransactionSync` (submit + wait for the

@@ -42,8 +42,7 @@ public struct TempoSubscriptionVerifier: PaymentMethodServer {
 
     /// Whether this is a `tempo` / `subscription` challenge with a decodable request.
     public func supports(_ challenge: Challenge) -> Bool {
-        challenge.method == TempoMethod.name && challenge.intent == .subscription
-            && (try? SubscriptionRequest(challenge: challenge)) != nil
+        SubscriptionRequest.supports(challenge)
     }
 
     /// Verifies the signed key authorization carried by `credential` and mints its

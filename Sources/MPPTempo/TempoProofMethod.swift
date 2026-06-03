@@ -76,10 +76,7 @@ public struct TempoProofMethod: PaymentMethodClient {
     /// resolvable (challenge `chainId` or the configured default), so it is not a
     /// support condition.
     public func supports(_ challenge: Challenge) -> Bool {
-        guard challenge.method == TempoMethod.name, challenge.intent == .charge,
-              let request = try? TempoChargeRequest(challenge: challenge)
-        else { return false }
-        return request.isZeroAmount
+        TempoChargeRequest.supportsZeroAmountProof(challenge)
     }
 
     /// The approval facts for `challenge`, filling amount/currency/recipient from the
@@ -129,21 +126,15 @@ public struct TempoProofMethod: PaymentMethodClient {
         // on and which challenge it attests, not only the display-only transfer
         // fields.
         let facts = ChargeApproval(
-            challengeId: challenge.id,
-            realm: challenge.realm,
+            challenge: challenge,
             chainId: chainId,
             amount: request.amount,
             currency: request.currency,
-            recipient: request.recipient,
-            validUntil: challenge.expires
+            recipient: request.recipient
         )
         guard await approval.approves(facts) else { throw TempoMethodError.approvalDenied }
 
-        let proof: ZeroAmountProof = switch variant {
-        case .v2Realm: .v2Realm(challengeId: challenge.id, realm: challenge.realm)
-        case .v1Wallet: .v1Wallet(challengeId: challenge.id, wallet: wallet)
-        case .specChallengeId: .v1ChallengeId(challengeId: challenge.id)
-        }
+        let proof = variant.proof(challengeId: challenge.id, realm: challenge.realm, wallet: wallet)
         let signature: Data
         do {
             signature = try proof.sign(chainId: chainId, with: signer)

@@ -28,7 +28,7 @@ public enum PaymentAuthScheme {
     public static func parseParameters(
         from headerValue: String
     ) throws(ParseError) -> [String: String] {
-        guard let parameters = extractSchemeParameters(headerValue) else {
+        guard let parameters = schemeParameterStrings(from: headerValue).first else {
             throw .missingScheme
         }
         return try parseAuthParameters(parameters)
@@ -67,53 +67,15 @@ public enum PaymentAuthScheme {
 
     // MARK: - Scheme extraction
 
-    /// Returns the parameter substring following the `Payment` scheme token, or
-    /// `nil` if no `Payment` scheme is present. Quote-aware so a `Payment`
-    /// substring inside another scheme's quoted value is not mistaken for the
-    /// scheme.
-    private static func extractSchemeParameters(_ header: String) -> String? {
-        let characters = Array(header)
-        let scheme = Array(name)
-        var inQuotes = false
-        var escaped = false
-        var index = 0
-
-        while index < characters.count {
-            let character = characters[index]
-            if inQuotes {
-                if escaped {
-                    escaped = false
-                } else if character == "\\" {
-                    escaped = true
-                } else if character == "\"" {
-                    inQuotes = false
-                }
-                index += 1
-                continue
-            }
-            if character == "\"" {
-                inQuotes = true
-                index += 1
-                continue
-            }
-            if startsWithSchemeToken(characters, at: index, scheme: scheme),
-               prefixAllowsScheme(characters, before: index) {
-                var start = index + scheme.count
-                while start < characters.count, characters[start].isWhitespace {
-                    start += 1
-                }
-                return String(characters[start...])
-            }
-            index += 1
-        }
-        return nil
-    }
-
     /// The post-scheme parameter substring after each top-level `Payment` token,
     /// in order. Each substring runs to the end of the header; ``parseAuthParameters``
     /// stops at the next scheme token, so parsing one substring yields exactly
     /// that challenge's parameters. Quote-aware, so a `Payment` inside another
     /// scheme's quoted value is not mistaken for a scheme boundary.
+    ///
+    /// ``parseParameters(from:)`` uses `.first` (the single-challenge case);
+    /// ``allParameters(from:)`` uses the full list. One scanner, no duplicate
+    /// quote/escape state machine to keep in sync.
     private static func schemeParameterStrings(from header: String) -> [String] {
         let characters = Array(header)
         let scheme = Array(name)

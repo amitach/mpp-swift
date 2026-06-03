@@ -9,7 +9,7 @@ import MPPCore
 enum SessionReceipt {
     /// `0x`-prefixed lowercase hex of a 32-byte channel id.
     static func channelHex(_ channelID: Data) -> String {
-        "0x" + channelID.map { String(format: "%02x", $0) }.joined()
+        "0x" + channelID.hexString
     }
 
     static func make(

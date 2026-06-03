@@ -50,12 +50,16 @@ public struct RFC3339DateTime: Sendable, Hashable {
 }
 
 extension RFC3339DateTime {
-    // RFC 3339 allows optional fractional seconds, which a single
-    // ISO8601DateFormatter cannot match both with and without. Try the
-    // fractional form first, then the plain form. Formatters are created per
-    // call (they are reference types and not safely shared under strict
-    // concurrency); timestamp parsing is not a hot path.
-    static func parse(_ string: String) -> Date? {
+    /// Parses an RFC 3339 `date-time` to its instant, or `nil` if the value is
+    /// not RFC 3339. The canonical RFC 3339 string→`Date` parse; use ``init(_:)``
+    /// when you also need the verbatim string preserved alongside the instant.
+    ///
+    /// RFC 3339 allows optional fractional seconds, which a single
+    /// ISO8601DateFormatter cannot match both with and without. Try the
+    /// fractional form first, then the plain form. Formatters are created per
+    /// call (they are reference types and not safely shared under strict
+    /// concurrency); timestamp parsing is not a hot path.
+    public static func parse(_ string: String) -> Date? {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = fractional.date(from: string) {

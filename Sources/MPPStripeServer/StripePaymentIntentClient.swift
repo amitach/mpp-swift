@@ -32,8 +32,7 @@ public struct StripePaymentIntentClient: StripePaymentIntentCreating {
             scheme: baseURL.scheme, host: baseURL.host(percentEncoded: false),
             allowInsecureLocal: allowInsecureLocal
         ) else {
-            let endpoint = "\(baseURL.scheme ?? "")://\(baseURL.host(percentEncoded: false) ?? "")"
-            throw .insecureTransport(url: endpoint)
+            throw .insecureTransport(url: MPPHTTPEndpoint(baseURL).redactedEndpoint)
         }
         self.transport = transport
         self.secretKey = secretKey
@@ -67,9 +66,9 @@ public struct StripePaymentIntentClient: StripePaymentIntentCreating {
         } catch {
             throw .malformedResponse(String(describing: error))
         }
-        guard case let .object(fields) = decoded,
-              case let .string(id)? = fields["id"],
-              case let .string(status)? = fields["status"]
+        guard let fields = decoded.objectValue,
+              let id = fields["id"]?.stringValue,
+              let status = fields["status"]?.stringValue
         else {
             throw .malformedResponse("PaymentIntent response is not {id, status}")
         }
@@ -144,9 +143,9 @@ public struct StripePaymentIntentClient: StripePaymentIntentCreating {
 
     private static func errorMessage(from data: Data) -> String {
         guard let decoded = try? JSONDecoder().decode(JSONValue.self, from: data),
-              case let .object(fields) = decoded,
-              case let .object(error)? = fields["error"],
-              case let .string(message)? = error["message"]
+              let fields = decoded.objectValue,
+              let error = fields["error"]?.objectValue,
+              let message = error["message"]?.stringValue
         else {
             return "Stripe returned a non-success status"
         }
@@ -164,14 +163,11 @@ public struct StripePaymentIntentClient: StripePaymentIntentCreating {
         if let account = request.settlement?.stripeAccount {
             fields[Self.stripeAccount] = account
         }
-        let host = baseURL.host(percentEncoded: false) ?? ""
-        let bracketedHost = host.contains(":") ? "[\(host)]" : host
-        let authority = baseURL.port.map { "\(bracketedHost):\($0)" } ?? bracketedHost
         let prefix = baseURL.path == "/" ? "" : baseURL.path
         return HTTPRequest(
             method: .post,
             scheme: baseURL.scheme ?? "https",
-            authority: authority,
+            authority: MPPHTTPEndpoint(baseURL).authority,
             path: prefix + StripeAPI.paymentIntentsPath,
             headerFields: fields
         )
