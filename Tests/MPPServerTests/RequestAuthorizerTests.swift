@@ -127,4 +127,36 @@ struct RequestAuthorizerTests {
         #expect(response.status.code == 413)
         #expect(body != ran)
     }
+
+    @Test("the authorize path emits a paymentVerified event for observability parity")
+    func authorizeEmitsEvent() async throws {
+        let sink = EventSink()
+        let middleware = try makeMiddleware(
+            authorizer: StubAuthorizer(outcome: .authorized(receipt())),
+            onEvent: { sink.add($0) }
+        )
+        _ = await middleware.handle(makeRequest(), body: Data(), now: now) { _, _ in
+            (HTTPResponse(status: .ok), ran)
+        }
+        #expect(sink.verifiedCount == 1)
+    }
+}
+
+/// A thread-safe sink for the middleware's synchronous `onEvent` callback.
+private final class EventSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [ServerEvent] = []
+
+    func add(_ event: ServerEvent) {
+        lock.lock()
+        defer { lock.unlock() }
+        events.append(event)
+    }
+
+    var verifiedCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return events.filter { if case .paymentVerified = $0 { return true } else { return false } }
+            .count
+    }
 }

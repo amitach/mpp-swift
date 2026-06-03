@@ -152,14 +152,14 @@ public struct SubscriptionEngine: Sendable {
         )
     }
 
-    /// The active subscription id for `lookupKey`, or `nil` if none. A read-through to the store so a
-    /// request-path authorizer can resolve a returning subscriber through the engine facade.
+    /// The active subscription id for `lookupKey`, or `nil` if none. A read-through to the
+    /// store, so a request-path authorizer can resolve a returning subscriber via the engine.
     public func activeSubscription(forLookupKey lookupKey: String) async -> String? {
         await store.activeSubscription(forLookupKey: lookupKey)
     }
 
-    /// The current record for `subscriptionID`, or `nil` if unknown. A read-through to the store, used
-    /// to read the last settlement reference when authorizing an already-charged period.
+    /// The current record for `subscriptionID`, or `nil` if unknown. A read-through to the
+    /// store, used to read the last settlement reference when authorizing a charged period.
     public func record(_ subscriptionID: String) async -> SubscriptionRecord? {
         await store.record(subscriptionID)
     }

@@ -152,6 +152,19 @@ struct SubscriptionAuthorizerTests {
         let outcome = await authorizer.authorize(request(), body: Data(), now: date(Self.anchor))
         #expect(outcome == nil)
     }
+
+    @Test("a vanished record (SubscriptionError.notFound) falls through, not a 503 retry loop")
+    func vanishedRecordFallsThrough() async throws {
+        let store = InMemorySubscriptionStore()
+        let engine = SubscriptionEngine(store: store, renewer: StubAuthRenewer())
+        // An active pointer to a subscription whose record does not exist: a TOCTOU removal between
+        // the active-subscription read and renew. engine.renew throws SubscriptionError.notFound,
+        // which is permanent, so the authorizer falls through (nil), not a retryable 503.
+        await store.setActiveSubscription("ghost", forLookupKey: Self.lookupKey)
+        let authorizer = try authorizer(engine: engine, resolvesTo: Self.lookupKey)
+        let outcome = await authorizer.authorize(request(), body: Data(), now: date(Self.anchor))
+        #expect(outcome == nil)
+    }
 }
 
 /// A renewer that succeeds with a fixed reference and counts charges.

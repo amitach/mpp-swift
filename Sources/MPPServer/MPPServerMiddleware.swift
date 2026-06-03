@@ -151,10 +151,11 @@ public struct MPPServerMiddleware: Sendable {
         if authorization == nil, let authorizer {
             switch await authorizer.authorize(request, body: body, now: now) {
             case let .authorized(receipt):
-                return await serve(
-                    request, verified: MPPVerified(credential: nil, receipt: receipt),
-                    handler: handler
-                )
+                // Report the authorize path through onEvent too, so an operator's paymentVerified
+                // counts include credential-less returning subscribers.
+                let verified = MPPVerified(credential: nil, receipt: receipt)
+                onEvent(.paymentVerified(verified))
+                return await serve(request, verified: verified, handler: handler)
             case let .respond(response, responseBody):
                 return (response, responseBody)
             case .none:
