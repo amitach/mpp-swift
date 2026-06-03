@@ -65,10 +65,12 @@ public struct MCPPaymentServer: Sendable {
                 )
             case let .proceed(verified):
                 let result = try await inner(params)
-                guard let receipt = verified.receipt else { return result }
-                return try Self.attachReceipt(
-                    receipt, challengeID: verified.credential.challenge.id, to: result
-                )
+                // MCP payment is always credential-based, so credential is present here. If a
+                // future credential-less authorize path reached this point, skip the receipt
+                // envelope rather than fabricate a challenge id.
+                guard let receipt = verified.receipt,
+                      let challengeID = verified.credential?.challenge.id else { return result }
+                return try Self.attachReceipt(receipt, challengeID: challengeID, to: result)
             }
         }
     }

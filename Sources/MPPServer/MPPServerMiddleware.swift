@@ -31,6 +31,7 @@ public struct MPPServerMiddleware: Sendable {
     private let challengeRequest: EncodedJSON
     private let expiresIn: TimeInterval?
     private let maxBodyBytes: Int
+    private let authorizer: (any RequestAuthorizer)?
     private let onEvent: @Sendable (ServerEvent) -> Void
 
     /// Creates a middleware for one route.
@@ -49,6 +50,9 @@ public struct MPPServerMiddleware: Sendable {
     ///     denial-of-service guard (the spec does not mandate it), so the digest
     ///     buffer is bounded before it is hashed. Pass a positive value: `0` rejects
     ///     every non-empty body and a negative value rejects even an empty one.
+    ///   - authorizer: An optional ``RequestAuthorizer`` consulted on credential-less
+    ///     requests before minting a `402` (for example a returning subscriber). Defaults
+    ///     to `nil`, in which case every credential-less request gets a `402`.
     ///   - onEvent: A synchronous diagnostics sink; defaults to a no-op.
     ///
     /// A digest-bound, described, or opaque-carrying challenge is minted via
@@ -61,6 +65,7 @@ public struct MPPServerMiddleware: Sendable {
         request: EncodedJSON,
         expiresIn: TimeInterval? = nil,
         maxBodyBytes: Int = 10 * 1024 * 1024,
+        authorizer: (any RequestAuthorizer)? = nil,
         onEvent: @escaping @Sendable (ServerEvent) -> Void = { _ in }
     ) {
         self.minter = minter
@@ -69,6 +74,7 @@ public struct MPPServerMiddleware: Sendable {
         challengeRequest = request
         self.expiresIn = expiresIn
         self.maxBodyBytes = maxBodyBytes
+        self.authorizer = authorizer
         self.onEvent = onEvent
     }
 
@@ -134,32 +140,63 @@ public struct MPPServerMiddleware: Sendable {
         now: Date,
         handler: (HTTPRequest, MPPVerified) async -> (HTTPResponse, Data)
     ) async -> (HTTPResponse, Data) {
+        // Bound the body before any payment or authorize work. `evaluate` enforces the same cap for
+        // its own callers; the authorize path below bypasses `evaluate`, so it is checked here too.
+        if body.count > maxBodyBytes {
+            return Self.payloadTooLargeResponse(maxBodyBytes: maxBodyBytes)
+        }
         let authorization = request.headerFields[.authorization]
+        // A credential-less request: consult an operator-configured authorizer (for example a
+        // returning subscriber recognized without a credential) before minting a 402.
+        if authorization == nil, let authorizer {
+            switch await authorizer.authorize(request, body: body, now: now) {
+            case let .authorized(receipt):
+                return await serve(
+                    request, verified: MPPVerified(credential: nil, receipt: receipt),
+                    handler: handler
+                )
+            case let .respond(response, responseBody):
+                return (response, responseBody)
+            case .none:
+                break // fall through to mint a 402
+            }
+        }
         switch await evaluate(authorization: authorization, body: body, now: now) {
         case .payloadTooLarge:
             return Self.payloadTooLargeResponse(maxBodyBytes: maxBodyBytes)
         case let .challenge(challenge, problem):
             return Self.paymentRequiredResponse(challenge: challenge, problem: problem)
         case let .proceed(verified):
-            var (response, responseBody) = await handler(request, verified)
-            // §11.10 floor: a paid response must be at least `private`. Keep a
-            // directive that already meets it (the stricter `no-store`, or an
-            // explicit `private`); otherwise enforce `private`, covering an absent
-            // value, a `public`, or a bare `max-age` a handler may have set.
-            let cacheControl = response.headerFields[.cacheControl]
-            let meetsFloor = cacheControl.map { $0.contains("no-store") || $0.contains("private") }
-            if meetsFloor != true {
-                response.headerFields[.cacheControl] = "private"
-            }
-            // Attach the settlement receipt (Payment-Receipt), when a method minted
-            // one. The header is optional (spec: for auditability), so an encoding
-            // failure on an otherwise-valid receipt is swallowed rather than failing
-            // the paid response the client already earned.
-            if let receipt = verified.receipt, let value = try? receipt.headerValue {
-                response.headerFields[Self.paymentReceiptField] = value
-            }
-            return (response, responseBody)
+            return await serve(request, verified: verified, handler: handler)
         }
+    }
+
+    /// Runs the protected handler for an authorized request, enforcing the §11.10 `Cache-Control:
+    /// private` floor and attaching the `Payment-Receipt` when the token carries one. Shared by the
+    /// verified-credential path and the credential-less authorize path.
+    private func serve(
+        _ request: HTTPRequest,
+        verified: MPPVerified,
+        handler: (HTTPRequest, MPPVerified) async -> (HTTPResponse, Data)
+    ) async -> (HTTPResponse, Data) {
+        var (response, responseBody) = await handler(request, verified)
+        // §11.10 floor: a paid response must be at least `private`. Keep a directive that already
+        // meets it (the stricter `no-store`, or an explicit `private`); otherwise enforce
+        // `private`,
+        // covering an absent value, a `public`, or a bare `max-age` a handler may have set.
+        let cacheControl = response.headerFields[.cacheControl]
+        let meetsFloor = cacheControl.map { $0.contains("no-store") || $0.contains("private") }
+        if meetsFloor != true {
+            response.headerFields[.cacheControl] = "private"
+        }
+        // Attach the settlement receipt (Payment-Receipt), when one was minted. The header is
+        // optional (spec: for auditability), so an encoding failure on an otherwise-valid receipt
+        // is
+        // swallowed rather than failing the response the client already earned.
+        if let receipt = verified.receipt, let value = try? receipt.headerValue {
+            response.headerFields[Self.paymentReceiptField] = value
+        }
+        return (response, responseBody)
     }
 
     private func mintChallenge(now: Date) -> Challenge {
