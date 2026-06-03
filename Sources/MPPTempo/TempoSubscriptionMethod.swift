@@ -65,8 +65,7 @@ public struct TempoSubscriptionMethod: PaymentMethodClient {
 
     /// Whether this is a `tempo` / `subscription` challenge with a decodable request.
     public func supports(_ challenge: Challenge) -> Bool {
-        challenge.method == TempoMethod.name && challenge.intent == .subscription
-            && (try? SubscriptionRequest(challenge: challenge)) != nil
+        SubscriptionRequest.supports(challenge)
     }
 
     /// The approval facts for `challenge`, filling amount/currency/recipient from the

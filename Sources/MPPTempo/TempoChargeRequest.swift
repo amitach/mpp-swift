@@ -68,6 +68,18 @@ public struct TempoChargeRequest: Sendable, Hashable {
         suggestedChannelID = wire.methodDetails?.channelId.flatMap(Data.init(hexPrefixed:))
     }
 
+    /// Whether `challenge` is a `tempo`/`charge` challenge carrying a decodable zero-amount
+    /// request (the proof path).
+    ///
+    /// The proof rail's applicability contract, shared by the client method and the server
+    /// verifier so the two cannot disagree. The chain is always resolvable (challenge `chainId`
+    /// or the configured default), so it is not a support condition; a non-zero amount is a
+    /// settled transfer handled elsewhere.
+    public static func supportsZeroAmountProof(_ challenge: Challenge) -> Bool {
+        challenge.method == TempoMethod.name && challenge.intent == .charge
+            && (try? TempoChargeRequest(challenge: challenge))?.isZeroAmount == true
+    }
+
     /// A reason a charge `request` could not be decoded.
     public enum DecodingFailure: Error, Sendable, Hashable {
         /// The `request` value was not unpadded base64url.

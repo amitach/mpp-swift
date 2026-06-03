@@ -75,6 +75,15 @@ public struct SubscriptionRequest: Sendable, Hashable {
         externalId = wire.externalId
     }
 
+    /// Whether `challenge` is a `tempo`/`subscription` challenge carrying a decodable request.
+    ///
+    /// The rail's applicability contract, shared by the client method and the server verifier
+    /// so the two cannot disagree on what this rail handles.
+    public static func supports(_ challenge: Challenge) -> Bool {
+        challenge.method == TempoMethod.name && challenge.intent == .subscription
+            && (try? SubscriptionRequest(challenge: challenge)) != nil
+    }
+
     /// `periodCount` x the unit's seconds, rejecting a non-canonical count, an unknown unit, or a
     /// product that overflows `UInt64`.
     private static func periodSeconds(

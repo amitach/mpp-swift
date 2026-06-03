@@ -51,10 +51,7 @@ public struct TempoProofVerifier: PaymentMethodServer {
     /// Whether this is a `tempo` / `charge` challenge with a decodable zero-amount
     /// request (the proof path).
     public func supports(_ challenge: Challenge) -> Bool {
-        guard challenge.method == TempoMethod.name, challenge.intent == .charge,
-              let request = try? TempoChargeRequest(challenge: challenge)
-        else { return false }
-        return request.isZeroAmount
+        TempoChargeRequest.supportsZeroAmountProof(challenge)
     }
 
     /// Verifies the zero-amount proof carried by `credential` and mints its receipt.

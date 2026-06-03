@@ -59,6 +59,16 @@ public struct StripeChargeRequest: Sendable, Hashable {
         metadata = wire.methodDetails.metadata
     }
 
+    /// Whether `challenge` is a `stripe`/`charge` challenge carrying a decodable request.
+    ///
+    /// The rail's applicability contract, shared by the client method and the server verifier
+    /// so the two cannot disagree on what this rail handles. A decode failure maps to `false`;
+    /// the throwing decode is re-run where the specific reason is surfaced.
+    public static func supports(_ challenge: Challenge) -> Bool {
+        challenge.method == StripeMethod.name && challenge.intent == .charge
+            && (try? StripeChargeRequest(challenge: challenge)) != nil
+    }
+
     /// A reason a charge `request` could not be decoded.
     public enum DecodingFailure: Error, Sendable, Hashable {
         /// The `request` value was not unpadded base64url.

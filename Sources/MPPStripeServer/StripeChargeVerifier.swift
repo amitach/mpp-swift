@@ -60,10 +60,7 @@ public struct StripeChargeVerifier: PaymentMethodServer {
 
     /// Whether this is a `stripe`/`charge` challenge with a decodable request.
     public func supports(_ challenge: Challenge) -> Bool {
-        guard challenge.method == StripeMethod.name, challenge.intent == .charge,
-              (try? StripeChargeRequest(challenge: challenge)) != nil
-        else { return false }
-        return true
+        StripeChargeRequest.supports(challenge)
     }
 
     /// Verifies the credential by settling a PaymentIntent and returns the receipt.

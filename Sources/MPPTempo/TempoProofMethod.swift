@@ -76,10 +76,7 @@ public struct TempoProofMethod: PaymentMethodClient {
     /// resolvable (challenge `chainId` or the configured default), so it is not a
     /// support condition.
     public func supports(_ challenge: Challenge) -> Bool {
-        guard challenge.method == TempoMethod.name, challenge.intent == .charge,
-              let request = try? TempoChargeRequest(challenge: challenge)
-        else { return false }
-        return request.isZeroAmount
+        TempoChargeRequest.supportsZeroAmountProof(challenge)
     }
 
     /// The approval facts for `challenge`, filling amount/currency/recipient from the
