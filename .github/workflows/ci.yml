@@ -131,6 +131,13 @@ jobs:
       # + TempoProofVerifier) over real HTTP.
       - name: Cross-SDK conformance (mppx client -> our server, offline)
         run: Scripts/conformance/run-reverse.sh
+      # Proxy: the reference mppx CLIENT pays a route THROUGH our MPPProxy (hosted by
+      # MPPConformanceServer in front of a free in-server origin). The proxy mints the 402,
+      # verifies the foreign Tempo proof, forwards to the origin, and relays the body with a
+      # Payment-Receipt. Proves a foreign client pays through the proxy, not only a direct
+      # gated endpoint. Offline.
+      - name: Cross-SDK proxy conformance (mppx client -> our MPPProxy -> origin, offline)
+        run: Scripts/conformance/run-proxy.sh
       # Subscription: OUR Swift client signs a TempoKeyAuthorization and activates a
       # subscription against the reference mppx subscription server, which verifies our
       # signed key authorization. Offline (activation settles no transaction).

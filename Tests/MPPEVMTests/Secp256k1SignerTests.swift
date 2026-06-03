@@ -22,7 +22,11 @@ struct Secp256k1SignerTests {
         let signature = try Secp256k1Signer(privateKey: key()).sign(hash: hash())
         #expect(signature.compact.count == 64)
         #expect(signature.recoveryID <= 3)
-        #expect(signature.serialized.count == 65)
+        // The 65-byte Ethereum wire form carries v = recoveryID + 27 and round-trips.
+        let wire = signature.ethereumWire
+        #expect(wire.count == 65)
+        #expect(wire[wire.startIndex + 64] == signature.recoveryID + 27)
+        #expect(RecoverableSignature(ethereumWire: wire) == signature)
     }
 
     @Test("the recovered public key matches the signer's (sign -> recover round-trip)")

@@ -32,14 +32,8 @@ public struct StripeChargeMethod: PaymentMethodClient {
         [Self.chargeRange]
     }
 
-    /// Whether this is a `stripe`/`charge` challenge with a decodable request (a non-empty
-    /// `paymentMethodTypes` included). A decode failure maps to `false`; the throwing decode is
-    /// re-run in ``buildCredential(for:)``, which surfaces the specific reason.
     public func supports(_ challenge: Challenge) -> Bool {
-        guard challenge.method == StripeMethod.name, challenge.intent == .charge,
-              (try? StripeChargeRequest(challenge: challenge)) != nil
-        else { return false }
-        return true
+        StripeChargeRequest.supports(challenge)
     }
 
     /// The approval facts for `challenge`, filling amount/currency/recipient from the

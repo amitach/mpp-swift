@@ -279,9 +279,8 @@ public struct TempoChannelMethod: PaymentMethodClient {
         _ challenge: Challenge, _ request: TempoChargeRequest, _ chainId: UInt64
     ) async throws {
         let facts = ChargeApproval(
-            challengeId: challenge.id, realm: challenge.realm, chainId: chainId,
-            amount: request.amount, currency: request.currency, recipient: request.recipient,
-            validUntil: challenge.expires
+            challenge: challenge, chainId: chainId, amount: request.amount,
+            currency: request.currency, recipient: request.recipient
         )
         guard await approval.approves(facts) else { throw TempoChannelMethodError.approvalDenied }
     }

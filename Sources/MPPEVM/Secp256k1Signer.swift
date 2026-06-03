@@ -173,11 +173,22 @@ public struct RecoverableSignature: Sendable, Hashable {
         self.recoveryID = recoveryID
     }
 
-    /// The 65-byte `r || s || recoveryID` form (raw recovery id, not Ethereum's
-    /// `27`-offset `v`; the offset is applied by the layer that knows the wire
-    /// convention).
-    public var serialized: Data {
-        compact + Data([recoveryID])
+    /// Parses a 65-byte Ethereum wire signature `r || s || v` (with `v` in `27...30`)
+    /// into the compact `r || s` and the `0...3` recovery id, or `nil` if it is not
+    /// 65 bytes or `v` is out of range. The inverse of ``ethereumWire``.
+    public init?(ethereumWire: Data) {
+        guard ethereumWire.count == 65 else { return nil }
+        let recoveryByte = ethereumWire[ethereumWire.startIndex + 64]
+        guard (27 ... 30).contains(recoveryByte) else { return nil }
+        self.init(compact: Data(ethereumWire.prefix(64)), recoveryID: recoveryByte - 27)
+    }
+
+    /// The 65-byte Ethereum wire form `r || s || v`, where `v = recoveryID + 27`
+    /// (the offset every EVM `ecrecover` consumer expects). The inverse of
+    /// ``init?(ethereumWire:)``; this type owns the `27` offset so the producing
+    /// and consuming sides cannot drift.
+    public var ethereumWire: Data {
+        compact + Data([recoveryID + 27])
     }
 }
 

@@ -69,7 +69,7 @@ public enum ZeroAmountProof: Sendable, Hashable {
         chainId: UInt64, with signer: Secp256k1Signer
     ) throws(Secp256k1Signer.SigningError) -> Data {
         let signature = try signer.sign(hash: signingHash(chainId: chainId))
-        return signature.compact + Data([signature.recoveryID + 27])
+        return signature.ethereumWire
     }
 
     /// Recovers the Ethereum address that produced `signature` over this proof at

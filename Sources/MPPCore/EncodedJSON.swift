@@ -34,6 +34,38 @@ public struct EncodedJSON: Sendable, Hashable {
     public func decodedData() throws(Base64URL.DecodeError) -> Data {
         try Base64URL.decode(rawValue)
     }
+
+    /// Decodes the wire value as base64url(JSON) into a `Decodable` `T`.
+    ///
+    /// The single canonical path for turning an on-wire base64url(JSON) value
+    /// into a typed model: ``decodedData()`` then `JSONDecoder`. The two ways it
+    /// can fail are surfaced as ``DecodeError`` so a caller can lift them into its
+    /// own error taxonomy. Centralizing it here means a future hardening of how a
+    /// received envelope is decoded (a size cap, a stricter decoder) lands once.
+    ///
+    /// - Throws: ``DecodeError``.
+    public func decode<T: Decodable>(as _: T.Type) throws(DecodeError) -> T {
+        let data: Data
+        do {
+            data = try decodedData()
+        } catch {
+            throw DecodeError.notBase64URL(error)
+        }
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            throw DecodeError.invalidJSON(reason: String(describing: error))
+        }
+    }
+
+    /// A reason a base64url(JSON) wire value could not be decoded into a model.
+    public enum DecodeError: Error, Sendable, Hashable {
+        /// The value was not unpadded base64url.
+        case notBase64URL(Base64URL.DecodeError)
+        /// The decoded bytes were not the expected JSON shape. `reason` carries
+        /// the underlying coding error's description for diagnostics.
+        case invalidJSON(reason: String)
+    }
 }
 
 // Transparent Codable + description come from RawStringValidated. The validating

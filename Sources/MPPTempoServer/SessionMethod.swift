@@ -136,8 +136,9 @@ public struct SessionMethod: PaymentMethodServer {
             guard var channel = current else { throw SessionError.channelNotFound }
             // Reject a voucher racing a close: a closing/finalized channel must not advance the
             // highest (consistent with deductFromChannel's guard).
-            if channel.finalized { throw SessionError.channelClosed(reason: "finalized") }
-            if channel.closing { throw SessionError.channelClosed(reason: "closing") }
+            if let reason = channel.undrawableReason {
+                throw SessionError.channelClosed(reason: reason)
+            }
             guard cumulative > channel.highestVoucherAmount else {
                 throw SessionError.belowHighestVoucher
             }
@@ -239,11 +240,12 @@ public struct SessionMethod: PaymentMethodServer {
         // selection so the stored highest/signature are read under serialization.
         guard let claimed = try await store.update(fields.channelID, { current in
             guard var channel = current else { throw SessionError.channelNotFound }
-            if channel.finalized { throw SessionError.channelClosed(reason: "finalized") }
-            // Single-flight: a close already in progress must reject the second one,
-            // else two concurrent closes both reach provider.settle and broadcast a
-            // duplicate on-chain settlement.
-            if channel.closing { throw SessionError.channelClosed(reason: "closing") }
+            // Single-flight: reject a finalized channel and a close already in progress
+            // (a second concurrent close would otherwise both reach provider.settle and
+            // broadcast a duplicate on-chain settlement), then claim the close.
+            if let reason = channel.undrawableReason {
+                throw SessionError.channelClosed(reason: reason)
+            }
             channel.closing = true
             return channel
         }) else { throw SessionError.channelNotFound }

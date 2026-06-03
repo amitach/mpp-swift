@@ -43,8 +43,8 @@ public struct EthereumAddress: Sendable, Hashable {
     /// when the corresponding nibble of `keccak256(lowercase-hex-without-0x)` is
     /// >= 8. This is the canonical address rendering used in a `did:pkh` source.
     public var checksummed: String {
-        let lower = bytes.map { String(format: "%02x", $0) }.joined()
-        let hashHex = Keccak256.hash(Data(lower.utf8)).map { String(format: "%02x", $0) }.joined()
+        let lower = bytes.hexString
+        let hashHex = Keccak256.hash(Data(lower.utf8)).hexString
         var out = "0x"
         for (character, hashNibble) in zip(lower, hashHex) {
             if character.isLetter, let value = hashNibble.hexDigitValue, value >= 8 {
@@ -61,11 +61,7 @@ public struct EthereumAddress: Sendable, Hashable {
     /// or recovery fails. Recovery is not verification: compare the result against
     /// an expected address. Shared by the proof and voucher verify paths.
     public static func recover(hash: Data, signature: Data) -> EthereumAddress? {
-        guard signature.count == 65 else { return nil }
-        let recoveryByte = signature[signature.startIndex + 64]
-        guard (27 ... 30).contains(recoveryByte), let recoverable = RecoverableSignature(
-            compact: Data(signature.prefix(64)), recoveryID: recoveryByte - 27
-        ) else { return nil }
+        guard let recoverable = RecoverableSignature(ethereumWire: signature) else { return nil }
         guard let publicKey = Secp256k1Signer.recoverPublicKey(
             hash: hash, signature: recoverable
         ) else { return nil }

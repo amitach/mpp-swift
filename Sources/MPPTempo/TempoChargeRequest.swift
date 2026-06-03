@@ -46,17 +46,14 @@ public struct TempoChargeRequest: Sendable, Hashable {
     /// - Throws: ``DecodingFailure`` if the `request` is not base64url, not a
     ///   JSON object of the expected shape, or carries a non-canonical `amount`.
     public init(challenge: Challenge) throws(DecodingFailure) {
-        let data: Data
-        do {
-            data = try challenge.request.decodedData()
-        } catch {
-            throw .notBase64URL(error)
-        }
         let wire: ChargeRequestWire
         do {
-            wire = try JSONDecoder().decode(ChargeRequestWire.self, from: data)
+            wire = try challenge.request.decode(as: ChargeRequestWire.self)
         } catch {
-            throw .invalidJSON(reason: String(describing: error))
+            switch error {
+            case let .notBase64URL(cause): throw .notBase64URL(cause)
+            case let .invalidJSON(reason): throw .invalidJSON(reason: reason)
+            }
         }
         do {
             amount = try Amount(wire.amount)
@@ -69,6 +66,18 @@ public struct TempoChargeRequest: Sendable, Hashable {
         escrowContract = wire.methodDetails?.escrowContract
         suggestedDeposit = wire.suggestedDeposit
         suggestedChannelID = wire.methodDetails?.channelId.flatMap(Data.init(hexPrefixed:))
+    }
+
+    /// Whether `challenge` is a `tempo`/`charge` challenge carrying a decodable zero-amount
+    /// request (the proof path).
+    ///
+    /// The proof rail's applicability contract, shared by the client method and the server
+    /// verifier so the two cannot disagree. The chain is always resolvable (challenge `chainId`
+    /// or the configured default), so it is not a support condition; a non-zero amount is a
+    /// settled transfer handled elsewhere.
+    public static func supportsZeroAmountProof(_ challenge: Challenge) -> Bool {
+        challenge.method == TempoMethod.name && challenge.intent == .charge
+            && (try? TempoChargeRequest(challenge: challenge))?.isZeroAmount == true
     }
 
     /// A reason a charge `request` could not be decoded.

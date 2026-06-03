@@ -188,7 +188,7 @@ public struct TempoKeyAuthorization: Sendable, Hashable {
     private func sign(with signer: Secp256k1Signer) throws(AuthorizationError) -> Data {
         let payload = try signPayload()
         guard let recoverable = try? signer.sign(hash: payload) else { throw .signingFailed }
-        return recoverable.compact + Data([recoverable.recoveryID + 27])
+        return recoverable.ethereumWire
     }
 
     /// Signs and serializes the authorization into the credential payload's `signature` value.

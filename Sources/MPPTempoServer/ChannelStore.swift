@@ -74,6 +74,18 @@ public struct ChannelState: Sendable, Hashable {
         self.closing = closing
     }
 
+    /// Why the channel cannot be drawn against: `"finalized"` once it is closed
+    /// on-chain, `"closing"` once a close is in flight, or `nil` if it is still
+    /// drawable. The single definition of voucher/close drawability: the store's
+    /// deduct guard and the session voucher and close-claim paths each throw their
+    /// own error from it. (The close path's early finalized-only check is a
+    /// deliberate exception: it fails fast before signature verification.)
+    var undrawableReason: String? {
+        if finalized { return "finalized" }
+        if closing { return "closing" }
+        return nil
+    }
+
     /// The amount still drawable this session: `highestVoucherAmount - spent`
     /// (clamped at zero, which only arises from an inconsistent record).
     public var available: ChannelAmount {
@@ -160,8 +172,7 @@ public func deductFromChannel(
 ) async throws -> ChannelState {
     let updated = try await store.update(channelID) { current in
         guard let state = current else { throw ChannelError.notFound }
-        guard !state.finalized else { throw ChannelError.closed(reason: "finalized") }
-        guard !state.closing else { throw ChannelError.closed(reason: "closing") }
+        if let reason = state.undrawableReason { throw ChannelError.closed(reason: reason) }
         guard let next = state.recordingSpend(of: amount) else {
             throw ChannelError.insufficientBalance(requested: amount, available: state.available)
         }

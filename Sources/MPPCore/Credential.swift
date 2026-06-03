@@ -34,16 +34,13 @@ public struct Credential: Sendable, Hashable, Codable {
     /// - Throws: ``ParsingError``.
     public init(headerValue: String) throws(ParsingError) {
         let token = try Self.token(from: headerValue)
-        let data: Data
         do {
-            data = try Base64URL.decode(token)
+            self = try EncodedJSON(token).decode(as: Credential.self)
         } catch {
-            throw .notBase64URL(error)
-        }
-        do {
-            self = try JSONDecoder().decode(Credential.self, from: data)
-        } catch {
-            throw .invalidJSON(reason: String(describing: error))
+            switch error {
+            case let .notBase64URL(cause): throw .notBase64URL(cause)
+            case let .invalidJSON(reason): throw .invalidJSON(reason: reason)
+            }
         }
     }
 

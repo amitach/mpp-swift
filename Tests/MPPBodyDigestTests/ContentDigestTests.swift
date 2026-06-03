@@ -41,12 +41,10 @@ struct ContentDigestTests {
         #expect(try ContentDigest.verify(body, matches: header))
     }
 
-    @Test("throws when the value carries no sha-256 member")
-    func throwsWhenNoSHA256() {
+    @Test("fails closed when the value carries no sha-256 member")
+    func failsWhenNoSHA256() {
         let header = "sha-512=:\(Data(repeating: 0, count: 64).base64EncodedString()):"
-        #expect(throws: ContentDigest.ParseError.missingAlgorithm) {
-            try ContentDigest.verify(Data("body".utf8), matches: header)
-        }
+        #expect(!ContentDigest.verify(Data("body".utf8), matches: header))
     }
 
     @Test("lower-cases the algorithm key on parse")
@@ -64,7 +62,7 @@ struct ContentDigestTests {
     }
 
     @Test(
-        "rejects a malformed Content-Digest value",
+        "a malformed Content-Digest value fails verification closed and is rejected by the parser",
         arguments: [
             "sha-256", // no '=' / no value
             "sha-256=abc", // value not a byte sequence (missing colons)
@@ -73,8 +71,10 @@ struct ContentDigestTests {
         ]
     )
     func rejectsMalformed(header: String) {
+        // verify fails closed (Bool); the parser reports the specific reason.
+        #expect(!ContentDigest.verify(Data("body".utf8), matches: header))
         #expect(throws: ContentDigest.ParseError.self) {
-            try ContentDigest.verify(Data("body".utf8), matches: header)
+            try ContentDigest.parse(header)
         }
     }
 }

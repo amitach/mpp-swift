@@ -96,6 +96,24 @@ struct VoucherTests {
         ) == false)
     }
 
+    @Test("verify REJECTS a malformed bare signature (empty / short / 64-byte), failing closed")
+    func verifyRejectsMalformedSignature() throws {
+        let voucher = try #require(Voucher(channelID: channelID, cumulativeAmount: amount))
+        // A bare signature that is not the canonical 65 bytes cannot ecrecover; verify must
+        // fail closed (return false) and never trap on the short or empty input.
+        let malformed: [Data] = [
+            Data(),
+            Data([0xDE, 0xAD, 0xBE, 0xEF]),
+            Data(repeating: 0x01, count: 64),
+        ]
+        for signature in malformed {
+            #expect(voucher.verify(
+                escrowContract: escrow, chainId: chainId, signature: signature,
+                expectedSigner: payer
+            ) == false)
+        }
+    }
+
     @Test("verify is bound to the domain: a different chainId or escrow rejects")
     func verifyDomainBinding() throws {
         let voucher = try #require(Voucher(channelID: channelID, cumulativeAmount: amount))
