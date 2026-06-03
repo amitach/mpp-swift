@@ -27,7 +27,10 @@ import MPPServer
 /// `RouteBinding`), a credential minted for one route is structurally rejected on another.
 public struct MPPProxy: Sendable {
     private let services: [String: ProxyService]
-    private let basePath: String?
+    /// The normalized mount prefix (leading slash, no trailing slash) stripped from
+    /// each incoming path, or `nil` for no base path. Precomputed once since it is
+    /// fixed for the proxy's life.
+    private let mountPrefix: String?
     private let transport: any MPPHTTPTransport
     private let openAPIData: Data
     private let llmsText: String
@@ -57,7 +60,7 @@ public struct MPPProxy: Sendable {
         var seenIDs: Set<String> = []
         let uniqueServices = services.filter { seenIDs.insert($0.id).inserted }
         self.services = Dictionary(uniqueKeysWithValues: uniqueServices.map { ($0.id, $0) })
-        self.basePath = basePath
+        mountPrefix = normalizedBasePath(basePath)
         self.transport = transport
         openAPIData = try ProxyDiscovery.openAPIJSON(
             services: uniqueServices,
@@ -125,9 +128,7 @@ public struct MPPProxy: Sendable {
     }
 
     private func strippedPathname(_ rawPath: String) -> String? {
-        guard let basePath, !basePath.isEmpty else { return rawPath }
-        let base = basePath.hasPrefix("/") ? basePath : "/\(basePath)"
-        let trimmed = base.hasSuffix("/") ? String(base.dropLast()) : base
+        guard let trimmed = mountPrefix else { return rawPath }
         if rawPath == trimmed { return "/" }
         guard rawPath.hasPrefix("\(trimmed)/") else { return nil }
         return String(rawPath.dropFirst(trimmed.count))
