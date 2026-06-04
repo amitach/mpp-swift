@@ -65,10 +65,21 @@ public struct ChallengeSigner: Sendable {
     ///
     /// Constant-time: each candidate key is checked with
     /// `HMAC.isValidAuthenticationCode`, never a string compare; the loop returns on
-    /// the first match (which key matched is not secret). An `id` that is not valid
-    /// unpadded base64url cannot be a valid MAC, so it returns `false`.
+    /// the first match (which key matched is not secret). The `id` must be the
+    /// **canonical** unpadded base64url of its MAC bytes (see below), otherwise it is
+    /// rejected.
     public func verify(_ challenge: Challenge) -> Bool {
-        guard let mac = try? Base64URL.decode(challenge.id) else { return false }
+        // The id MUST be the canonical encoding of its bytes. base64url's final
+        // character carries "don't care" low bits that a lenient decoder (Foundation's
+        // Data(base64Encoded:)) ignores, so several distinct id strings decode to the
+        // same MAC. Without this canonical check each variant would pass the byte-wise
+        // MAC gate yet key a *distinct* replay slot (a single-use / double-spend
+        // bypass). Re-encoding the decoded bytes and comparing the strings rejects
+        // every non-canonical variant. Both operands are public (the supplied id and
+        // its re-encoding), so this compare reveals nothing about the secret and does
+        // not weaken the constant-time MAC check below.
+        guard let mac = try? Base64URL.decode(challenge.id),
+              Base64URL.encode(mac) == challenge.id else { return false }
         let input = Data(challenge.bindingInput.utf8)
         for secret in verificationSecrets where HMAC<SHA256>.isValidAuthenticationCode(
             mac, authenticating: input, using: SymmetricKey(data: secret)

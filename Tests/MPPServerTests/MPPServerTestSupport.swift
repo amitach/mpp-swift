@@ -63,6 +63,33 @@ func headerFor(
     return try Credential(challenge: challenge, payload: ["proof": "0xabc"]).headerValue
 }
 
+private let base64URLAlphabet = Array(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+)
+
+/// The non-canonical base64url ids that decode to the SAME bytes as `id`. For a
+/// 32-byte (256-bit) MAC the final character carries two unused ("don't care") low
+/// bits, so the three alphabet characters sharing its top four bits encode the
+/// identical bytes: the malleation a lenient base64 decoder lets through (CHID-1).
+func sameMACVariants(of id: String) -> [String] {
+    let chars = Array(id)
+    guard let last = chars.last, let idx = base64URLAlphabet.firstIndex(of: last) else { return [] }
+    let group = idx - (idx % 4) // start of the four chars sharing the top four bits
+    return (1 ... 3).map { String(chars.dropLast()) + String(base64URLAlphabet[group + $0]) }
+}
+
+/// The rejection reason from a verify outcome, or `nil` if it verified.
+func rejection(_ outcome: PaymentVerifier.Outcome) -> PaymentVerifier.Rejection? {
+    if case let .rejected(reason) = outcome { return reason }
+    return nil
+}
+
+/// The verified token from a verify outcome, or `nil` if it was rejected.
+func verified(_ outcome: PaymentVerifier.Outcome) -> MPPVerified? {
+    if case let .verified(token) = outcome { return token }
+    return nil
+}
+
 /// An `HTTPRequest` carrying an optional `Authorization` header.
 func makeRequest(authorization: String? = nil) -> HTTPRequest {
     var fields = HTTPFields()

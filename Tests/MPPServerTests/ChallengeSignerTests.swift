@@ -141,4 +141,23 @@ struct ChallengeSignerTests {
         let bad = try draft(id: "not valid base64url!!")
         #expect(!signer().verify(bad))
     }
+
+    @Test("rejects a non-canonical same-MAC id (CHID-1 malleability)")
+    func rejectsNonCanonicalSameMACID() throws {
+        // A lenient base64 decoder ignores the final char's don't-care bits, so several
+        // distinct id strings decode to the same MAC. Each would pass a byte-wise MAC
+        // gate yet key a distinct replay slot (a single-use bypass). verify MUST reject
+        // every non-canonical variant; only the exact canonical id is accepted.
+        let signed = try sign(draft(), with: signer())
+        #expect(signer().verify(signed))
+        let variants = sameMACVariants(of: signed.id)
+        #expect(variants.count == 3)
+        for variant in variants {
+            // A genuine malleation: a different string, but the identical decoded MAC
+            // (so the pre-fix byte-MAC gate would have accepted it).
+            #expect(variant != signed.id)
+            #expect(try Base64URL.decode(variant) == Base64URL.decode(signed.id))
+            #expect(!signer().verify(signed.withID(variant)))
+        }
+    }
 }
