@@ -28,7 +28,12 @@ struct StripeConformanceTests {
                 "paymentMethodTypes": .array([.string("card")]),
             ]),
         ]))
-        return try ChallengeMinter(signer: signer).mint(binding: chargeBinding(), request: request)
+        // The verifier now requires an expiry (see DIVERGING_FROM_SPEC in PaymentVerifier); mint
+        // with one in the future relative to the fixed test clock.
+        return try ChallengeMinter(signer: signer).mint(
+            binding: chargeBinding(), request: request,
+            expires: Expires(date: now.addingTimeInterval(3600))
+        )
     }
 
     @Test("client builds an SPT credential the server verifier settles into a receipt")

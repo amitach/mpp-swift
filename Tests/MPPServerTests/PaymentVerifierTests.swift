@@ -58,20 +58,6 @@ struct PaymentVerifierTests {
         try makeBinding()
     }
 
-    /// Builds a credential whose echoed challenge is signed by `signer`.
-    private func signedCredential(
-        signer: ChallengeSigner,
-        digest: String? = nil,
-        expires: Expires? = nil
-    ) throws -> Credential {
-        let unsigned = try Challenge(
-            id: "unsigned", realm: "api.example.com", method: MethodName("tempo"),
-            intent: .charge, request: EncodedJSON("e30"), digest: digest, expires: expires
-        )
-        let signed = unsigned.withID(signer.computeID(for: unsigned))
-        return Credential(challenge: signed, payload: ["proof": "0xabc"])
-    }
-
     @Test("verifies a well-formed, signed, un-expired, route-matched credential")
     func verifiesValidCredential() async throws {
         let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
@@ -326,5 +312,49 @@ struct PaymentVerifierTests {
             return count
         }
         #expect(wins == 1)
+    }
+}
+
+// The audit-D5 compatibility switch: whether the verifier requires a challenge to carry an
+// `expires`. Default `.required` matches the mppx peer; `.optional` restores the spec semantics.
+@Suite("PaymentVerifier expiry policy")
+struct PaymentVerifierExpiryPolicyTests {
+    private func outcome(
+        _ policy: ChallengeExpiryPolicy, expires: Expires?
+    ) async throws -> PaymentVerifier.Outcome {
+        let verifier = PaymentVerifier(
+            signer: ChallengeSigner(secret: secret),
+            replayStore: InMemoryReplayStore(),
+            expiryPolicy: policy
+        )
+        let header = try signedCredential(
+            signer: ChallengeSigner(secret: secret), expires: expires
+        ).headerValue
+        let binding = try makeBinding()
+        return await verifier.verify(
+            authorization: header, body: Data(), now: now, expecting: binding
+        )
+    }
+
+    // DIVERGING_FROM_SPEC (audit D5): `.required` (the default) matches the mppx peer, which
+    // mandates an `expires` at verification; a challenge minted without one is rejected as an
+    // invalid challenge rather than honored indefinitely.
+    @Test("default (.required): a challenge carrying no expires is rejected")
+    func requiredRejectsMissingExpires() async throws {
+        let result = try await outcome(.required, expires: nil)
+        #expect(rejection(result) == .invalidChallenge)
+    }
+
+    @Test(".optional: a challenge carrying no expires verifies (spec semantics)")
+    func optionalAcceptsMissingExpires() async throws {
+        let result = try await outcome(.optional, expires: nil)
+        #expect(verified(result) != nil)
+    }
+
+    @Test(".optional still rejects a present-and-past expires")
+    func optionalRejectsPastExpires() async throws {
+        let past = try Expires("2025-01-01T00:00:00Z")
+        let result = try await outcome(.optional, expires: past)
+        #expect(rejection(result) == .expired)
     }
 }
