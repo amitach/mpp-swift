@@ -185,8 +185,9 @@ public struct PaymentVerifier: Sendable {
     public enum Outcome: Sendable {
         /// The credential is protocol-valid; the request may be served.
         case verified(MPPVerified)
-        /// The credential was rejected; the server answers `402` with the
-        /// corresponding problem.
+        /// The credential was rejected; the server answers with the corresponding problem.
+        /// Usually `402`, but a §10.5 settlement rejection (``Rejection/settlement(_:)``) carries
+        /// its own status (e.g. `410` for a closed/unknown channel, `400` for a malformed request).
         case rejected(Rejection)
     }
 
