@@ -1,6 +1,4 @@
 import Foundation
-import MPPClient
-import MPPCore
 import MPPEVM
 import Testing
 @testable import MPPTempo

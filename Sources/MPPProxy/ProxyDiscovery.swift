@@ -1,5 +1,4 @@
 import Foundation
-import MPPCore
 import MPPDiscovery
 
 /// Builds the two discovery surfaces the proxy publishes from its service tables: the spec

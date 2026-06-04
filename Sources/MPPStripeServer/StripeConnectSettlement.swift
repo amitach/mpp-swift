@@ -1,5 +1,3 @@
-import MPPStripe
-
 /// A Stripe Connect transfer: the destination connected account and an optional explicit amount.
 /// `destination` is required by the type (so a "missing destination" is unrepresentable, a
 /// compile-time guarantee the reference SDK enforces only at runtime).

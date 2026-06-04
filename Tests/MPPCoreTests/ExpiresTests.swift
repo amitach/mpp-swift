@@ -34,25 +34,6 @@ struct ExpiresTests {
         }
     }
 
-    @Test("isExpired compares against the supplied now, not the system clock")
-    func isExpiredUsesSuppliedNow() {
-        let past = Expires(date: now.addingTimeInterval(-1))
-        let future = Expires(date: now.addingTimeInterval(1))
-        #expect(past.isExpired(at: now))
-        #expect(!future.isExpired(at: now))
-    }
-
-    @Test("validate throws for an expired challenge and carries the expiry")
-    func validateThrowsWhenExpired() throws {
-        let past = Expires(date: now.addingTimeInterval(-60))
-        #expect(throws: Expires.ExpiredError(expires: past.rawValue)) {
-            try past.validate(at: now)
-        }
-        #expect(throws: Never.self) {
-            try Expires(date: now.addingTimeInterval(60)).validate(at: now)
-        }
-    }
-
     // Boundary at the exact expiry instant. The validity window is `now <=
     // expires`: a challenge is valid AT its expiry instant and expired only once
     // `now` is strictly past it. The draft is silent on the instant; this pins

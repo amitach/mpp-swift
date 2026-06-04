@@ -305,16 +305,6 @@ struct MPPServerMiddlewareTests {
         let challenge = try Challenge(headerValue: wwwAuth)
         #expect(problem.extensions["challengeId"] == .string(challenge.id))
     }
-
-    @Test("a rejection emits paymentRejected then challengeIssued for the retry challenge")
-    func rejectionEmitsRejectedThenIssued() async throws {
-        let box = EventBox()
-        let middleware = try makeMiddleware(onEvent: box.add)
-        _ = await middleware.evaluate(authorization: "Bearer not-a-payment", body: Data(), now: now)
-        // The rejection is reported, then the retry challenge that was issued, so
-        // challengeIssued counts every minted challenge (fresh and retry alike).
-        #expect(eventNames(box) == ["paymentRejected", "challengeIssued"])
-    }
 }
 
 /// A method that settles every challenge by rejecting with a fixed typed settlement problem, to

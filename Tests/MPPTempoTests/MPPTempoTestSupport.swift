@@ -1,7 +1,6 @@
 import Foundation
 import HTTPTypes
 import MPPClient
-import MPPCore
 import MPPEVM
 
 // Shared doubles + fixtures for the MPPTempo test target (one home, not per-file).

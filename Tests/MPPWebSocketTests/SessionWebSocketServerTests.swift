@@ -1,5 +1,4 @@
 import Foundation
-import MPPCore
 import MPPTempoServer
 import Testing
 @testable import MPPWebSocket

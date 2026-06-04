@@ -9,8 +9,6 @@ import Testing
 
 // MARK: - Local test doubles (the MPPClient ones are not visible across the target boundary)
 
-enum StubError: Error { case boom }
-
 private func fieldName(_ token: String) -> HTTPField.Name {
     guard let name = HTTPField.Name(token) else { preconditionFailure("valid field name") }
     return name

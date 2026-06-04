@@ -1,5 +1,4 @@
 import Foundation
-import MPPClient
 import MPPCore
 import MPPEVM
 import MPPTempo

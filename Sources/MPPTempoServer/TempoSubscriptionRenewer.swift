@@ -1,5 +1,4 @@
 import Foundation
-import MPPEVM
 import MPPTempo
 
 /// The concrete on-chain ``SubscriptionRenewer``: charges one billing period by submitting the

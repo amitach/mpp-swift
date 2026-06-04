@@ -1,7 +1,6 @@
 import Foundation
 import MPPAuth
 import MPPClient
-import MPPCore
 import MPPEVM
 import MPPStripe
 import MPPTempo

@@ -4,7 +4,6 @@ import Hummingbird
 import MPPCore
 import MPPHummingbird
 import MPPServer
-import MPPTempo
 import MPPTempoServer
 import NIOCore
 

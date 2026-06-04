@@ -1,7 +1,6 @@
 import Foundation
 import MPPCore
 import MPPEVM
-import MPPServer
 import MPPTempo
 import MPPTempoServer
 import Testing
