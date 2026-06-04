@@ -72,16 +72,6 @@ struct PaymentVerifierTests {
         return Credential(challenge: signed, payload: ["proof": "0xabc"])
     }
 
-    private func rejection(_ outcome: PaymentVerifier.Outcome) -> PaymentVerifier.Rejection? {
-        if case let .rejected(reason) = outcome { return reason }
-        return nil
-    }
-
-    private func verified(_ outcome: PaymentVerifier.Outcome) -> MPPVerified? {
-        if case let .verified(token) = outcome { return token }
-        return nil
-    }
-
     @Test("verifies a well-formed, signed, un-expired, route-matched credential")
     func verifiesValidCredential() async throws {
         let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
@@ -283,6 +273,35 @@ struct PaymentVerifierTests {
             authorization: header, body: body, now: now, expecting: binding
         )
         #expect(verified(accepted) != nil)
+    }
+
+    @Test("a malleated challenge id is rejected, consuming no replay slot (CHID-1)")
+    func malleatedIDRejectedNoReplaySlot() async throws {
+        let verifier = PaymentVerifier(signer: signer(), replayStore: InMemoryReplayStore())
+        let binding = try expected()
+        let credential = try signedCredential(signer: signer())
+        // A same-MAC, non-canonical variant of the (canonical) challenge id: it would have
+        // passed the pre-fix byte-wise HMAC gate while keying a distinct replay slot.
+        let variant = try #require(sameMACVariants(of: credential.challenge.id).first)
+        #expect(try Base64URL.decode(variant) == Base64URL.decode(credential.challenge.id))
+        let malleated = Credential(
+            challenge: credential.challenge.withID(variant), payload: credential.payload
+        )
+        // Rejected at the HMAC gate (before consume)...
+        let rejected = try await verifier.verify(
+            authorization: malleated.headerValue, body: Data(), now: now, expecting: binding
+        )
+        #expect(rejection(rejected) == .invalidChallenge)
+        // ...and it consumed no replay slot, so the canonical credential still settles
+        // exactly once (the double-spend vector is closed).
+        let first = try await verifier.verify(
+            authorization: credential.headerValue, body: Data(), now: now, expecting: binding
+        )
+        let second = try await verifier.verify(
+            authorization: credential.headerValue, body: Data(), now: now, expecting: binding
+        )
+        #expect(verified(first) != nil)
+        #expect(rejection(second) == .replayed)
     }
 
     @Test("under concurrent verification of one credential, exactly one is verified")
