@@ -59,9 +59,12 @@ func mcpGate(
 /// returning the `params._meta` a client would send.
 func mcpCredentialMeta(byte: UInt8 = 1) async throws -> Metadata {
     let minter = ChallengeMinter(signer: ChallengeSigner(secret: mcpSecret))
+    // The verifier now requires an expiry (see DIVERGING_FROM_SPEC in PaymentVerifier); mint with
+    // one in the future relative to the gate's fixed clock (mcpNow).
     let challenge = try minter.mint(
         binding: RouteBinding(realm: mcpRealm, method: MethodName("tempo"), intent: .charge),
-        request: mcpChargeRequest()
+        request: mcpChargeRequest(),
+        expires: Expires(date: mcpNow.addingTimeInterval(3600))
     )
     let credential = try await mcpProofMethod(byte: byte).buildCredential(for: challenge)
     return try Metadata(additionalFields: [

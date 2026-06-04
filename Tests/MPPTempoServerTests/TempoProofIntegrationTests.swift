@@ -29,7 +29,11 @@ struct TempoProofIntegrationTests {
             methods: [TempoProofVerifier()]
         )
         let route = try binding()
-        let minted = minter.mint(binding: route, request: request())
+        // The verifier now requires an expiry (see DIVERGING_FROM_SPEC in PaymentVerifier), so mint
+        // with one in the future relative to the fixed test clock.
+        let minted = minter.mint(
+            binding: route, request: request(), expires: Expires(date: now.addingTimeInterval(3600))
+        )
 
         let good = try await method().buildCredential(for: minted)
         let bad = try withSignature(good) { hex in
@@ -64,7 +68,10 @@ struct TempoProofIntegrationTests {
         )
         let route = try binding()
         // A non-zero charge: protocol-valid, but the proof verifier does not support it.
-        let minted = minter.mint(binding: route, request: request(amount: "100"))
+        let minted = minter.mint(
+            binding: route, request: request(amount: "100"),
+            expires: Expires(date: now.addingTimeInterval(3600))
+        )
         let credential = Credential(challenge: minted, source: nil, payload: [:])
         let outcome = try await verifier.verify(
             authorization: credential.headerValue, body: Data(), now: now,

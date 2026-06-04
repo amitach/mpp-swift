@@ -48,11 +48,13 @@ func paidHeader() throws -> String {
 }
 
 /// A credential header minted with overridable secret/binding/expiry/digest, to
-/// drive each `PaymentVerifier.Rejection` through the middleware.
+/// drive each `PaymentVerifier.Rejection` through the middleware. Defaults to a
+/// future expiry (the verifier now requires one, see DIVERGING_FROM_SPEC in
+/// `PaymentVerifier`); pass an explicit `expires` to drive the expired/no-expiry cases.
 func headerFor(
     signedWith customSecret: Data? = nil,
     binding customBinding: RouteBinding? = nil,
-    expires: Expires? = nil,
+    expires: Expires? = Expires(date: now.addingTimeInterval(3600)),
     digest: String? = nil
 ) throws -> String {
     let signer = ChallengeSigner(secret: customSecret ?? secret)
@@ -76,6 +78,22 @@ func sameMACVariants(of id: String) -> [String] {
     guard let last = chars.last, let idx = base64URLAlphabet.firstIndex(of: last) else { return [] }
     let group = idx - (idx % 4) // start of the four chars sharing the top four bits
     return (1 ... 3).map { String(chars.dropLast()) + String(base64URLAlphabet[group + $0]) }
+}
+
+/// Builds a credential whose echoed challenge is signed by `signer`. Defaults to a
+/// future expiry (the verifier now requires one, see DIVERGING_FROM_SPEC in
+/// `PaymentVerifier`); pass `expires: nil` to drive the no-expiry rejection.
+func signedCredential(
+    signer: ChallengeSigner,
+    digest: String? = nil,
+    expires: Expires? = Expires(date: now.addingTimeInterval(3600))
+) throws -> Credential {
+    let unsigned = try Challenge(
+        id: "unsigned", realm: "api.example.com", method: MethodName("tempo"),
+        intent: .charge, request: EncodedJSON("e30"), digest: digest, expires: expires
+    )
+    let signed = unsigned.withID(signer.computeID(for: unsigned))
+    return Credential(challenge: signed, payload: ["proof": "0xabc"])
 }
 
 /// The rejection reason from a verify outcome, or `nil` if it verified.

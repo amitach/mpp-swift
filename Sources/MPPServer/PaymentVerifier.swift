@@ -2,6 +2,22 @@ import Foundation
 import MPPBodyDigest
 import MPPCore
 
+/// Whether a challenge must carry an `expires` to verify: the compatibility switch for the
+/// audit-D5 divergence.
+///
+/// DIVERGING_FROM_SPEC (audit D5): `draft-httpauth-payment-00` marks `expires` OPTIONAL (a
+/// challenge MAY never lapse), but the mppx reference peer requires it at verification
+/// (server/Mppx.ts calls Expires.assert). The default matches the peer; select ``optional`` for
+/// the spec's optional-`expires` semantics.
+public enum ChallengeExpiryPolicy: Sendable {
+    /// A challenge with no `expires` is rejected (matches the mppx peer). The default, so a
+    /// credential's presentation window is always bounded.
+    case required
+    /// A challenge with no `expires` is accepted as non-lapsing, per the spec's optional field;
+    /// only a present-and-past `expires` is rejected.
+    case optional
+}
+
 /// Verifies an `Authorization: Payment` credential against this server's secret:
 /// the protocol-level gate that turns an untrusted request into an ``MPPVerified``
 /// token, or a typed rejection.
@@ -27,6 +43,7 @@ public struct PaymentVerifier: Sendable {
     private let signer: ChallengeSigner
     private let replayStore: any ReplayStore
     private let methods: [any PaymentMethodServer]
+    private let expiryPolicy: ChallengeExpiryPolicy
 
     /// Creates a verifier over the server's challenge signer and replay store, and
     /// an optional set of ``PaymentMethodServer`` settlement verifiers.
@@ -38,14 +55,20 @@ public struct PaymentVerifier: Sendable {
     /// settlement before the credential is accepted, and a challenge that no
     /// registered method supports is rejected (fail closed) rather than granted on
     /// the protocol checks alone.
+    ///
+    /// `expiryPolicy` selects whether a challenge must carry an `expires`; it defaults
+    /// to ``ChallengeExpiryPolicy/required`` (matches the mppx peer). Select
+    /// ``ChallengeExpiryPolicy/optional`` for the spec's optional-`expires` semantics.
     public init(
         signer: ChallengeSigner,
         replayStore: any ReplayStore,
-        methods: [any PaymentMethodServer] = []
+        methods: [any PaymentMethodServer] = [],
+        expiryPolicy: ChallengeExpiryPolicy = .required
     ) {
         self.signer = signer
         self.replayStore = replayStore
         self.methods = methods
+        self.expiryPolicy = expiryPolicy
     }
 
     /// Verifies the `Authorization: Payment` header value against `body` as of
@@ -124,8 +147,22 @@ public struct PaymentVerifier: Sendable {
         guard signer.verify(challenge) else { return .rejected(.invalidChallenge) }
         // ...but not that they are this route's parameters: pin them.
         guard expecting.matches(challenge) else { return .rejected(.bindingMismatch) }
-        if let expires = challenge.expires, expires.isExpired(at: now) {
-            return .rejected(.expired)
+        // The expiry check is governed by `expiryPolicy`. DIVERGING_FROM_SPEC: the default
+        // (.required) matches the mppx peer, which requires an `expires` at verification
+        // (server/Mppx.ts calls Expires.assert, which throws InvalidChallengeError "missing
+        // required expires field"), rejecting a challenge that carries none rather than honoring
+        // it indefinitely. The spec marks `expires` OPTIONAL, so .optional reproduces that:
+        // a missing `expires` passes (the challenge never lapses) and only a present-and-past
+        // one is rejected. Our minter and middleware always set an expiry (default 5 minutes),
+        // so .required does not affect the issued-challenge happy path.
+        switch expiryPolicy {
+        case .required:
+            guard let expires = challenge.expires else { return .rejected(.invalidChallenge) }
+            guard !expires.isExpired(at: now) else { return .rejected(.expired) }
+        case .optional:
+            if let expires = challenge.expires, expires.isExpired(at: now) {
+                return .rejected(.expired)
+            }
         }
         // A malformed digest in our own signed challenge, or a body mismatch, both reject (fail
         // closed); no digest is a pass.

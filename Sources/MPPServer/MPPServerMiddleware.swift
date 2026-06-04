@@ -42,9 +42,13 @@ public struct MPPServerMiddleware: Sendable {
     ///   - binding: The route's `(realm, method, intent)`. Used to both mint the
     ///     offered challenge and pin verification, so the two cannot drift.
     ///   - request: The method-specific request to advertise, `base64url(JCS(json))`.
-    ///   - expiresIn: Challenge lifetime from mint time, in seconds; `nil` mints a
-    ///     challenge with no expiry. Pass a non-negative value: a negative interval
-    ///     would mint already-expired challenges, making the route inaccessible.
+    ///   - expiresIn: Challenge lifetime from mint time, in seconds; defaults to 300
+    ///     (5 minutes, matching the mppx reference peer). Pass a non-negative value: a
+    ///     negative interval would mint already-expired challenges, making the route
+    ///     inaccessible. `nil` mints a non-lapsing challenge, which this server's own
+    ///     ``PaymentVerifier`` rejects (it requires an expiry; see DIVERGING_FROM_SPEC
+    ///     there), so pass `nil` only when pairing with a verifier that accepts
+    ///     no-expiry challenges.
     ///   - maxBodyBytes: Request bodies larger than this are rejected with `413`
     ///     before any payment work. Defaults to 10 MiB. This bound is an MPP-swift
     ///     denial-of-service guard (the spec does not mandate it), so the digest
@@ -63,7 +67,7 @@ public struct MPPServerMiddleware: Sendable {
         verifier: PaymentVerifier,
         binding: RouteBinding,
         request: EncodedJSON,
-        expiresIn: TimeInterval? = nil,
+        expiresIn: TimeInterval? = 300,
         maxBodyBytes: Int = 10 * 1024 * 1024,
         authorizer: (any RequestAuthorizer)? = nil,
         onEvent: @escaping @Sendable (ServerEvent) -> Void = { _ in }
