@@ -121,6 +121,10 @@ public struct PaymentVerifier: Sendable {
         do {
             let receipt = try await method.verify(credential, now: now)
             return .verified(MPPVerified(credential: credential, receipt: receipt))
+        } catch let problem as SettlementProblemConvertible {
+            // §10.5: the method supplied a typed problem (distinct type + HTTP status); carry it
+            // verbatim instead of flattening to the generic verification failure.
+            return .rejected(.settlement(problem.settlementProblem))
         } catch {
             return .rejected(.settlementUnverified(reason: String(describing: error)))
         }
@@ -208,5 +212,11 @@ public struct PaymentVerifier: Sendable {
         /// proof, the signature did not recover to the `source` wallet). `reason`
         /// carries the method error's description for diagnostics.
         case settlementUnverified(reason: String)
+        /// The method settlement rejected the credential with a typed problem
+        /// (`draft-httpauth-payment-00` §10.5): a distinct RFC 9457 problem type and HTTP
+        /// status the transport surfaces directly (a session's `410` closed/unknown channel,
+        /// `400` malformed request, or `402` amount/signature failure), rather than the generic
+        /// ``settlementUnverified(reason:)``.
+        case settlement(SettlementProblem)
     }
 }

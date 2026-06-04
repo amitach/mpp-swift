@@ -243,18 +243,23 @@ public struct MPPServerMiddleware: Sendable {
         case rejection(PaymentVerifier.Rejection)
     }
 
-    /// Builds the RFC 9457 problem for a 402, using the paymentauth.org problem
+    /// Builds the RFC 9457 problem for a rejection, using the paymentauth.org problem
     /// type registry and carrying the offered challenge id as a `challengeId`
-    /// extension member.
-    /// The slug/title/detail for a 402 problem.
-    private struct Spec { let slug: String; let title: String; let detail: String }
+    /// extension member. Most causes are `402`; a §10.5 settlement problem carries its own
+    /// status (e.g. `410` for a closed/unknown channel, `400` for a malformed request).
+    private struct Spec {
+        let slug: String
+        let title: String
+        let detail: String
+        var status: Int = 402
+    }
 
     private static func problem(for cause: ProblemCause, challengeID: String) -> ProblemDetails {
         let spec = Self.spec(for: cause)
         return ProblemDetails(
             type: "https://paymentauth.org/problems/\(spec.slug)",
             title: spec.title,
-            status: 402,
+            status: spec.status,
             detail: spec.detail,
             extensions: ["challengeId": .string(challengeID)]
         )
@@ -303,6 +308,12 @@ public struct MPPServerMiddleware: Sendable {
             verificationFailed("The payment could not be verified on its rail.")
         case .rejection(.noSupportingMethod):
             verificationFailed("No payment method can settle this challenge.")
+        case let .rejection(.settlement(problem)):
+            // §10.5: the method supplied a typed problem (its own type, title, and status).
+            Spec(
+                slug: problem.slug, title: problem.title, detail: problem.detail,
+                status: problem.status
+            )
         }
     }
 
@@ -322,7 +333,10 @@ public struct MPPServerMiddleware: Sendable {
     private static func paymentRequiredResponse(
         challenge: Challenge, problem: ProblemDetails
     ) -> (HTTPResponse, Data) {
-        var response = HTTPResponse(status: .init(code: 402))
+        // The status is the problem's (402 by default; a §10.5 settlement problem may be 410/400).
+        // A fresh challenge is still offered in `WWW-Authenticate` so the client can retry (present
+        // a corrected voucher, or open a new channel after a 410).
+        var response = HTTPResponse(status: .init(code: problem.status ?? 402))
         response.headerFields[.wwwAuthenticate] = challenge.headerValue
         response.headerFields[.cacheControl] = "no-store"
         response.headerFields[.contentType] = problemContentType

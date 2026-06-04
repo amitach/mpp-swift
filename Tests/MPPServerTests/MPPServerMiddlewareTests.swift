@@ -316,3 +316,57 @@ struct MPPServerMiddlewareTests {
         #expect(eventNames(box) == ["paymentRejected", "challengeIssued"])
     }
 }
+
+/// A method that settles every challenge by rejecting with a fixed typed settlement problem, to
+/// drive the §10.5 problem-type/status mapping through the verifier and middleware.
+private struct SettlementProblemMethod: PaymentMethodServer {
+    let problem: SettlementProblem
+    func supports(_: Challenge) -> Bool {
+        true
+    }
+
+    func verify(_: Credential, now _: Date) async throws -> Receipt {
+        throw Thrown(problem: problem)
+    }
+
+    struct Thrown: Error, SettlementProblemConvertible {
+        let problem: SettlementProblem
+        var settlementProblem: SettlementProblem {
+            problem
+        }
+    }
+}
+
+@Suite("MPPServerMiddleware settlement problems")
+struct MPPServerMiddlewareSettlementTests {
+    private let problem = SettlementProblem(
+        slug: "session/channel-not-found", title: "Channel Not Found", status: 410,
+        detail: "no channel is recorded for the voucher"
+    )
+
+    // §10.5: a method's typed settlement problem (here a 410 channel-not-found) threads through
+    // PaymentVerifier as `.settlement` and the middleware answers with that status and problem
+    // type, not a generic 402. Each leg uses its own middleware (fresh replay store) so the
+    // deterministic credential is not seen as a replay across the two calls.
+    @Test("the evaluate decision carries the problem's own status and type")
+    func settlementProblemDecision() async throws {
+        let middleware = try makeMiddleware(methods: [SettlementProblemMethod(problem: problem)])
+        let header = try paidHeader()
+        let decision = await middleware.evaluate(authorization: header, body: Data(), now: now)
+        guard case let .challenge(_, problemDetails) = decision else {
+            Issue.record("expected a challenge decision, got \(decision)"); return
+        }
+        #expect(problemDetails.status == 410)
+        #expect(problemDetails.type == "https://paymentauth.org/problems/session/channel-not-found")
+    }
+
+    @Test("the HTTP response carries the problem's own status (not a generic 402)")
+    func settlementProblemHTTPStatus() async throws {
+        let middleware = try makeMiddleware(methods: [SettlementProblemMethod(problem: problem)])
+        let header = try paidHeader()
+        let (response, _) = await middleware.handle(
+            makeRequest(authorization: header), body: Data(), now: now
+        ) { _, _ in (HTTPResponse(status: .ok), Data()) }
+        #expect(response.status.code == 410)
+    }
+}
