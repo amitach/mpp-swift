@@ -127,31 +127,37 @@ public struct SessionMethod: PaymentMethodServer {
         // atomic.
         try verifySignature(fields, expectedSigner: channel.authorizedSigner, context)
 
-        // The ENTIRE monotonic decision (reject below-or-equal, enforce the min delta, advance the
-        // highest) runs inside the store's serialized update, so a voucher that lost a race to a
-        // concurrent higher one is rejected here rather than falling through and still charging.
-        // Only a voucher that STRICTLY advances the channel commits; the charge below is reached
-        // only then, so a stale or equal-cumulative (replay) voucher is rejected, never charged.
-        try await store.update(fields.channelID) { current in
-            guard var channel = current else { throw SessionError.channelNotFound }
-            // Reject a voucher racing a close: a closing/finalized channel must not advance the
-            // highest (consistent with deductFromChannel's guard).
-            if let reason = channel.undrawableReason {
-                throw SessionError.channelClosed(reason: reason)
+        // The monotonic decision is atomic (serialized in the store update): a voucher EQUAL to the
+        // highest is an idempotent replay (no new charge; via IdempotentVoucher, caught below; spec
+        // §10.4 / mppx peer); a strictly lower one is rejected, a higher one charges once.
+        do {
+            try await store.update(fields.channelID) { current in
+                guard var channel = current else { throw SessionError.channelNotFound }
+                // Reject a voucher racing a close: a closing/finalized channel must not advance the
+                // highest (consistent with deductFromChannel's guard).
+                if let reason = channel.undrawableReason {
+                    throw SessionError.channelClosed(reason: reason)
+                }
+                if cumulative == channel.highestVoucherAmount {
+                    throw IdempotentVoucher(channel: channel)
+                }
+                guard cumulative > channel.highestVoucherAmount else {
+                    throw SessionError.belowHighestVoucher
+                }
+                guard let delta = cumulative.subtracting(channel.highestVoucherAmount),
+                      delta >= minVoucherDelta
+                else { throw SessionError.deltaTooSmall }
+                channel.highestVoucherAmount = cumulative
+                channel.highestVoucherSignature = fields.signature
+                return channel
             }
-            guard cumulative > channel.highestVoucherAmount else {
-                throw SessionError.belowHighestVoucher
-            }
-            guard let delta = cumulative.subtracting(channel.highestVoucherAmount),
-                  delta >= minVoucherDelta
-            else { throw SessionError.deltaTooSmall }
-            channel.highestVoucherAmount = cumulative
-            channel.highestVoucherSignature = fields.signature
-            return channel
+        } catch let replay as IdempotentVoucher {
+            // An already-accepted cumulative: return a receipt for the unchanged channel, no
+            // charge.
+            return receipt(replay.channel, context)
         }
-        // Reached only after a strictly-advancing voucher committed atomically: charge exactly
-        // once.
-        let charged = try await chargeRequest(fields.channelID, context)
+        // Reached only after a strictly-advancing voucher committed atomically: charge once.
+        let charged = try await chargeSession(store, fields.channelID, context.chargeAmount)
         return receipt(charged, context)
     }
 
@@ -197,7 +203,7 @@ public struct SessionMethod: PaymentMethodServer {
                 spent: onChain.settled, units: 0
             )
         }
-        let charged = try await chargeRequest(fields.channelID, context)
+        let charged = try await chargeSession(store, fields.channelID, context.chargeAmount)
         return SessionReceipt.make(
             method: context.method, now: context.now, challengeID: context.challengeID,
             channel: charged, txHash: openTxHash
@@ -322,29 +328,35 @@ public struct SessionMethod: PaymentMethodServer {
         else { throw SessionError.invalidVoucherSignature }
     }
 
-    /// Charges this request's amount against the channel (one unit), mapping the
-    /// store's failures to session rejections.
-    private func chargeRequest(_ channelID: Data, _ context: Context) async throws -> ChannelState {
-        do {
-            return try await deductFromChannel(
-                store,
-                channelID: channelID,
-                amount: context.chargeAmount
-            )
-        } catch let error as ChannelError {
-            switch error {
-            case .insufficientBalance: throw SessionError.insufficientBalance
-            case let .closed(reason): throw SessionError.channelClosed(reason: reason)
-            case .notFound: throw SessionError.channelNotFound
-            }
-        }
-    }
-
     private func receipt(_ channel: ChannelState, _ context: Context) -> Receipt {
         SessionReceipt.make(
             method: context.method, now: context.now, challengeID: context.challengeID,
             channel: channel
         )
+    }
+}
+
+/// Internal control-flow signal: a voucher whose cumulative equals the channel's current highest
+/// is an idempotent replay. Thrown from inside the atomic store update (aborting its no-op write)
+/// and caught by `acceptVoucher`, which returns a receipt for the unchanged channel without
+/// charging again.
+private struct IdempotentVoucher: Error {
+    let channel: ChannelState
+}
+
+/// Charges a session request's `amount` against the channel, mapping store failures to session
+/// rejections. File-scope so it does not count against the method's body length.
+private func chargeSession(
+    _ store: any ChannelStore, _ channelID: Data, _ amount: ChannelAmount
+) async throws -> ChannelState {
+    do {
+        return try await deductFromChannel(store, channelID: channelID, amount: amount)
+    } catch let error as ChannelError {
+        switch error {
+        case .insufficientBalance: throw SessionMethod.SessionError.insufficientBalance
+        case let .closed(reason): throw SessionMethod.SessionError.channelClosed(reason: reason)
+        case .notFound: throw SessionMethod.SessionError.channelNotFound
+        }
     }
 }
 
