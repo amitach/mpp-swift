@@ -9,6 +9,14 @@ import Foundation
 /// `sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:`. MPP uses SHA-256.
 /// The value is an RFC 8941 structured-field dictionary whose member value is a
 /// byte sequence: standard base64 **with** padding, delimited by colons.
+///
+/// Audit D2: the mppx reference peer emits a bare, unframed `sha-256=<base64>` (no
+/// colon delimiters, unpadded), which is not RFC 9530. We deliberately keep the
+/// spec-correct framed form rather than match the peer: the digest is server-internal
+/// (this server both mints it into the challenge and verifies the body against it; a
+/// client echoes the challenge opaquely and never parses the digest), so the format
+/// never crosses an SDK boundary and the difference is not an interop break. Matching
+/// the peer would only regress this SDK's RFC 9530 compliance.
 public enum ContentDigest {
     /// The digest algorithm MPP uses (`draft-httpauth-payment-00` §5.1).
     public static let algorithm = "sha-256"
