@@ -345,19 +345,31 @@ struct MPPServerMiddlewareSettlementTests {
     )
 
     // §10.5: a method's typed settlement problem (here a 410 channel-not-found) threads through
-    // PaymentVerifier as `.settlement` and the middleware answers with that status and problem
-    // type, not a generic 402. Each leg uses its own middleware (fresh replay store) so the
-    // deterministic credential is not seen as a replay across the two calls.
-    @Test("the evaluate decision carries the problem's own status and type")
+    // PaymentVerifier as `.settlement` and the middleware answers with a terminal `.problem`
+    // decision carrying that status and problem type, not a generic 402. Each leg uses its own
+    // middleware (fresh replay store) so the deterministic credential is not seen as a replay.
+    @Test("the evaluate decision is a terminal problem with the status, type, and no challengeId")
     func settlementProblemDecision() async throws {
         let middleware = try makeMiddleware(methods: [SettlementProblemMethod(problem: problem)])
         let header = try paidHeader()
         let decision = await middleware.evaluate(authorization: header, body: Data(), now: now)
-        guard case let .challenge(_, problemDetails) = decision else {
-            Issue.record("expected a challenge decision, got \(decision)"); return
+        guard case let .problem(problemDetails) = decision else {
+            Issue.record("expected a terminal .problem decision, got \(decision)"); return
         }
         #expect(problemDetails.status == 410)
         #expect(problemDetails.type == "https://paymentauth.org/problems/session/channel-not-found")
+        #expect(problemDetails.extensions["challengeId"] == nil) // terminal: no challenge offered
+    }
+
+    @Test("a terminal settlement rejection fires paymentRejected but no challengeIssued")
+    func settlementProblemEmitsNoChallengeIssued() async throws {
+        let box = EventBox()
+        let middleware = try makeMiddleware(
+            methods: [SettlementProblemMethod(problem: problem)], onEvent: box.add
+        )
+        let header = try paidHeader()
+        _ = await middleware.evaluate(authorization: header, body: Data(), now: now)
+        #expect(eventNames(box) == ["paymentRejected"]) // no challengeIssued for a terminal 410
     }
 
     @Test("the HTTP response carries the problem's own status (not a generic 402)")

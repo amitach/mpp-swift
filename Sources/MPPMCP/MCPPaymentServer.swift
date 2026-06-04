@@ -83,6 +83,22 @@ public struct MCPPaymentServer: Sendable {
                     message: problem.detail ?? problem.title ?? "Payment Required",
                     data: MCPPaymentCodec.errorData(challenge: challenge, problem: problem)
                 )
+            case let .problem(problem):
+                // A terminal §10.5 settlement problem (no retry challenge). Unreachable on the
+                // MCP gate today (it registers no session method), but mapped for completeness: a
+                // supplied credential was rejected, so the code follows the same compatibility mode
+                // as a failed-credential re-challenge, and the data carries the problem (no
+                // challenges) with its own HTTP status.
+                let code = codeMode == .specCorrect
+                    ? MCPPayment.verificationFailedCode
+                    : MCPPayment.paymentRequiredCode
+                throw try MCPError.paymentRequired(
+                    code: code,
+                    message: problem.detail ?? problem.title ?? "Payment Required",
+                    data: MCPPaymentCodec.errorData(
+                        challenge: nil, problem: problem, httpStatus: problem.status ?? 402
+                    )
+                )
             case let .proceed(verified):
                 let result = try await inner(params)
                 // MCP payment is always credential-based, so credential is present here. If a
