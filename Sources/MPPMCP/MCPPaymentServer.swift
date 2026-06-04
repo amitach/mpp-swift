@@ -11,9 +11,9 @@ import MPPServer
 /// header string the middleware consumes, the body is empty (MCP carries no HTTP body, so no
 /// digest), and the middleware's `Decision` is mapped onto the JSON-RPC wire:
 ///
-/// - no / rejected credential -> `MCPError.paymentRequired` (`-32042` when none was supplied,
-///   `-32043` when one was supplied but failed verification), carrying the challenge set in
-///   `error.data.challenges`;
+/// - no / rejected credential -> `MCPError.paymentRequired` (`-32042` for both an absent and a
+///   failed credential - see the DIVERGING_FROM_SPEC note in ``MCPPayment``), carrying the
+///   challenge set in `error.data.challenges`;
 /// - verified -> the wrapped handler runs and the minted receipt is attached to `result._meta`.
 public struct MCPPaymentServer: Sendable {
     private let middleware: MPPServerMiddleware
@@ -55,9 +55,11 @@ public struct MCPPaymentServer: Sendable {
                 // Unreachable: the MCP body is always empty here. Fail closed rather than proceed.
                 throw MCPError.internalError("payment gate: unexpected oversized body")
             case let .challenge(challenge, problem):
-                let code = credential == nil
-                    ? MCPPayment.paymentRequiredCode
-                    : MCPPayment.verificationFailedCode
+                // DIVERGING_FROM_SPEC (audit D1): the spec (§10.1) wants -32043 for a
+                // failed-verification re-challenge, but the mppx peer's client only
+                // recognizes -32042 and would not retry on -32043, so emit -32042 for
+                // both the no-credential and failed-credential cases. See MCPPayment.
+                let code = MCPPayment.paymentRequiredCode
                 throw try MCPError.paymentRequired(
                     code: code,
                     message: problem.detail ?? problem.title ?? "Payment Required",

@@ -93,7 +93,9 @@ struct MCPPaymentServerGateTests {
             guard let (code, data) = paymentRequired(error) else {
                 Issue.record("expected .paymentRequired, got \(error)"); return
             }
-            #expect(code == MCPPayment.verificationFailedCode)
+            // DIVERGING_FROM_SPEC (audit D1): -32042 for a failed credential (not the spec's
+            // -32043), to match the mppx peer's client which only recognizes -32042.
+            #expect(code == MCPPayment.paymentRequiredCode)
             let problem = try MCPPaymentCodec.problem(fromErrorData: data)
             #expect(problem != nil)
             #expect(problem?.extensions["challengeId"] != nil)

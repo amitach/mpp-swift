@@ -10,8 +10,14 @@ import MPPEVM
 /// fee-payer sponsorship, arrive with the on-chain settlement layer in a later
 /// PR; the zero-amount proof needs only this one.)
 public enum ProofVariant: Sendable, Hashable {
-    /// Domain version `"2"`, message `{challengeId, realm}`. The default emitted;
-    /// the form `mppx` servers verify.
+    /// Domain version `"2"`, message `{challengeId, realm}`. The default emitted.
+    ///
+    /// DIVERGING_FROM_SPEC (audit D3): `draft-tempo-charge-00` §5.4.1 defines the
+    /// normative proof as single-field `{challengeId}` at domain version `"1"`
+    /// (``specChallengeId``). The mppx peer deliberately binds the proof to the realm
+    /// as well (peer CHANGELOG: "bind signatures to the challenge realm"), so this SDK
+    /// defaults to the peer's realm-bound form for interop. Select ``specChallengeId``
+    /// to target a strictly spec-conformant server.
     case v2Realm
     /// Domain version `"1"`, message `{challengeId, wallet}`.
     case v1Wallet
