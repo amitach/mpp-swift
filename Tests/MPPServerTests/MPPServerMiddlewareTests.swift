@@ -316,3 +316,73 @@ struct MPPServerMiddlewareTests {
         #expect(eventNames(box) == ["paymentRejected", "challengeIssued"])
     }
 }
+
+/// A method that settles every challenge by rejecting with a fixed typed settlement problem, to
+/// drive the §10.5 problem-type/status mapping through the verifier and middleware.
+private struct SettlementProblemMethod: PaymentMethodServer {
+    let problem: SettlementProblem
+    func supports(_: Challenge) -> Bool {
+        true
+    }
+
+    func verify(_: Credential, now _: Date) async throws -> Receipt {
+        throw Thrown(problem: problem)
+    }
+
+    struct Thrown: Error, SettlementProblemConvertible {
+        let problem: SettlementProblem
+        var settlementProblem: SettlementProblem {
+            problem
+        }
+    }
+}
+
+@Suite("MPPServerMiddleware settlement problems")
+struct MPPServerMiddlewareSettlementTests {
+    private let problem = SettlementProblem(
+        slug: "session/channel-not-found", title: "Channel Not Found", status: 410,
+        detail: "no channel is recorded for the voucher"
+    )
+
+    // §10.5: a method's typed settlement problem (here a 410 channel-not-found) threads through
+    // PaymentVerifier as `.settlement` and the middleware answers with a terminal `.problem`
+    // decision carrying that status and problem type, not a generic 402. Each leg uses its own
+    // middleware (fresh replay store) so the deterministic credential is not seen as a replay.
+    @Test("the evaluate decision is a terminal problem with the status, type, and no challengeId")
+    func settlementProblemDecision() async throws {
+        let middleware = try makeMiddleware(methods: [SettlementProblemMethod(problem: problem)])
+        let header = try paidHeader()
+        let decision = await middleware.evaluate(authorization: header, body: Data(), now: now)
+        guard case let .problem(problemDetails) = decision else {
+            Issue.record("expected a terminal .problem decision, got \(decision)"); return
+        }
+        #expect(problemDetails.status == 410)
+        #expect(problemDetails.type == "https://paymentauth.org/problems/session/channel-not-found")
+        #expect(problemDetails.extensions["challengeId"] == nil) // terminal: no challenge offered
+    }
+
+    @Test("a terminal settlement rejection fires paymentRejected but no challengeIssued")
+    func settlementProblemEmitsNoChallengeIssued() async throws {
+        let box = EventBox()
+        let middleware = try makeMiddleware(
+            methods: [SettlementProblemMethod(problem: problem)], onEvent: box.add
+        )
+        let header = try paidHeader()
+        _ = await middleware.evaluate(authorization: header, body: Data(), now: now)
+        #expect(eventNames(box) == ["paymentRejected"]) // no challengeIssued for a terminal 410
+    }
+
+    @Test("the HTTP response carries the problem's own status (not a generic 402)")
+    func settlementProblemHTTPStatus() async throws {
+        let middleware = try makeMiddleware(methods: [SettlementProblemMethod(problem: problem)])
+        let header = try paidHeader()
+        let (response, _) = await middleware.handle(
+            makeRequest(authorization: header), body: Data(), now: now
+        ) { _, _ in (HTTPResponse(status: .ok), Data()) }
+        #expect(response.status.code == 410)
+        // A terminal 410 carries no retry challenge (WWW-Authenticate is offered only on a 402),
+        // matching the mppx peer; the no-store cache directive still applies.
+        #expect(response.headerFields[.wwwAuthenticate] == nil)
+        #expect(response.headerFields[.cacheControl] == "no-store")
+    }
+}

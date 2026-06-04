@@ -8,12 +8,14 @@ import MPPCore
 /// handler should be cheap (hand off to a logger/metrics queue, do not block).
 public enum ServerEvent: Sendable {
     /// A challenge was minted and returned in a `402`: either because the request
-    /// carried no credential, or as the retry challenge that accompanies a
-    /// rejection (so this event counts every minted challenge). On a rejection it
-    /// follows the ``paymentRejected(_:)`` event for the same request.
+    /// carried no credential, or as the retry challenge that accompanies a `402`
+    /// rejection. A terminal §10.5 settlement problem (`410` / `400`) offers no retry
+    /// challenge, so it fires only ``paymentRejected(_:)`` and no `challengeIssued`. On a
+    /// rejection this event follows ``paymentRejected(_:)`` for the same request.
     case challengeIssued(Challenge)
     /// A credential verified; the protected handler is about to run.
     case paymentVerified(MPPVerified)
-    /// A presented credential was rejected; a fresh `402` challenge was returned.
+    /// A presented credential was rejected. A `402` returns a fresh retry challenge; a terminal
+    /// §10.5 settlement problem (`410` / `400`) returns the problem with no challenge.
     case paymentRejected(PaymentVerifier.Rejection)
 }

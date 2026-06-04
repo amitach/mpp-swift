@@ -83,6 +83,16 @@ public struct MCPPaymentServer: Sendable {
                     message: problem.detail ?? problem.title ?? "Payment Required",
                     data: MCPPaymentCodec.errorData(challenge: challenge, problem: problem)
                 )
+            case let .problem(problem):
+                // A terminal §10.5 settlement problem (no retry challenge) only arises for a
+                // session method, which the MCP gate never registers (the JSON-RPC binding gates
+                // one-shot charge methods, not multi-request channel sessions), so this is
+                // unreachable. Fail closed rather than emit a challenge-less error frame that the
+                // paired `MCPPaymentClient` cannot parse (it expects a `challenges` array). If MCP
+                // ever gains session support, both sides of the codec must learn the terminal form.
+                throw MCPError.internalError(
+                    "payment gate: unexpected terminal settlement problem (\(problem.title ?? "?"))"
+                )
             case let .proceed(verified):
                 let result = try await inner(params)
                 // MCP payment is always credential-based, so credential is present here. If a

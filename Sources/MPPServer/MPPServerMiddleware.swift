@@ -110,8 +110,14 @@ public struct MPPServerMiddleware: Sendable {
     public enum Decision: Sendable {
         /// The body exceeded `maxBodyBytes`; answer `413` before any payment work.
         case payloadTooLarge
-        /// No valid credential; answer `402` with this challenge and problem body.
+        /// No valid (or a retryable-`402`) credential; answer `402` with this retry challenge
+        /// (offered in `WWW-Authenticate`) and problem body.
         case challenge(Challenge, ProblemDetails)
+        /// A terminal settlement problem (§10.5): answer with the problem's own status (e.g. `410`
+        /// for a closed/unknown channel, `400` for a malformed request) and body, offering no
+        /// retry challenge. Distinct from ``challenge(_:_:)`` precisely so no challenge is minted,
+        /// counted, or embedded for a response the client cannot retry on the same terms.
+        case problem(ProblemDetails)
         /// The credential verified; run the protected handler with this token.
         case proceed(MPPVerified)
     }
@@ -146,14 +152,18 @@ public struct MPPServerMiddleware: Sendable {
             onEvent(.paymentVerified(verified))
             return .proceed(verified)
         case let .rejected(rejection):
-            // Offer a fresh challenge alongside the rejection so the client can retry.
-            // Both moments are reported: the rejection, then the retry challenge that
-            // was issued (so `challengeIssued` counts every minted challenge).
-            let challenge = mintChallenge(now: now)
             onEvent(.paymentRejected(rejection))
-            onEvent(.challengeIssued(challenge))
-            let problem = Self.problem(for: .rejection(rejection), challengeID: challenge.id)
-            return .challenge(challenge, problem)
+            // A 402 rejection offers a fresh retry challenge (and counts it as issued), so the
+            // client can present a corrected credential. A terminal 410/400 settlement problem
+            // (§10.5) offers none: it mints no challenge, fires no `challengeIssued`, and embeds
+            // no `challengeId` (the client cannot retry on a challenge it was never given).
+            if Self.problemStatus(for: rejection) == 402 {
+                let challenge = mintChallenge(now: now)
+                onEvent(.challengeIssued(challenge))
+                let problem = Self.problem(for: .rejection(rejection), challengeID: challenge.id)
+                return .challenge(challenge, problem)
+            }
+            return .problem(Self.problem(for: .rejection(rejection), challengeID: nil))
         }
     }
 
@@ -195,6 +205,8 @@ public struct MPPServerMiddleware: Sendable {
             return Self.payloadTooLargeResponse(maxBodyBytes: maxBodyBytes)
         case let .challenge(challenge, problem):
             return Self.paymentRequiredResponse(challenge: challenge, problem: problem)
+        case let .problem(problem):
+            return Self.problemResponse(problem)
         case let .proceed(verified):
             return await serve(request, verified: verified, handler: handler)
         }
@@ -243,20 +255,31 @@ public struct MPPServerMiddleware: Sendable {
         case rejection(PaymentVerifier.Rejection)
     }
 
-    /// Builds the RFC 9457 problem for a 402, using the paymentauth.org problem
-    /// type registry and carrying the offered challenge id as a `challengeId`
-    /// extension member.
-    /// The slug/title/detail for a 402 problem.
-    private struct Spec { let slug: String; let title: String; let detail: String }
+    /// The HTTP status a rejection answers with (402 by default; a §10.5 settlement problem may be
+    /// 410 / 400). Drives whether a retry challenge is offered.
+    private static func problemStatus(for rejection: PaymentVerifier.Rejection) -> Int {
+        spec(for: .rejection(rejection)).status
+    }
 
-    private static func problem(for cause: ProblemCause, challengeID: String) -> ProblemDetails {
+    /// Builds the RFC 9457 problem for a cause, using the paymentauth.org problem type registry.
+    /// When `challengeID` is non-nil it is carried as the `challengeId` extension member (the
+    /// offered retry challenge); a terminal settlement problem passes `nil` to omit it. Most causes
+    /// are `402`; a §10.5 settlement problem carries its own status (e.g. `410` / `400`).
+    private struct Spec {
+        let slug: String
+        let title: String
+        let detail: String
+        var status: Int = 402
+    }
+
+    private static func problem(for cause: ProblemCause, challengeID: String?) -> ProblemDetails {
         let spec = Self.spec(for: cause)
         return ProblemDetails(
             type: "https://paymentauth.org/problems/\(spec.slug)",
             title: spec.title,
-            status: 402,
+            status: spec.status,
             detail: spec.detail,
-            extensions: ["challengeId": .string(challengeID)]
+            extensions: challengeID.map { ["challengeId": .string($0)] } ?? [:]
         )
     }
 
@@ -303,6 +326,12 @@ public struct MPPServerMiddleware: Sendable {
             verificationFailed("The payment could not be verified on its rail.")
         case .rejection(.noSupportingMethod):
             verificationFailed("No payment method can settle this challenge.")
+        case let .rejection(.settlement(problem)):
+            // §10.5: the method supplied a typed problem (its own type, title, and status).
+            Spec(
+                slug: problem.slug, title: problem.title, detail: problem.detail,
+                status: problem.status
+            )
         }
     }
 
@@ -319,11 +348,24 @@ public struct MPPServerMiddleware: Sendable {
         return name
     }()
 
+    /// A `402` offering `challenge` in `WWW-Authenticate` (the retry challenge), with the problem
+    /// body. Only the retryable `402` path reaches here; a terminal settlement problem uses
+    /// ``problemResponse(_:)``.
     private static func paymentRequiredResponse(
         challenge: Challenge, problem: ProblemDetails
     ) -> (HTTPResponse, Data) {
         var response = HTTPResponse(status: .init(code: 402))
         response.headerFields[.wwwAuthenticate] = challenge.headerValue
+        response.headerFields[.cacheControl] = "no-store"
+        response.headerFields[.contentType] = problemContentType
+        return (response, encodedProblem(problem))
+    }
+
+    /// A terminal settlement problem (§10.5): the problem's own status (e.g. `410` / `400`) and
+    /// body, with no `WWW-Authenticate` (no retry challenge is offered), matching the mppx peer,
+    /// which associates the challenge with `402` responses alone.
+    private static func problemResponse(_ problem: ProblemDetails) -> (HTTPResponse, Data) {
+        var response = HTTPResponse(status: .init(code: problem.status ?? 402))
         response.headerFields[.cacheControl] = "no-store"
         response.headerFields[.contentType] = problemContentType
         return (response, encodedProblem(problem))
