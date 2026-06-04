@@ -30,7 +30,7 @@ Each requirement maps to a type, a default, a runtime guard, or a CI gate:
 - **Secret management (§11.2.2):** the server challenge secret lives only in server-side stores (file / environment / KMS), never in a client Keychain; rotation with historical-key verification; a minimum key length is validated on load.
 - **Replay (§11.3) and idempotency (§11.4):** single-use proof semantics via an atomic replay store, consumed before any side effect; unpaid requests perform no work.
 - **Amount verification (§11.6):** amounts are integer base units carried as a canonical string; a spending-approval policy runs before any signing; the human-readable `description` is never used for verification. `Double`/`Float` are banned from amount paths.
-- **Caching (§11.10) and DoS (§11.12):** `Cache-Control: no-store` on 402 and `private` on a receipted 200; a request body cap (HTTP 413 over a fixed limit); a rate-limiter seam for challenge issuance and verification.
+- **Caching (§11.10) and DoS (§11.12):** `Cache-Control: no-store` on 402 and `private` on a receipted 200; a request body cap (HTTP 413 over a fixed limit). Rate limiting itself is not built in: the synchronous `onEvent` sink reports challenge issuance and verification so an operator can feed an external limiter, with per-client throttling left to the deployment (a reverse proxy or gateway in front of the server).
 
 Credentials, receipts, and secret keys must never appear in logs, error messages, traces, or analytics.
 
