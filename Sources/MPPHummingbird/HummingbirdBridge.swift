@@ -1,7 +1,6 @@
 import Foundation
 import HTTPTypes
 import Hummingbird
-import MPPCore
 import NIOCore
 
 /// Bridges a Hummingbird `Request`/`Response` to the engine's framework-neutral

@@ -11,14 +11,15 @@ struct SignedVoucherFields: Hashable {
 }
 
 /// The fields of a channel-open credential payload.
+///
+/// The wire also carries `authorizedSigner` (the signer the client asserts), but the server
+/// derives the authorized signer from the on-chain channel (falling back to the payer) rather
+/// than trusting the client's assertion, so it is advisory and not stored here.
 struct OpenFields: Hashable {
     let channelID: Data
     let cumulativeAmount: String
     let signature: Data
     let transaction: Data
-    /// The signer the client asserts; the server uses the on-chain value, falling
-    /// back to the payer, so this is advisory.
-    let authorizedSigner: EthereumAddress?
 }
 
 /// The fields of a channel top-up credential payload.
@@ -48,13 +49,13 @@ enum SessionAction: Hashable {
         case "voucher": return signedVoucher(payload).map(SessionAction.voucher)
         case "close": return signedVoucher(payload).map(SessionAction.close)
         case "open":
+            // `authorizedSigner` is advisory (the server reads the signer on-chain), so like
+            // `additionalDeposit` below it is not parsed or stored.
             guard let voucher = signedVoucher(payload),
                   let transaction = hex(payload["transaction"]) else { return nil }
-            let signer = payload["authorizedSigner"]?.stringValue
-                .flatMap(EthereumAddress.init(hex:))
             return .open(OpenFields(
                 channelID: voucher.channelID, cumulativeAmount: voucher.cumulativeAmount,
-                signature: voucher.signature, transaction: transaction, authorizedSigner: signer
+                signature: voucher.signature, transaction: transaction
             ))
         case "topUp":
             // `additionalDeposit` is required on the wire but advisory to the server

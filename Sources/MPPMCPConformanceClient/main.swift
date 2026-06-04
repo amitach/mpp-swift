@@ -1,6 +1,5 @@
 import Foundation
 import MCP
-import MPPClient
 import MPPCore
 import MPPEVM
 import MPPMCP

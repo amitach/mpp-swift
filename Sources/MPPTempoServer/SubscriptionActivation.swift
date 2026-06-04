@@ -1,6 +1,4 @@
 import Foundation
-import MPPCore
-import MPPEVM
 import MPPTempo
 
 /// Tempo glue from a verified subscription activation to a persisted

@@ -5,7 +5,6 @@ import MPPCore
 import MPPEVM
 import Testing
 @testable import MPPTempo
-@testable import MPPTempoFFI
 
 // Forward cross-SDK CHANNEL conformance: our Swift client (`PaymentClient` +
 // `TempoChannelMethod` + the FFI open-tx builder) opens a payment channel against the

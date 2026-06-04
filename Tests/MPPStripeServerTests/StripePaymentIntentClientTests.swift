@@ -1,6 +1,5 @@
 import Foundation
 import HTTPTypes
-import MPPClient
 import Testing
 @testable import MPPStripeServer
 

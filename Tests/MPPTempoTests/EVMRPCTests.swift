@@ -2,7 +2,6 @@ import Foundation
 import HTTPTypes
 import MPPClient
 import MPPCore
-import MPPEVM
 import Testing
 @testable import MPPTempo
 

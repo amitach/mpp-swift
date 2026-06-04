@@ -2,7 +2,6 @@ import Foundation
 import HTTPTypes
 import Hummingbird
 import Logging
-import MPPCore
 import MPPProxy
 import MPPServer
 import NIOCore

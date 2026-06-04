@@ -2,7 +2,6 @@ import Foundation
 import HTTPTypes
 import MPPClient
 import MPPCore
-import MPPStripe
 @testable import MPPStripeServer
 
 // Fixtures for the MPPStripeServer tests: a stub PaymentIntent seam (captures the request, returns

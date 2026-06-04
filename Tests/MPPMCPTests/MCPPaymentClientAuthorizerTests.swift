@@ -1,7 +1,6 @@
 import Foundation
 import MCP
 import MPPClient
-import MPPCore
 import Testing
 @testable import MPPMCP
 
