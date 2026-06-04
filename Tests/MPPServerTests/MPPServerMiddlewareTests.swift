@@ -368,5 +368,9 @@ struct MPPServerMiddlewareSettlementTests {
             makeRequest(authorization: header), body: Data(), now: now
         ) { _, _ in (HTTPResponse(status: .ok), Data()) }
         #expect(response.status.code == 410)
+        // A terminal 410 carries no retry challenge (WWW-Authenticate is offered only on a 402),
+        // matching the mppx peer; the no-store cache directive still applies.
+        #expect(response.headerFields[.wwwAuthenticate] == nil)
+        #expect(response.headerFields[.cacheControl] == "no-store")
     }
 }

@@ -334,10 +334,16 @@ public struct MPPServerMiddleware: Sendable {
         challenge: Challenge, problem: ProblemDetails
     ) -> (HTTPResponse, Data) {
         // The status is the problem's (402 by default; a §10.5 settlement problem may be 410/400).
-        // A fresh challenge is still offered in `WWW-Authenticate` so the client can retry (present
-        // a corrected voucher, or open a new channel after a 410).
-        var response = HTTPResponse(status: .init(code: problem.status ?? 402))
-        response.headerFields[.wwwAuthenticate] = challenge.headerValue
+        let status = problem.status ?? 402
+        var response = HTTPResponse(status: .init(code: status))
+        // `WWW-Authenticate` carries the retry challenge. It accompanies the payment-required
+        // status only (402, extending RFC 9110's 401 semantics), not a terminal 410/400 settlement
+        // problem - matching the mppx peer, which associates the challenge with 402 responses
+        // alone. On a 402 the client retries with a corrected credential; a 410/400 is terminal
+        // (open a new channel, or fix the request) and carries no challenge.
+        if status == 402 {
+            response.headerFields[.wwwAuthenticate] = challenge.headerValue
+        }
         response.headerFields[.cacheControl] = "no-store"
         response.headerFields[.contentType] = problemContentType
         return (response, encodedProblem(problem))

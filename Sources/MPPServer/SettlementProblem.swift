@@ -15,7 +15,10 @@ public struct SettlementProblem: Sendable, Hashable {
     public let slug: String
     /// The human-readable problem title.
     public let title: String
-    /// The HTTP status the transport answers with (e.g. `402`, `410`, `400`).
+    /// The HTTP status the transport answers with: a client- or server-error status (4xx/5xx),
+    /// for example `402` (payment), `410` (gone), or `400` (bad request). The transport renders
+    /// it directly as the response status, so a non-error value would be a method bug; the
+    /// `WWW-Authenticate` retry challenge is offered only for `402`.
     public let status: Int
     /// A client-safe one-line detail. Must not carry a secret (it is echoed to the client).
     public let detail: String
