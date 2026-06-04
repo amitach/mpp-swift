@@ -145,16 +145,14 @@ enum MCPPaymentCodec {
     // MARK: - The -32042 error.data frame
 
     static func errorData(
-        challenge: Challenge?,
+        challenge: Challenge,
         problem: ProblemDetails?,
         httpStatus: Int = 402
     ) throws -> [String: Value] {
-        var data: [String: Value] = ["httpStatus": .int(httpStatus)]
-        // A terminal settlement problem (§10.5) offers no retry challenge, so the `challenges`
-        // array is omitted; a `402` always carries one.
-        if let challenge {
-            data["challenges"] = try .array([value(for: challenge)])
-        }
+        var data: [String: Value] = try [
+            "httpStatus": .int(httpStatus),
+            "challenges": .array([value(for: challenge)]),
+        ]
         if let problem {
             let encoded = try JSONEncoder().encode(problem)
             data["problem"] = try JSONDecoder().decode(Value.self, from: encoded)
