@@ -11,19 +11,29 @@ import MPPServer
 /// header string the middleware consumes, the body is empty (MCP carries no HTTP body, so no
 /// digest), and the middleware's `Decision` is mapped onto the JSON-RPC wire:
 ///
-/// - no / rejected credential -> `MCPError.paymentRequired` (`-32042` when none was supplied,
-///   `-32043` when one was supplied but failed verification), carrying the challenge set in
-///   `error.data.challenges`;
+/// - no / rejected credential -> `MCPError.paymentRequired`, carrying the challenge set in
+///   `error.data.challenges`; the JSON-RPC code is chosen by ``MCPErrorCodeMode`` (default
+///   ``MCPErrorCodeMode/peerCompatible``, which matches the mppx peer - see its
+///   DIVERGING_FROM_SPEC note);
 /// - verified -> the wrapped handler runs and the minted receipt is attached to `result._meta`.
 public struct MCPPaymentServer: Sendable {
     private let middleware: MPPServerMiddleware
+    private let codeMode: MCPErrorCodeMode
     private let now: @Sendable () -> Date
 
     /// - Parameters:
     ///   - middleware: the mint/verify pipeline (challenge minter + payment verifier + binding).
+    ///   - codeMode: which JSON-RPC error code to emit on a payment-required re-challenge;
+    ///     defaults to ``MCPErrorCodeMode/peerCompatible`` (matches the mppx peer). Select
+    ///     ``MCPErrorCodeMode/specCorrect`` for the `draft-payment-transport-mcp-00` §10.1 codes.
     ///   - now: the clock, injected so tests are deterministic; defaults to the system clock.
-    public init(middleware: MPPServerMiddleware, now: @escaping @Sendable () -> Date = Date.init) {
+    public init(
+        middleware: MPPServerMiddleware,
+        codeMode: MCPErrorCodeMode = .peerCompatible,
+        now: @escaping @Sendable () -> Date = Date.init
+    ) {
         self.middleware = middleware
+        self.codeMode = codeMode
         self.now = now
     }
 
@@ -34,6 +44,7 @@ public struct MCPPaymentServer: Sendable {
         _ inner: @escaping @Sendable (CallTool.Parameters) async throws -> CallTool.Result
     ) -> @Sendable (CallTool.Parameters) async throws -> CallTool.Result {
         let middleware = middleware
+        let codeMode = codeMode
         let now = now
         return { params in
             let credential: Credential?
@@ -55,9 +66,18 @@ public struct MCPPaymentServer: Sendable {
                 // Unreachable: the MCP body is always empty here. Fail closed rather than proceed.
                 throw MCPError.internalError("payment gate: unexpected oversized body")
             case let .challenge(challenge, problem):
-                let code = credential == nil
-                    ? MCPPayment.paymentRequiredCode
-                    : MCPPayment.verificationFailedCode
+                // The re-challenge code depends on the configured compatibility mode. An ABSENT
+                // credential is always -32042; a SUPPLIED-but-rejected one is -32042 in the
+                // peer-compatible default (the mppx client only retries on -32042) or -32043 in
+                // spec-correct mode. See the DIVERGING_FROM_SPEC note on `MCPErrorCodeMode`.
+                let code: Int = switch codeMode {
+                case .peerCompatible:
+                    MCPPayment.paymentRequiredCode
+                case .specCorrect:
+                    credential == nil
+                        ? MCPPayment.paymentRequiredCode
+                        : MCPPayment.verificationFailedCode
+                }
                 throw try MCPError.paymentRequired(
                     code: code,
                     message: problem.detail ?? problem.title ?? "Payment Required",

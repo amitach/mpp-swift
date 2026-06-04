@@ -43,7 +43,8 @@ struct MCPPaymentEndToEndTests {
         // First call consumes the (deterministic) challenge id.
         _ = try await payClient.callTool(name: "premium")
         // The second call mints the same id (fixed clock + fixed request), so the paid retry is
-        // a replay -> the server answers -32043 (verification failed), which propagates.
+        // a replay -> the server re-challenges. DIVERGING_FROM_SPEC (audit D1): the server emits
+        // -32042 (not the spec's -32043) for a failed credential, to match the mppx peer's client.
         do {
             _ = try await payClient.callTool(name: "premium")
             Issue.record("expected a replay rejection")
@@ -51,7 +52,7 @@ struct MCPPaymentEndToEndTests {
             guard case let .paymentRequired(code, _, _) = error else {
                 Issue.record("expected .paymentRequired, got \(error)"); return
             }
-            #expect(code == MCPPayment.verificationFailedCode)
+            #expect(code == MCPPayment.paymentRequiredCode)
         }
     }
 }

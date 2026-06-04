@@ -45,11 +45,14 @@ func mcpMiddleware() throws -> MPPServerMiddleware {
     )
 }
 
-/// A gate over a fresh middleware (own replay store) on the fixed test clock.
+/// A gate over a fresh middleware (own replay store) on the fixed test clock. `codeMode`
+/// defaults to the peer-compatible form the production gate uses.
 func mcpGate(
-    _ inner: @escaping @Sendable (CallTool.Parameters) async throws -> CallTool.Result
+    _ inner: @escaping @Sendable (CallTool.Parameters) async throws -> CallTool.Result,
+    codeMode: MCPErrorCodeMode = .peerCompatible
 ) throws -> @Sendable (CallTool.Parameters) async throws -> CallTool.Result {
-    try MCPPaymentServer(middleware: mcpMiddleware(), now: { mcpNow }).gated(inner)
+    try MCPPaymentServer(middleware: mcpMiddleware(), codeMode: codeMode, now: { mcpNow })
+        .gated(inner)
 }
 
 /// Mints a challenge (same secret/binding/request the gate verifies against) and pays it,

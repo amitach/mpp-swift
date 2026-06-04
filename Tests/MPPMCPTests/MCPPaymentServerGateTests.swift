@@ -81,7 +81,7 @@ struct MCPPaymentServerGateTests {
         #expect(receiptValue.objectValue?[MCPPaymentCodec.challengeIDKey] != nil)
     }
 
-    @Test("a replayed credential answers -32043 with a problem")
+    @Test("a replayed credential answers -32042 with a problem (peer-compatible default)")
     func replayedCredential() async throws {
         let handler = try mcpGate(okHandler())
         let meta = try await mcpCredentialMeta()
@@ -93,10 +93,34 @@ struct MCPPaymentServerGateTests {
             guard let (code, data) = paymentRequired(error) else {
                 Issue.record("expected .paymentRequired, got \(error)"); return
             }
-            #expect(code == MCPPayment.verificationFailedCode)
+            // DIVERGING_FROM_SPEC (audit D1): -32042 for a failed credential (not the spec's
+            // -32043), to match the mppx peer's client which only recognizes -32042.
+            #expect(code == MCPPayment.paymentRequiredCode)
             let problem = try MCPPaymentCodec.problem(fromErrorData: data)
             #expect(problem != nil)
             #expect(problem?.extensions["challengeId"] != nil)
+        }
+    }
+
+    // The compatibility switch (audit D1): spec-correct mode emits the distinct -32043 code for a
+    // supplied-but-rejected credential, while an absent credential stays -32042 in both modes.
+    @Test("spec-correct mode: -32042 for a missing credential, -32043 for a rejected one")
+    func specCorrectCodes() async throws {
+        let absent = try mcpGate(okHandler(), codeMode: .specCorrect)
+        do {
+            _ = try await absent(CallTool.Parameters(name: "premium"))
+            Issue.record("expected paymentRequired")
+        } catch {
+            #expect(paymentRequired(error)?.code == MCPPayment.paymentRequiredCode)
+        }
+        let handler = try mcpGate(okHandler(), codeMode: .specCorrect)
+        let meta = try await mcpCredentialMeta()
+        _ = try await handler(CallTool.Parameters(name: "premium", meta: meta)) // consumes the id
+        do {
+            _ = try await handler(CallTool.Parameters(name: "premium", meta: meta))
+            Issue.record("expected a replay rejection")
+        } catch {
+            #expect(paymentRequired(error)?.code == MCPPayment.verificationFailedCode)
         }
     }
 
