@@ -7,12 +7,12 @@ import Testing
 @testable import MPPTempoServer
 
 // SessionMethod over an injected stub provider + in-memory store, matching the
-// reference SDK's session-server cases: voucher accept / equal-cumulative-rejected /
+// reference SDK's session-server cases: voucher accept / equal-cumulative-idempotent /
 // concurrent-single-charge / strictly-increasing / below-settled / exceeds-deposit /
 // bad-signature / closed / insufficient-balance, plus open (validate + create), topUp,
 // and close (settle). The voucher monotonic decision is atomic: an equal-cumulative
-// replay is rejected, not charged. The StubProvider/Flag doubles and the shared session
-// fixtures (escrow, seedStore, voucherCredential, sessionMethod, ...) live in
+// replay is accepted idempotently, not charged again. The StubProvider/Flag doubles and the
+// shared session fixtures (escrow, seedStore, voucherCredential, sessionMethod, ...) live in
 // TempoServerTestSupport.swift.
 
 @Suite("SessionMethod")
@@ -45,27 +45,31 @@ struct SessionMethodTests {
         #expect(channel?.highestVoucherAmount == ChannelAmount(100))
     }
 
-    @Test("an equal-cumulative replay is rejected and not charged")
-    func voucherEqualCumulativeRejected() async throws {
-        let store = try await seedStore(highest: 100, spent: 0)
+    @Test("an equal-cumulative replay is accepted idempotently and not charged again")
+    func voucherEqualCumulativeIdempotent() async throws {
+        let store = try await seedStore(highest: 100, spent: 100)
         let session = sessionMethod(store, StubProvider(onChainChannel(deposit: 1000)))
-        // A voucher that does not strictly advance the highest is a replay: it must reject (the
-        // monotonic decision is atomic inside the store update), never charge.
-        await #expect(throws: SessionMethod.SessionError.belowHighestVoucher) {
-            try await session.verify(voucherCredential(cumulative: "100", amount: "5"), now: now)
-        }
+        // Re-presenting the current highest is an idempotent replay (spec §10.4 and the mppx
+        // peer's Session.ts): it returns a receipt for the already-accepted state without advancing
+        // the highest or charging again, so a client retrying a voucher is not double-charged.
+        let receipt = try await session.verify(
+            voucherCredential(cumulative: "100", amount: "5"), now: now
+        )
+        #expect(receipt.extras["acceptedCumulative"] == .string("100"))
+        #expect(receipt.extras["spent"] == .string("100")) // unchanged: no new charge
         let channel = await store.channel(channelID)
         #expect(channel?.highestVoucherAmount == ChannelAmount(100))
-        #expect(channel?.spent == ChannelAmount(0))
+        #expect(channel?.spent == ChannelAmount(100)) // the replayed request did not charge
     }
 
-    @Test("concurrent equal vouchers advance and charge exactly once (atomic monotonic)")
+    @Test("concurrent equal vouchers charge exactly once (the loser is idempotent, not a charge)")
     func voucherConcurrentSingleCharge() async throws {
         let store = try await seedStore(highest: 0, spent: 0)
         let session = sessionMethod(store, StubProvider(onChainChannel(deposit: 1000)))
         // Two vouchers race to advance 0 -> 100: the store serializes the monotonic update, so
-        // exactly one wins (advances + charges) and the other rejects as below-highest. The loser
-        // must NOT also charge (the pre-fix bug let a non-advancing voucher charge anyway).
+        // exactly one advances and charges. The other observes the now-equal cumulative and is
+        // accepted as an idempotent replay (not a second charge), so both return a receipt while
+        // spent advances exactly once.
         async let first = try? await session.verify(
             voucherCredential(cumulative: "100", amount: "10"), now: now
         )
@@ -73,7 +77,7 @@ struct SessionMethodTests {
             voucherCredential(cumulative: "100", amount: "10"), now: now
         )
         let succeeded = await [first, second].compactMap(\.self)
-        #expect(succeeded.count == 1)
+        #expect(succeeded.count == 2) // one advanced, one idempotent; neither errored
         let channel = await store.channel(channelID)
         #expect(channel?.highestVoucherAmount == ChannelAmount(100))
         #expect(channel?.spent == ChannelAmount(10)) // charged once, not twice
