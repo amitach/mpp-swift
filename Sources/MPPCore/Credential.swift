@@ -86,3 +86,21 @@ public struct Credential: Sendable, Hashable, Codable {
         case invalidJSON(reason: String)
     }
 }
+
+extension Credential: CustomStringConvertible, CustomDebugStringConvertible {
+    /// A redacted rendering. The `payload` carries the bearer secret (a Stripe SPT, a signed
+    /// proof), so it is summarized by its sorted keys only and never by its values: a credential
+    /// that reaches a log, an error string, or a debugger thus cannot leak the secret it bears.
+    /// The challenge id and `source` are not secret (they travel in the clear on the wire), so
+    /// they are shown to keep the rendering useful for correlation. This affects only the
+    /// human-readable form; ``headerValue`` and `Codable` encoding are unchanged.
+    public var description: String {
+        let keys = payload.keys.sorted().joined(separator: ", ")
+        return "Credential(challengeID: \(challenge.id), source: \(source ?? "nil"), "
+            + "payload: [\(keys)])"
+    }
+
+    public var debugDescription: String {
+        description
+    }
+}
