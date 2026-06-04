@@ -94,4 +94,23 @@ struct CredentialTests {
             try Credential(headerValue: "Payment \(token)")
         }
     }
+
+    // CRED-1: the redacted rendering must never expose a payload value (the bearer secret),
+    // only its keys, while keeping the non-secret challenge id and source for correlation.
+    @Test("description and debugDescription redact payload values but keep keys, id, and source")
+    func descriptionRedactsPayloadValues() throws {
+        let credential = try Credential(
+            challenge: sampleChallenge(),
+            source: "did:pkh:eip155:1:0xabc",
+            payload: ["spt": "spt_SECRET_abc123", "signature": "0xSECRETsig"]
+        )
+        for rendering in [String(describing: credential), String(reflecting: credential)] {
+            #expect(!rendering.contains("spt_SECRET_abc123")) // the SPT value never appears
+            #expect(!rendering.contains("0xSECRETsig")) // the proof signature value never appears
+            #expect(rendering.contains("spt")) // the keys are shown
+            #expect(rendering.contains("signature"))
+            #expect(rendering.contains("x7Tg2")) // the (public) challenge id
+            #expect(rendering.contains("did:pkh:eip155:1:0xabc")) // the (public) source
+        }
+    }
 }
