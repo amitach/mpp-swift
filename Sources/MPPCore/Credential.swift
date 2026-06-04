@@ -100,6 +100,9 @@ extension Credential: CustomStringConvertible, CustomDebugStringConvertible {
             + "payload: [\(keys)])"
     }
 
+    /// The same redacted rendering as ``description``. `debugPrint`, `String(reflecting:)`, and
+    /// the debugger's `po` use `debugDescription`, so it must omit payload values too; both
+    /// rendering paths share the one redacted output.
     public var debugDescription: String {
         description
     }
