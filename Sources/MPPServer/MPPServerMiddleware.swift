@@ -187,6 +187,9 @@ public struct MPPServerMiddleware: Sendable {
     ///   - authorization: The `Authorization` header value, or `nil` if absent.
     ///   - body: The full request body (its size is checked against `maxBodyBytes`).
     ///   - now: The instant to evaluate expiry against.
+    ///   - accept: The client's parsed `Accept-Payment` preferences (§7.4). An empty array (the
+    ///     default) means "accept any", advertising every offer; otherwise only the accepted
+    ///     methods are advertised, most-preferred first. HTTP-path only; non-HTTP callers omit it.
     /// - Returns: the ``Decision`` for the request. Emits a ``ServerEvent`` for the
     ///   minted-challenge, verified, and rejected branches.
     public func evaluate(
