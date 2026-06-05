@@ -53,4 +53,14 @@ struct ProxyServiceTLSTests {
             )
         }
     }
+
+    @Test("the headers convenience init validates the upstream scheme too")
+    func headersInitValidates() {
+        #expect(throws: ProxyService.ConfigurationError.self) {
+            try ProxyService(
+                id: "svc", baseURL: proxyURL("http://api.example.com"), routes: [],
+                headers: ["X-Api-Key": "secret"]
+            )
+        }
+    }
 }
