@@ -146,8 +146,10 @@ enum PaymentPageStyle {
                 + "media=\"(prefers-color-scheme: dark)\" />"
         case nil:
             guard let host = URL(string: realm)?.host, !host.isEmpty else { return "" }
-            return "<link rel=\"icon\" "
-                + "href=\"https://www.google.com/s2/favicons?domain=\(sanitizeHTML(host))&sz=64\" />"
+            // Sanitize the whole URL so the `&` between query params becomes `&amp;` (valid HTML in
+            // an attribute value), not only the host.
+            let url = "https://www.google.com/s2/favicons?domain=\(host)&sz=64"
+            return "<link rel=\"icon\" href=\"\(sanitizeHTML(url))\" />"
         }
     }
 

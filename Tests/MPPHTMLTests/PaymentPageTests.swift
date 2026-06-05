@@ -198,6 +198,7 @@ struct PaymentPageThemeTests {
     @Test("with no favicon the realm host's favicon is used as a fallback")
     func faviconFallback() throws {
         let html = try render(PaymentPageTheme())
-        #expect(html.contains("https://www.google.com/s2/favicons?domain=api.example.com&sz=64"))
+        let fallback = "https://www.google.com/s2/favicons?domain=api.example.com&amp;sz=64"
+        #expect(html.contains(fallback))
     }
 }
