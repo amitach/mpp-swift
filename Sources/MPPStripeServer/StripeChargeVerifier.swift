@@ -170,7 +170,7 @@ public struct StripeChargeVerifier: PaymentMethodServer {
         /// The challenge `request` could not be decoded.
         case malformedRequest(StripeChargeRequest.DecodingFailure)
         /// The charge `amount` exceeded the safe-integer ceiling (`2^53 - 1`, the peer's JS
-        /// `Number.MAX_SAFE_INTEGER`) enforced for cross-SDK parity (see ``maxSafeAmount``).
+        /// `Number.MAX_SAFE_INTEGER`) enforced for cross-SDK parity.
         case amountOverflow
         /// The credential payload had no non-empty `spt`.
         case missingSPT
