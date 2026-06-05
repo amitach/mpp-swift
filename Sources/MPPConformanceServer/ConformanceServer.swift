@@ -66,6 +66,8 @@ func makeMiddleware() throws -> MPPServerMiddleware {
             log("[server] VERIFIED     source=\(verified.credential?.source ?? "nil")")
         case let .paymentRejected(rejection):
             log("[server] rejected     \(rejection)")
+        case let .rateLimited(key):
+            log("[server] RATE-LIMITED key=\(key)")
         }
     }
 }
@@ -127,6 +129,8 @@ private func makeSubscriptionMiddleware() async throws -> MPPServerMiddleware {
             log("[server] ACTIVATED (subscription) source=\(verified.credential?.source ?? "nil")")
         case let .paymentRejected(rejection):
             log("[server] rejected (subscription) \(rejection)")
+        case let .rateLimited(key):
+            log("[server] RATE-LIMITED (subscription) key=\(key)")
         }
     }
 }

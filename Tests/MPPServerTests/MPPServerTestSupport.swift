@@ -27,6 +27,8 @@ func makeMiddleware(
     methods: [any PaymentMethodServer] = [],
     maxBodyBytes: Int = 10 * 1024 * 1024,
     authorizer: (any RequestAuthorizer)? = nil,
+    rateLimiter: (any RateLimiter)? = nil,
+    rateLimitKey: @escaping @Sendable (HTTPRequest) -> String? = { _ in nil },
     onEvent: @escaping @Sendable (ServerEvent) -> Void = { _ in }
 ) throws -> MPPServerMiddleware {
     let signer = ChallengeSigner(secret: secret)
@@ -38,6 +40,8 @@ func makeMiddleware(
         expiresIn: 300,
         maxBodyBytes: maxBodyBytes,
         authorizer: authorizer,
+        rateLimiter: rateLimiter,
+        rateLimitKey: rateLimitKey,
         onEvent: onEvent
     )
 }
@@ -119,4 +123,34 @@ func makeRequest(authorization: String? = nil) -> HTTPRequest {
         path: "/r",
         headerFields: fields
     )
+}
+
+/// Collects the events a middleware emits during a request (the sink is synchronous).
+final class EventBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [ServerEvent] = []
+    func add(_ event: ServerEvent) {
+        lock.lock(); stored.append(event); lock.unlock()
+    }
+
+    var events: [ServerEvent] {
+        lock.lock(); defer { lock.unlock() }; return stored
+    }
+}
+
+func eventName(_ event: ServerEvent) -> String {
+    switch event {
+    case .challengeIssued: "challengeIssued"
+    case .paymentVerified: "paymentVerified"
+    case .paymentRejected: "paymentRejected"
+    case .rateLimited: "rateLimited"
+    }
+}
+
+func lastEventName(_ box: EventBox) -> String? {
+    box.events.last.map(eventName)
+}
+
+func eventNames(_ box: EventBox) -> [String] {
+    box.events.map(eventName)
 }

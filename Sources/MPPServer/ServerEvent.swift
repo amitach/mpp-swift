@@ -18,4 +18,7 @@ public enum ServerEvent: Sendable {
     /// A presented credential was rejected. A `402` returns a fresh retry challenge; a terminal
     /// §10.5 settlement problem (`410` / `400`) returns the problem with no challenge.
     case paymentRejected(PaymentVerifier.Rejection)
+    /// A request was rejected with `429` by the configured ``RateLimiter`` before any payment
+    /// work (§11.12). Carries the client key the limit was keyed on. Fires for no other branch.
+    case rateLimited(key: String)
 }
