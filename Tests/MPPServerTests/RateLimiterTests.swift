@@ -52,13 +52,16 @@ struct RateLimiterTests {
         #expect(await limiter.reserve("b", now: now) == .allowed) // "b" is fresh
     }
 
-    @Test("a backwards clock neither drains nor refills the bucket")
+    @Test("a backwards clock neither drains nor refills, and grants no spurious burst on recovery")
     func backwardsClock() async {
-        let limiter = makeLimiter()
+        let limiter = makeLimiter() // burst 3
         _ = await limiter.reserve("a", now: now) // 3 -> 2
         // An earlier instant clamps elapsed to 0: no refill, no spurious drain; the 2 tokens stand.
-        #expect(await limiter.reserve("a", now: now.addingTimeInterval(-100)) == .allowed)
-        #expect(await limiter.reserve("a", now: now.addingTimeInterval(-100)) == .allowed)
-        #expect(await limiter.reserve("a", now: now.addingTimeInterval(-100)) != .allowed)
+        #expect(await limiter.reserve("a", now: now.addingTimeInterval(-100)) == .allowed) // 2 -> 1
+        // Recovery to the original instant must NOT refill (updatedAt never moved backwards): only
+        // the 1 remaining token is available, then limited. (A bucket that moved updatedAt into the
+        // past would here see elapsed 100s and hand back a full burst.)
+        #expect(await limiter.reserve("a", now: now) == .allowed) // 1 -> 0
+        #expect(await limiter.reserve("a", now: now) != .allowed) // 0: limited
     }
 }

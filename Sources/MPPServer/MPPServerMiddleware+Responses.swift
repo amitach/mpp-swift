@@ -54,20 +54,12 @@ extension MPPServerMiddleware {
         return (response, encodedProblem(problem))
     }
 
-    /// The `Retry-After` response header name (built from a compile-time-known-valid token).
-    static let retryAfterField: HTTPField.Name = {
-        guard let name = HTTPField.Name("Retry-After") else {
-            preconditionFailure("Retry-After is a valid HTTP field name")
-        }
-        return name
-    }()
-
     static func tooManyRequestsResponse(retryAfter: TimeInterval) -> (HTTPResponse, Data) {
         var response = HTTPResponse(status: .init(code: 429))
         // Retry-After is whole seconds (RFC 9110 §10.2.3), rounded up to at least 1 so a client
         // never retries before a token is actually available.
         let seconds = max(1, Int(retryAfter.rounded(.up)))
-        response.headerFields[Self.retryAfterField] = String(seconds)
+        response.headerFields[.retryAfter] = String(seconds)
         response.headerFields[.cacheControl] = "no-store"
         response.headerFields[.contentType] = problemContentType
         // No `type` (about:blank, like the 413): the 429 is a transport-level DoS guard, not a

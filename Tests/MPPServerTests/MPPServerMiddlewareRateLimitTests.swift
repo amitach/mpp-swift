@@ -29,7 +29,7 @@ struct MPPServerMiddlewareRateLimitTests {
                 return (HTTPResponse(status: .ok), Data())
             }
         #expect(second.status.code == 429)
-        #expect(try second.headerFields[#require(HTTPField.Name("Retry-After"))] == "1")
+        #expect(second.headerFields[.retryAfter] == "1")
         #expect(second.headerFields[.cacheControl] == "no-store")
         #expect(second.headerFields[.contentType] == "application/problem+json")
         #expect(!body.isEmpty)

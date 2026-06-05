@@ -56,10 +56,12 @@ public actor InMemoryRateLimiter: RateLimiter {
     public func reserve(_ key: String, now: Date) -> RateLimitDecision {
         var bucket = buckets[key] ?? Bucket(tokens: capacity, updatedAt: now)
         // Refill by elapsed time, clamped to capacity. A non-monotonic (backwards) clock adds no
-        // tokens rather than draining the bucket.
+        // tokens (elapsed clamps to 0) and never moves `updatedAt` backwards: advancing it into
+        // the past would make a later, correct-time call see an inflated elapsed and refill a
+        // spurious full burst on clock recovery.
         let elapsed = max(0, now.timeIntervalSince(bucket.updatedAt))
         bucket.tokens = min(capacity, bucket.tokens + elapsed * refillPerSecond)
-        bucket.updatedAt = now
+        bucket.updatedAt = max(bucket.updatedAt, now)
         let decision: RateLimitDecision
         if bucket.tokens >= 1 {
             bucket.tokens -= 1
