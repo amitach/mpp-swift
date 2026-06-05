@@ -47,7 +47,8 @@ public struct ProxyService: Sendable {
         rewriteRequest: (@Sendable (HTTPRequest) -> HTTPRequest)? = nil
     ) throws(ConfigurationError) {
         guard TransportSecurity.isAllowed(
-            scheme: baseURL.scheme, host: baseURL.host, allowInsecureLocal: allowInsecureLocal
+            scheme: baseURL.scheme, host: baseURL.host(percentEncoded: false),
+            allowInsecureLocal: allowInsecureLocal
         ) else {
             throw .insecureUpstream(scheme: baseURL.scheme ?? "", host: baseURL.host ?? "")
         }
