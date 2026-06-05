@@ -89,7 +89,7 @@ public struct SessionMethod: PaymentMethodServer {
         guard let chargeAmount = ChannelAmount(decimal: request.amount.rawValue) else {
             throw SessionError.malformedRequest
         }
-        let context = Context(
+        let context = try SessionContext(
             method: challenge.method,
             challengeID: challenge.id,
             escrow: escrow,
@@ -97,6 +97,7 @@ public struct SessionMethod: PaymentMethodServer {
             chargeAmount: chargeAmount,
             recipient: request.recipient.flatMap(EthereumAddress.init(hex:)),
             currency: request.currency.flatMap(EthereumAddress.init(hex:)),
+            minVoucherDelta: resolveMinVoucherDelta(request),
             now: now
         )
         switch action {
@@ -107,10 +108,22 @@ public struct SessionMethod: PaymentMethodServer {
         }
     }
 
+    /// The minimum voucher delta for this challenge: the per-challenge
+    /// `methodDetails.minVoucherDelta` override (a decimal base-units string) when set, else the
+    /// verifier's static default (`init`). A present-but-unparseable override fails closed rather
+    /// than silently using the default, since the value gates how little a voucher may advance.
+    private func resolveMinVoucherDelta(
+        _ request: TempoChargeRequest
+    ) throws(SessionError) -> ChannelAmount {
+        guard let raw = request.minVoucherDelta else { return minVoucherDelta }
+        guard let parsed = ChannelAmount(decimal: raw) else { throw .malformedRequest }
+        return parsed
+    }
+
     // MARK: - voucher
 
     private func acceptVoucher(
-        _ fields: SignedVoucherFields, _ context: Context
+        _ fields: SignedVoucherFields, _ context: SessionContext
     ) async throws -> Receipt {
         let onChain = try await provider.channelState(
             channelID: fields.channelID, escrow: context.escrow, chainID: context.chainID
@@ -145,7 +158,7 @@ public struct SessionMethod: PaymentMethodServer {
                     throw SessionError.belowHighestVoucher
                 }
                 guard let delta = cumulative.subtracting(channel.highestVoucherAmount),
-                      delta >= minVoucherDelta
+                      delta >= context.minVoucherDelta
                 else { throw SessionError.deltaTooSmall }
                 channel.highestVoucherAmount = cumulative
                 channel.highestVoucherSignature = fields.signature
@@ -163,7 +176,10 @@ public struct SessionMethod: PaymentMethodServer {
 
     // MARK: - open
 
-    private func openChannel(_ fields: OpenFields, _ context: Context) async throws -> Receipt {
+    private func openChannel(
+        _ fields: OpenFields,
+        _ context: SessionContext
+    ) async throws -> Receipt {
         let (onChain, openTxHash) = try await provider.broadcastOpen(
             serializedTransaction: fields.transaction, channelID: fields.channelID,
             escrow: context.escrow, chainID: context.chainID
@@ -212,7 +228,7 @@ public struct SessionMethod: PaymentMethodServer {
 
     // MARK: - topUp
 
-    private func topUp(_ fields: TopUpFields, _ context: Context) async throws -> Receipt {
+    private func topUp(_ fields: TopUpFields, _ context: SessionContext) async throws -> Receipt {
         let (onChain, txHash) = try await provider.broadcastTopUp(
             serializedTransaction: fields.transaction, channelID: fields.channelID,
             escrow: context.escrow, chainID: context.chainID
@@ -230,7 +246,10 @@ public struct SessionMethod: PaymentMethodServer {
 
     // MARK: - close
 
-    private func close(_ fields: SignedVoucherFields, _ context: Context) async throws -> Receipt {
+    private func close(
+        _ fields: SignedVoucherFields,
+        _ context: SessionContext
+    ) async throws -> Receipt {
         guard let channel = await store.channel(fields.channelID) else {
             throw SessionError.channelNotFound
         }
@@ -283,9 +302,10 @@ public struct SessionMethod: PaymentMethodServer {
             channel: updated ?? claimed, txHash: txHash
         )
     }
+}
 
-    // MARK: - helpers
-
+// Private helpers, in an extension so they do not count against the struct's body-length limit.
+extension SessionMethod {
     private func amount(_ decimal: String) throws -> ChannelAmount {
         guard let value = ChannelAmount(decimal: decimal)
         else { throw SessionError.malformedPayload }
@@ -301,7 +321,10 @@ public struct SessionMethod: PaymentMethodServer {
         if onChain.deposit == .zero { throw SessionError.channelClosed(reason: "settled") }
     }
 
-    private func validateOnChainChannel(_ onChain: OnChainChannel, _ context: Context) throws {
+    private func validateOnChainChannel(
+        _ onChain: OnChainChannel,
+        _ context: SessionContext
+    ) throws {
         if onChain.deposit == .zero { throw SessionError.channelNotFound }
         if onChain.finalized { throw SessionError.channelClosed(reason: "finalized") }
         if onChain
@@ -315,7 +338,7 @@ public struct SessionMethod: PaymentMethodServer {
     }
 
     private func verifySignature(
-        _ fields: SignedVoucherFields, expectedSigner: EthereumAddress, _ context: Context
+        _ fields: SignedVoucherFields, expectedSigner: EthereumAddress, _ context: SessionContext
     ) throws {
         guard
             let voucher = Voucher(
@@ -328,7 +351,7 @@ public struct SessionMethod: PaymentMethodServer {
         else { throw SessionError.invalidVoucherSignature }
     }
 
-    private func receipt(_ channel: ChannelState, _ context: Context) -> Receipt {
+    private func receipt(_ channel: ChannelState, _ context: SessionContext) -> Receipt {
         SessionReceipt.make(
             method: context.method, now: context.now, challengeID: context.challengeID,
             channel: channel
@@ -357,44 +380,5 @@ private func chargeSession(
         case let .closed(reason): throw SessionMethod.SessionError.channelClosed(reason: reason)
         case .notFound: throw SessionMethod.SessionError.channelNotFound
         }
-    }
-}
-
-/// Per-request resolved context for a session action (the challenge's route + the
-/// injected clock). File-scope so it does not count against the method's body length.
-private struct Context {
-    let method: MethodName
-    let challengeID: String
-    let escrow: EthereumAddress
-    let chainID: UInt64
-    let chargeAmount: ChannelAmount
-    let recipient: EthereumAddress?
-    let currency: EthereumAddress?
-    let now: Date
-}
-
-/// Picks the voucher a `close` settles: the higher of the client's final voucher
-/// and the server's stored highest accepted voucher (with its stored signature), so
-/// a close can never settle below what the channel already drew. The final `else` is
-/// unreachable (a stored highest above the client's amount always carries its
-/// signature) and falls back to the already-verified client voucher defensively.
-private func settleSelection(
-    clientCumulative: ChannelAmount, clientSignature: Data, claimed: ChannelState
-) -> (amount: ChannelAmount, signature: Data) {
-    if clientCumulative >= claimed.highestVoucherAmount {
-        return (clientCumulative, clientSignature)
-    }
-    if let storedSignature = claimed.highestVoucherSignature {
-        return (claimed.highestVoucherAmount, storedSignature)
-    }
-    return (clientCumulative, clientSignature)
-}
-
-private extension OpenFields {
-    /// The `{channelId, cumulativeAmount, signature}` view for signature verification.
-    var asVoucher: SignedVoucherFields {
-        SignedVoucherFields(
-            channelID: channelID, cumulativeAmount: cumulativeAmount, signature: signature
-        )
     }
 }

@@ -33,6 +33,11 @@ public struct TempoChargeRequest: Sendable, Hashable {
     /// `0x`-hex id), if present and well-formed. A client may attach to it on-chain rather
     /// than opening a fresh channel.
     public let suggestedChannelID: Data?
+    /// The minimum increment between successive vouchers the server requires for this
+    /// challenge, from `methodDetails.minVoucherDelta` (a decimal base-units string), if set.
+    /// Overrides the channel session verifier's static default; a voucher whose delta over the
+    /// highest accepted falls below it is rejected (the spec's anti-griefing minimum).
+    public let minVoucherDelta: String?
 
     /// Whether this is a zero-amount charge (the EIP-712 proof path).
     ///
@@ -66,6 +71,7 @@ public struct TempoChargeRequest: Sendable, Hashable {
         escrowContract = wire.methodDetails?.escrowContract
         suggestedDeposit = wire.suggestedDeposit
         suggestedChannelID = wire.methodDetails?.channelId.flatMap(Data.init(hexPrefixed:))
+        minVoucherDelta = wire.methodDetails?.minVoucherDelta
     }
 
     /// Whether `challenge` is a `tempo`/`charge` challenge carrying a decodable zero-amount
@@ -107,9 +113,11 @@ private struct ChargeRequestWire: Decodable {
 }
 
 /// The `methodDetails` sub-object: `chainId` (proof + session), the session's
-/// `escrowContract`, and an optional `channelId` the server suggests reusing.
+/// `escrowContract`, an optional `channelId` the server suggests reusing, and the
+/// optional per-challenge `minVoucherDelta` (a decimal base-units string).
 private struct MethodDetails: Decodable {
     let chainId: UInt64?
     let escrowContract: String?
     let channelId: String?
+    let minVoucherDelta: String?
 }
