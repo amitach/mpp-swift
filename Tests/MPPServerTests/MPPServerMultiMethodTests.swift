@@ -159,6 +159,14 @@ struct MPPServerMultiMethodTests {
         #expect(highThenLow == ["tempo"])
     }
 
+    @Test("a specific q=0 opt-out overrides a wildcard accept (most-specific wins)")
+    func specificOptOutBeatsWildcard() async throws {
+        // "accept everything, but not tempo": tempo matches both the wildcard (q=1) and the
+        // specific tempo/charge (q=0); the more-specific q=0 wins, so tempo is dropped, stripe
+        // kept.
+        #expect(try await advertisedMethods(accept: "*/charge;q=1, tempo/charge;q=0") == ["stripe"])
+    }
+
     @Test("multiple Accept-Payment header lines are combined (RFC 9110 §5.2)")
     func multipleHeaderLinesCombined() async throws {
         let middleware = try multiMethodMiddleware()
