@@ -3,7 +3,9 @@ import HTTPTypes
 
 /// A response captured for idempotent replay: the status, headers, and body of a settled request.
 public struct IdempotentResponse: Sendable {
+    /// The HTTP response (status and headers) to replay for a settled idempotent request.
     public let response: HTTPResponse
+    /// The response body to replay.
     public let body: Data
 
     public init(response: HTTPResponse, body: Data) {
