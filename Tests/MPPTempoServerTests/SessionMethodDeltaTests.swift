@@ -34,7 +34,7 @@ struct SessionMethodDeltaTests {
         #expect(channel?.highestVoucherAmount == ChannelAmount(200)) // delta 100 >= 50: advanced
     }
 
-    @Test("a malformed per-challenge minVoucherDelta fails closed")
+    @Test("a malformed per-challenge minVoucherDelta fails closed for a voucher")
     func voucherMalformedMinDelta() async throws {
         let store = try await seedStore(highest: 100)
         let session = sessionMethod(store, StubProvider(onChainChannel(deposit: 1000)))
@@ -43,5 +43,19 @@ struct SessionMethodDeltaTests {
                 voucherCredential(cumulative: "200", minVoucherDelta: "not-a-number"), now: now
             )
         }
+    }
+
+    @Test("a malformed minVoucherDelta does not block a close (the delta gates vouchers only)")
+    func malformedMinDeltaAllowsClose() async throws {
+        let store = try await seedStore(highest: 100, spent: 40)
+        let session = sessionMethod(store, StubProvider(onChainChannel(deposit: 1000)))
+        // Close never reads the delta, so a typo'd override must not block settlement (funds
+        // recovery): the close succeeds and finalizes the channel.
+        _ = try await session.verify(
+            voucherCredential(cumulative: "100", action: "close", minVoucherDelta: "not-a-number"),
+            now: now
+        )
+        let channel = await store.channel(channelID)
+        #expect(channel?.finalized == true)
     }
 }

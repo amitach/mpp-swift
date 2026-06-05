@@ -97,11 +97,14 @@ public struct SessionMethod: PaymentMethodServer {
             chargeAmount: chargeAmount,
             recipient: request.recipient.flatMap(EthereumAddress.init(hex:)),
             currency: request.currency.flatMap(EthereumAddress.init(hex:)),
-            minVoucherDelta: resolveMinVoucherDelta(request),
             now: now
         )
         switch action {
-        case let .voucher(fields): return try await acceptVoucher(fields, context)
+        case let .voucher(fields):
+            // Resolve the minimum delta only here: it gates voucher acceptance alone, so a
+            // malformed per-challenge override must not also block a topUp or a channel close.
+            let minDelta = try resolveMinVoucherDelta(request)
+            return try await acceptVoucher(fields, context, minVoucherDelta: minDelta)
         case let .open(fields): return try await openChannel(fields, context)
         case let .topUp(fields): return try await topUp(fields, context)
         case let .close(fields): return try await close(fields, context)
@@ -123,7 +126,7 @@ public struct SessionMethod: PaymentMethodServer {
     // MARK: - voucher
 
     private func acceptVoucher(
-        _ fields: SignedVoucherFields, _ context: SessionContext
+        _ fields: SignedVoucherFields, _ context: SessionContext, minVoucherDelta: ChannelAmount
     ) async throws -> Receipt {
         let onChain = try await provider.channelState(
             channelID: fields.channelID, escrow: context.escrow, chainID: context.chainID
@@ -158,7 +161,7 @@ public struct SessionMethod: PaymentMethodServer {
                     throw SessionError.belowHighestVoucher
                 }
                 guard let delta = cumulative.subtracting(channel.highestVoucherAmount),
-                      delta >= context.minVoucherDelta
+                      delta >= minVoucherDelta
                 else { throw SessionError.deltaTooSmall }
                 channel.highestVoucherAmount = cumulative
                 channel.highestVoucherSignature = fields.signature

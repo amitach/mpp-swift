@@ -8,7 +8,8 @@ import MPPTempo
 // sole constructor/consumer.
 
 /// Per-request resolved context for a session action: the challenge's route, the
-/// resolved charge amount and minimum voucher delta, and the injected clock.
+/// resolved charge amount, and the injected clock. (The minimum voucher delta is
+/// resolved separately on the voucher path, the only action that uses it.)
 struct SessionContext {
     let method: MethodName
     let challengeID: String
@@ -17,7 +18,6 @@ struct SessionContext {
     let chargeAmount: ChannelAmount
     let recipient: EthereumAddress?
     let currency: EthereumAddress?
-    let minVoucherDelta: ChannelAmount
     let now: Date
 }
 
