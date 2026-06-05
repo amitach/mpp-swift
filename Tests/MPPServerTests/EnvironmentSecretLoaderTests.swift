@@ -12,6 +12,17 @@ struct EnvironmentSecretLoaderTests {
     private let currentValue = String(repeating: "c", count: 32)
     private let previousValue = String(repeating: "p", count: 32)
 
+    @Test("the loader's variable names are the canonical MPPSensitiveSurfaces ones (single source)")
+    func variableNamesComeFromTheRegistry() {
+        // The loader derives its env-var names from MPPSensitiveSurfaces, so the redaction registry
+        // cannot drift from the variables the server actually reads. This guards against a future
+        // change hardcoding a different literal here.
+        #expect(EnvironmentSecretLoader.currentVariable
+            == MPPSensitiveSurfaces.currentSecretEnvironmentVariable)
+        #expect(EnvironmentSecretLoader.previousVariable
+            == MPPSensitiveSurfaces.previousSecretEnvironmentVariable)
+    }
+
     private func draft() throws -> Challenge {
         try Challenge(
             id: "unsigned", realm: "api.example.com", method: MethodName("tempo"),
