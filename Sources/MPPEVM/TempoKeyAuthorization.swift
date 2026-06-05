@@ -222,20 +222,6 @@ public struct TempoKeyAuthorization: Sendable, Hashable {
         return (authorization, signature)
     }
 
-    /// Recovers the signing (payer) address from a signed serialized authorization.
-    public static func recover(serialized: Data) throws(AuthorizationError) -> EthereumAddress {
-        guard let outer = try? RLP.decode(serialized),
-              case let .list(elements) = outer, elements.count == 2,
-              case let .bytes(signature) = elements[1], signature.count == 65
-        else { throw .invalidSignature }
-        // Hash the re-encoded inner tuple: RLP is canonical, so this reproduces the signed payload.
-        let payload = Keccak256.hash(RLP.encode(elements[0]))
-        guard let signer = EthereumAddress.recover(hash: payload, signature: signature) else {
-            throw .invalidSignature
-        }
-        return signer
-    }
-
     private static func parseTuple(
         _ tuple: [RLP.Item]
     ) throws(AuthorizationError) -> TempoKeyAuthorization {
@@ -352,5 +338,29 @@ public struct TempoKeyAuthorization: Sendable, Hashable {
             }
         }
         return String(digits.reversed().map { Character(UnicodeScalar(0x30 + $0)) })
+    }
+}
+
+public extension TempoKeyAuthorization {
+    /// Recovers the signing (payer) address from a signed serialized authorization.
+    ///
+    /// `malleability` gates non-canonical high-`s` signatures: the default
+    /// ``SignatureMalleabilityPolicy/accepted`` recovers any signature (peer behavior);
+    /// ``SignatureMalleabilityPolicy/rejectHighS`` rejects a high-`s` one (EIP-2).
+    static func recover(
+        serialized: Data, malleability: SignatureMalleabilityPolicy = .accepted
+    ) throws(AuthorizationError) -> EthereumAddress {
+        guard let outer = try? RLP.decode(serialized),
+              case let .list(elements) = outer, elements.count == 2,
+              case let .bytes(signature) = elements[1], signature.count == 65
+        else { throw .invalidSignature }
+        // Hash the re-encoded inner tuple: RLP is canonical, so this reproduces the signed payload.
+        let payload = Keccak256.hash(RLP.encode(elements[0]))
+        guard let signer = EthereumAddress.recover(
+            hash: payload, signature: signature, malleability: malleability
+        ) else {
+            throw .invalidSignature
+        }
+        return signer
     }
 }

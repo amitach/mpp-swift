@@ -47,17 +47,20 @@ public struct SessionMethod: PaymentMethodServer {
     private let store: any ChannelStore
     private let defaultChainID: UInt64
     private let minVoucherDelta: ChannelAmount
+    private let malleability: SignatureMalleabilityPolicy
 
     public init(
         provider: any ChannelStateProvider,
         store: any ChannelStore,
         defaultChainID: UInt64 = TempoChain.mainnet,
-        minVoucherDelta: ChannelAmount = .zero
+        minVoucherDelta: ChannelAmount = .zero,
+        malleability: SignatureMalleabilityPolicy = .accepted
     ) {
         self.provider = provider
         self.store = store
         self.defaultChainID = defaultChainID
         self.minVoucherDelta = minVoucherDelta
+        self.malleability = malleability
     }
 
     public func supports(_ challenge: Challenge) -> Bool {
@@ -349,7 +352,8 @@ extension SessionMethod {
             ),
             voucher.verify(
                 escrowContract: context.escrow, chainId: context.chainID,
-                signature: fields.signature, expectedSigner: expectedSigner
+                signature: fields.signature, expectedSigner: expectedSigner,
+                malleability: malleability
             )
         else { throw SessionError.invalidVoucherSignature }
     }

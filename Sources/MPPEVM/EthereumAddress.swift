@@ -67,4 +67,19 @@ public struct EthereumAddress: Sendable, Hashable {
         ) else { return nil }
         return EthereumAddress(uncompressedPublicKey: publicKey)
     }
+
+    /// Recovers the signer under a ``SignatureMalleabilityPolicy``: identical to
+    /// ``recover(hash:signature:)`` except that ``SignatureMalleabilityPolicy/rejectHighS`` returns
+    /// `nil` for a non-canonical high-`s` signature before recovering.
+    /// ``SignatureMalleabilityPolicy/accepted``
+    /// (the default elsewhere) is exactly the policy-free behavior.
+    public static func recover(
+        hash: Data, signature: Data, malleability: SignatureMalleabilityPolicy
+    ) -> EthereumAddress? {
+        if case .rejectHighS = malleability {
+            guard let parsed = RecoverableSignature(ethereumWire: signature),
+                  parsed.isLowS else { return nil }
+        }
+        return recover(hash: hash, signature: signature)
+    }
 }

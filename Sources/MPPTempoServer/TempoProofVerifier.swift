@@ -28,6 +28,7 @@ import MPPTempo
 public struct TempoProofVerifier: PaymentMethodServer {
     private let defaultChainId: UInt64
     private let acceptedVariants: [ProofVariant]
+    private let malleability: SignatureMalleabilityPolicy
 
     /// Creates the verifier.
     ///
@@ -37,15 +38,19 @@ public struct TempoProofVerifier: PaymentMethodServer {
     ///     the client and the reference SDKs).
     ///   - acceptedVariants: The proof shapes to accept (defaults to all three:
     ///     v2 realm, v1 wallet, and the spec single-field form).
+    ///   - malleability: Whether to reject a non-canonical high-`s` proof signature
+    ///     (defaults to ``SignatureMalleabilityPolicy/accepted``, the peer behavior).
     public init(
         defaultChainId: UInt64 = TempoChain.mainnet,
-        acceptedVariants: [ProofVariant] = [.v2Realm, .v1Wallet, .specChallengeId]
+        acceptedVariants: [ProofVariant] = [.v2Realm, .v1Wallet, .specChallengeId],
+        malleability: SignatureMalleabilityPolicy = .accepted
     ) {
         // An empty set would reject every proof with `.signatureMismatch`; that is a
         // configuration error, so fail fast rather than silently reject everything.
         precondition(!acceptedVariants.isEmpty, "acceptedVariants must not be empty")
         self.defaultChainId = defaultChainId
         self.acceptedVariants = acceptedVariants
+        self.malleability = malleability
     }
 
     /// Whether this is a `tempo` / `charge` challenge with a decodable zero-amount
@@ -101,7 +106,8 @@ public struct TempoProofVerifier: PaymentMethodServer {
     ) -> Bool {
         acceptedVariants.contains { variant in
             variant.proof(challengeId: challenge.id, realm: challenge.realm, wallet: wallet)
-                .recoverSigner(chainId: chainId, signature: signature) == wallet
+                .recoverSigner(chainId: chainId, signature: signature, malleability: malleability)
+                == wallet
         }
     }
 
