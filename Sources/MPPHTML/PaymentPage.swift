@@ -19,6 +19,8 @@ public struct PaymentMethodContent: Sendable {
     /// Display label for this method. Defaults to the challenge's method name.
     public var label: String?
 
+    /// Creates a method's page contribution from its HTML fragment, with an
+    /// optional embedded config object and display label.
     public init(content: String, config: JSONValue = .object([:]), label: String? = nil) {
         self.content = content
         self.config = config
@@ -29,9 +31,12 @@ public struct PaymentMethodContent: Sendable {
 /// Page-level customization: the labels (``PaymentPageText``) and the visual
 /// theme (``PaymentPageTheme``). Both default to a neutral light/dark scheme.
 public struct PaymentPageConfig: Sendable {
+    /// The page labels.
     public var text: PaymentPageText
+    /// The page visual theme.
     public var theme: PaymentPageTheme
 
+    /// Creates a page configuration from optional text and theme overrides.
     public init(
         text: PaymentPageText = PaymentPageText(),
         theme: PaymentPageTheme = PaymentPageTheme()
@@ -91,7 +96,7 @@ public enum PaymentPage {
             <main>
               <header class="\(PaymentPageClassNames.header)">
                 \(PaymentPageStyle.logo(theme))
-                <span>\(text.paymentRequired)</span>
+                <span>\(sanitizeHTML(text.paymentRequired))</span>
               </header>
               <section class="\(PaymentPageClassNames.summary)" aria-label="Payment summary">
                 <h1 class="\(PaymentPageClassNames.summaryAmount)">\(sanitizeHTML(formattedAmount))\
@@ -120,7 +125,7 @@ public enum PaymentPage {
             <meta name="viewport" content="width=device-width, initial-scale=1.0" />
             <meta name="robots" content="noindex" />
             <meta name="color-scheme" content="\(sanitizeHTML(theme.colorScheme))" />
-            <title>\(text.title)</title>
+            <title>\(sanitizeHTML(text.title))</title>
             \(PaymentPagePreflight.style)
             \(PaymentPageStyle.favicon(theme, realm: realm))
             \(PaymentPageStyle.font(theme))
@@ -150,7 +155,7 @@ public enum PaymentPage {
         formatter.timeZone = TimeZone(identifier: "UTC")
         formatter.dateFormat = "MMM d, yyyy, h:mm:ss a 'UTC'"
         let display = formatter.string(from: expires.date)
-        return "<p class=\"\(PaymentPageClassNames.summaryExpires)\">\(text.expires) "
+        return "<p class=\"\(PaymentPageClassNames.summaryExpires)\">\(sanitizeHTML(text.expires)) "
             + "<time datetime=\"\(datetime)\">\(display)</time></p>"
     }
 

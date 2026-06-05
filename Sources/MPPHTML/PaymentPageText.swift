@@ -12,6 +12,8 @@ public struct PaymentPageText: Sendable, Equatable {
     /// Page `<title>`. Default: the resolved ``paymentRequired``.
     public var title: String?
 
+    /// Creates page text from optional label overrides; omitted labels use the
+    /// defaults.
     public init(
         expires: String? = nil,
         pay: String? = nil,
@@ -25,9 +27,12 @@ public struct PaymentPageText: Sendable, Equatable {
     }
 }
 
-/// The fully resolved, HTML-sanitized text used by the renderer and embedded in
-/// the page data block. Distinct from ``PaymentPageText`` so the renderer never
-/// sees an unresolved (optional, unescaped) value.
+/// The fully resolved (defaults filled, title fallback applied) text. Values are
+/// raw, not HTML-escaped: the renderer sanitizes each at its HTML interpolation
+/// point, and the JSON data block embeds the raw values so a method script reads
+/// the true label (not `Pay &amp; Go`). This matches how every other embedded
+/// field is treated, and deliberately differs from the mppx peer, which
+/// pre-escapes the text in its data block.
 struct ResolvedText: Equatable, Encodable {
     let expires: String
     let pay: String
@@ -42,19 +47,20 @@ extension PaymentPageText {
         paymentRequired: "Payment Required"
     )
 
-    /// Resolves overrides against the defaults, then sanitizes. An override is
-    /// honored only when non-`nil` and non-empty (matching the peer's
-    /// `mergeDefined`, which treats `''` as "use the default"). `title` becomes
-    /// the override when non-empty, otherwise the resolved `paymentRequired`.
+    /// Resolves overrides against the defaults, leaving values raw (the renderer
+    /// escapes at each HTML interpolation point). An override is honored only
+    /// when non-`nil` and non-empty (matching the peer's `mergeDefined`, which
+    /// treats `''` as "use the default"). `title` becomes the override when
+    /// non-empty, otherwise the resolved `paymentRequired`.
     func resolved() -> ResolvedText {
         let paymentRequired = pick(paymentRequired, Self.defaults.paymentRequired)
         let titleOverride = pick(title, "")
         let resolvedTitle = titleOverride.isEmpty ? paymentRequired : titleOverride
         return ResolvedText(
-            expires: sanitizeHTML(pick(expires, Self.defaults.expires)),
-            pay: sanitizeHTML(pick(pay, Self.defaults.pay)),
-            paymentRequired: sanitizeHTML(paymentRequired),
-            title: sanitizeHTML(resolvedTitle)
+            expires: pick(expires, Self.defaults.expires),
+            pay: pick(pay, Self.defaults.pay),
+            paymentRequired: paymentRequired,
+            title: resolvedTitle
         )
     }
 

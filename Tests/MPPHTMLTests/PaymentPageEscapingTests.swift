@@ -83,6 +83,25 @@ struct PaymentPageEscapingTests {
         #expect(!html.contains("</style><script>x"))
     }
 
+    @Test("text labels are raw in the embedded data but escaped in the HTML")
+    func textRawInDataEscapedInHTML() throws {
+        let challenge = try makeChallenge()
+        let html = PaymentPage.render(
+            challenge: challenge,
+            formattedAmount: "1.00",
+            method: PaymentMethodContent(content: ""),
+            config: PaymentPageConfig(
+                text: PaymentPageText(pay: "Buy & Read", paymentRequired: "Pay & Go")
+            )
+        )
+        // HTML: escaped at the interpolation point.
+        #expect(html.contains("<span>Pay &amp; Go</span>"))
+        #expect(html.contains("<title>Pay &amp; Go</title>"))
+        // JSON data block: raw, so a method script reads the true label, not `Pay &amp; Go`.
+        #expect(html.contains("\"paymentRequired\":\"Pay & Go\""))
+        #expect(html.contains("\"pay\":\"Buy & Read\""))
+    }
+
     @Test("the embedded data block is deterministic across renders")
     func deterministic() throws {
         let challenge = try makeChallenge(description: "Hello & welcome")

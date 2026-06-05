@@ -60,8 +60,11 @@ extension LightDarkAsset: ExpressibleByStringLiteral {
 /// The page color scheme: light only, dark only, or both (the default, which
 /// emits dark colors under `@media (prefers-color-scheme: dark)`).
 public enum PaymentPageColorScheme: String, Sendable {
+    /// Light scheme only.
     case light
+    /// Dark scheme only.
     case dark
+    /// Both, with dark colors applied under `prefers-color-scheme: dark`.
     case lightDark = "light dark"
 }
 
@@ -104,6 +107,8 @@ public struct PaymentPageTheme: Sendable {
     /// Card/surface color. Default `#f5f5f5` / `#1a1a1a`.
     public var surface: LightDarkColor?
 
+    /// Creates a theme from optional overrides; every omitted field uses its
+    /// neutral default.
     public init(
         colorScheme: PaymentPageColorScheme? = nil,
         fontFamily: String? = nil,

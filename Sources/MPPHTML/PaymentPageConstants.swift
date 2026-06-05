@@ -64,8 +64,13 @@ func sanitizeHTML(_ value: String) -> String {
 /// `</style>` substring regardless of CSS context, so any `<` (and, for
 /// symmetry, `>`) is replaced with its CSS numeric escape, which the CSS parser
 /// reads back as the original character while the HTML parser never sees a `<`.
-/// A defense-in-depth guard for host-supplied theme values (colors, fonts,
-/// sizes), which legitimately never contain these characters.
+///
+/// This guards the HTML breakout (script injection), not CSS-rule injection: a
+/// theme value such as `} * { background: url(...) }` could still inject CSS
+/// (e.g. an exfiltrating `url()`). That is acceptable under the contract that
+/// theme values are host-supplied (server-controlled), never end-user input; a
+/// multi-tenant host accepting tenant themes would need a CSS value allowlist on
+/// top. Legitimate theme values (colors, fonts, sizes) contain none of these.
 func sanitizeCSS(_ value: String) -> String {
     value
         .replacingOccurrences(of: "<", with: "\\00003c ")
