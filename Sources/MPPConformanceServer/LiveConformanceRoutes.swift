@@ -93,6 +93,8 @@ import MPPTempoServer
                 log("[server] VERIFIED (session) source=\(verified.credential?.source ?? "nil")")
             case let .paymentRejected(rejection):
                 log("[server] rejected (session) \(rejection)")
+            case let .rateLimited(key):
+                log("[server] RATE-LIMITED (session) key=\(key)")
             }
         }
     }
@@ -179,6 +181,8 @@ import MPPTempoServer
                 log("[server] ACTIVATED (subscription-live) source=\(source)")
             case let .paymentRejected(rejection):
                 log("[server] rejected (subscription-live) \(rejection)")
+            case let .rateLimited(key):
+                log("[server] RATE-LIMITED (subscription-live) key=\(key)")
             }
         }
     }

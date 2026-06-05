@@ -32,6 +32,8 @@ public struct MPPServerMiddleware: Sendable {
     private let expiresIn: TimeInterval?
     private let maxBodyBytes: Int
     private let authorizer: (any RequestAuthorizer)?
+    private let rateLimiter: (any RateLimiter)?
+    private let rateLimitKey: @Sendable (HTTPRequest) -> String?
     private let onEvent: @Sendable (ServerEvent) -> Void
 
     /// Creates a middleware for one route.
@@ -57,6 +59,14 @@ public struct MPPServerMiddleware: Sendable {
     ///   - authorizer: An optional ``RequestAuthorizer`` consulted on credential-less
     ///     requests before minting a `402` (for example a returning subscriber). Defaults
     ///     to `nil`, in which case every credential-less request gets a `402`.
+    ///   - rateLimiter: An optional ``RateLimiter`` consulted at the top of
+    ///     ``handle(_:body:now:handler:)``, before any payment work, to throttle a flood
+    ///     (§11.12). Defaults to `nil` (no limiting). Only used by `handle`; the pure
+    ///     ``evaluate(authorization:body:now:)`` has no request to key on.
+    ///   - rateLimitKey: Derives the client key the ``RateLimiter`` is keyed on from the
+    ///     request (for example `request.headerFields[.init("X-Forwarded-For")!]`). Defaults
+    ///     to returning `nil` (no key, so no limiting) since the transport remote address is
+    ///     not in `HTTPRequest`; the host wires its own extractor.
     ///   - onEvent: A synchronous diagnostics sink; defaults to a no-op.
     ///
     /// A digest-bound, described, or opaque-carrying challenge is minted via
@@ -70,6 +80,8 @@ public struct MPPServerMiddleware: Sendable {
         expiresIn: TimeInterval? = 300,
         maxBodyBytes: Int = 10 * 1024 * 1024,
         authorizer: (any RequestAuthorizer)? = nil,
+        rateLimiter: (any RateLimiter)? = nil,
+        rateLimitKey: @escaping @Sendable (HTTPRequest) -> String? = { _ in nil },
         onEvent: @escaping @Sendable (ServerEvent) -> Void = { _ in }
     ) {
         self.minter = minter
@@ -79,6 +91,8 @@ public struct MPPServerMiddleware: Sendable {
         self.expiresIn = expiresIn
         self.maxBodyBytes = maxBodyBytes
         self.authorizer = authorizer
+        self.rateLimiter = rateLimiter
+        self.rateLimitKey = rateLimitKey
         self.onEvent = onEvent
     }
 
@@ -178,6 +192,14 @@ public struct MPPServerMiddleware: Sendable {
         now: Date,
         handler: (HTTPRequest, MPPVerified) async -> (HTTPResponse, Data)
     ) async -> (HTTPResponse, Data) {
+        // Throttle first (§11.12): a flood is rejected with `429` before the body cap, the
+        // authorize seam, or any payment work, so a limited client costs the least. Only the
+        // `handle` path rate-limits, because the key is derived from the request.
+        if let rateLimiter, let key = rateLimitKey(request),
+           case let .limited(retryAfter) = await rateLimiter.reserve(key, now: now) {
+            onEvent(.rateLimited(key: key))
+            return Self.tooManyRequestsResponse(retryAfter: retryAfter)
+        }
         // Bound the body before any payment or authorize work. `evaluate` enforces the same cap for
         // its own callers; the authorize path below bypasses `evaluate`, so it is checked here too.
         if body.count > maxBodyBytes {
@@ -333,66 +355,5 @@ public struct MPPServerMiddleware: Sendable {
                 status: problem.status
             )
         }
-    }
-
-    // MARK: - Response building
-
-    private static let problemContentType = "application/problem+json"
-
-    /// The `Payment-Receipt` response header name (non-standard, so built from a
-    /// compile-time-known-valid token).
-    private static let paymentReceiptField: HTTPField.Name = {
-        guard let name = HTTPField.Name("Payment-Receipt") else {
-            preconditionFailure("Payment-Receipt is a valid HTTP field name")
-        }
-        return name
-    }()
-
-    /// A `402` offering `challenge` in `WWW-Authenticate` (the retry challenge), with the problem
-    /// body. Only the retryable `402` path reaches here; a terminal settlement problem uses
-    /// ``problemResponse(_:)``.
-    private static func paymentRequiredResponse(
-        challenge: Challenge, problem: ProblemDetails
-    ) -> (HTTPResponse, Data) {
-        var response = HTTPResponse(status: .init(code: 402))
-        response.headerFields[.wwwAuthenticate] = challenge.headerValue
-        response.headerFields[.cacheControl] = "no-store"
-        response.headerFields[.contentType] = problemContentType
-        return (response, encodedProblem(problem))
-    }
-
-    /// A terminal settlement problem (§10.5): the problem's own status (e.g. `410` / `400`) and
-    /// body, with no `WWW-Authenticate` (no retry challenge is offered), matching the mppx peer,
-    /// which associates the challenge with `402` responses alone.
-    private static func problemResponse(_ problem: ProblemDetails) -> (HTTPResponse, Data) {
-        var response = HTTPResponse(status: .init(code: problem.status ?? 402))
-        response.headerFields[.cacheControl] = "no-store"
-        response.headerFields[.contentType] = problemContentType
-        return (response, encodedProblem(problem))
-    }
-
-    private static func payloadTooLargeResponse(maxBodyBytes: Int) -> (HTTPResponse, Data) {
-        var response = HTTPResponse(status: .init(code: 413))
-        response.headerFields[.cacheControl] = "no-store"
-        response.headerFields[.contentType] = problemContentType
-        // No `type`: an absent type is `about:blank` (RFC 9457 §3.1.1). The 413 is
-        // a transport-level guard, not a payment problem.
-        let problem = ProblemDetails(
-            title: "Payload Too Large",
-            status: 413,
-            detail: "The request body exceeded the \(maxBodyBytes)-byte limit."
-        )
-        return (response, encodedProblem(problem))
-    }
-
-    private static func encodedProblem(_ problem: ProblemDetails) -> Data {
-        // Canonical encoding, matching `Credential.headerValue`: sorted keys so the
-        // body is deterministic regardless of extension-member count, and unescaped
-        // slashes so the problem `type` URIs read cleanly on the wire. The body is
-        // best-effort (it cannot realistically fail); the status and headers, which
-        // the protocol decision depends on, are always authoritative.
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        return (try? encoder.encode(problem)) ?? Data()
     }
 }

@@ -20,20 +20,8 @@ private func rejectionProblemType(
     return challengeOf(decision)?.1.type
 }
 
-/// Collects events emitted during a request (sink is synchronous).
-private final class EventBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stored: [ServerEvent] = []
-    func add(_ event: ServerEvent) {
-        lock.lock(); stored.append(event); lock.unlock()
-    }
-
-    var events: [ServerEvent] {
-        lock.lock(); defer { lock.unlock() }; return stored
-    }
-}
-
-// Matchers, so assertions stay one short `#expect` line.
+// Matchers, so assertions stay one short `#expect` line. (EventBox + the event-name helpers are
+// shared in MPPServerTestSupport.)
 private func challengeOf(
     _ decision: MPPServerMiddleware.Decision
 ) -> (Challenge, ProblemDetails)? {
@@ -49,22 +37,6 @@ private func isProceed(_ decision: MPPServerMiddleware.Decision) -> Bool {
 private func isTooLarge(_ decision: MPPServerMiddleware.Decision) -> Bool {
     if case .payloadTooLarge = decision { return true }
     return false
-}
-
-private func eventName(_ event: ServerEvent) -> String {
-    switch event {
-    case .challengeIssued: return "challengeIssued"
-    case .paymentVerified: return "paymentVerified"
-    case .paymentRejected: return "paymentRejected"
-    }
-}
-
-private func lastEventName(_ box: EventBox) -> String? {
-    box.events.last.map(eventName)
-}
-
-private func eventNames(_ box: EventBox) -> [String] {
-    box.events.map(eventName)
 }
 
 @Suite("MPPServerMiddleware")
