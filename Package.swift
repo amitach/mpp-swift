@@ -177,7 +177,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MPPClientTests",
-            dependencies: ["MPPClient", "MPPCore"]
+            dependencies: ["MPPClient", "MPPCore", "MPPDiscovery"]
         ),
         // MPPAuth: concrete PaymentAuthorizer implementations for an interactive or headless
         // payer (a terminal y/n prompt, and an Apple-only Touch ID / device-auth prompt). The
