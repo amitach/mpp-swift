@@ -85,6 +85,23 @@ struct StripeChargeVerifierTests {
         }
     }
 
+    @Test("an amount above the safe-integer ceiling is rejected even though it fits Int")
+    func amountAboveSafeIntegerCeiling() async throws {
+        // 2^53 fits a 64-bit Int comfortably but exceeds the peer's MAX_SAFE_INTEGER (2^53-1), so
+        // it must be rejected for cross-SDK parity -- pinning the ceiling at 2^53-1, not Int.max.
+        let aboveCeiling = String(9_007_199_254_740_992) // 2^53
+        let challenge = try stripeChargeChallenge(request: .object([
+            "amount": .string(aboveCeiling), "currency": .string("usd"),
+            "methodDetails": .object([
+                "networkId": .string("internal"), "paymentMethodTypes": .array([.string("card")]),
+            ]),
+        ]))
+        let verifier = StripeChargeVerifier(client: StubPaymentIntent())
+        try await expectError(verifier, credential: stripeCredential(challenge: challenge)) {
+            if case .amountOverflow = $0 { return true }; return false
+        }
+    }
+
     @Test("supports stripe/charge with a decodable request; rejects otherwise")
     func supports() throws {
         let verifier = StripeChargeVerifier(client: StubPaymentIntent())
