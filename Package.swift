@@ -49,6 +49,7 @@ let package = Package(
         .library(name: "MPPStripe", targets: ["MPPStripe"]),
         .library(name: "MPPStripeServer", targets: ["MPPStripeServer"]),
         .library(name: "MPPHTML", targets: ["MPPHTML"]),
+        .library(name: "MPPHTMLServer", targets: ["MPPHTMLServer"]),
         .library(name: "MPPMCP", targets: ["MPPMCP"]),
         .library(name: "MPPProxy", targets: ["MPPProxy"]),
         .library(name: "MPPHummingbird", targets: ["MPPHummingbird"]),
@@ -390,6 +391,24 @@ let package = Package(
         .testTarget(
             name: "MPPHTMLTests",
             dependencies: ["MPPHTML", "MPPCore"]
+        ),
+        // MPPHTMLServer: wires MPPHTML into MPPServer's 402 path -- a ChallengePresenter that
+        // renders the HTML page on Accept: text/html, plus the browser service worker that submits
+        // the credential. Split from MPPHTML (like MPPStripe/MPPStripeServer) so a renderer-only
+        // consumer is not forced onto MPPServer.
+        .target(
+            name: "MPPHTMLServer",
+            dependencies: [
+                "MPPHTML", "MPPServer", "MPPCore",
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+            ]
+        ),
+        .testTarget(
+            name: "MPPHTMLServerTests",
+            dependencies: [
+                "MPPHTMLServer", "MPPHTML", "MPPServer", "MPPCore",
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+            ]
         ),
         // MPPMCP: binds the 402 flow to JSON-RPC / Model Context Protocol on the official MCP
         // SDK (module `MCP`). Rail-agnostic: it composes MPPServer's mint/verify pipeline and
