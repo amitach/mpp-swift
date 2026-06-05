@@ -53,15 +53,17 @@ func seedStore(highest: UInt64, spent: UInt64 = 0) async throws -> InMemoryChann
     return store
 }
 
-func sessionChallenge(amount: String = "1") throws -> Challenge {
+func sessionChallenge(amount: String = "1", minVoucherDelta: String? = nil) throws -> Challenge {
+    var methodDetails: [String: JSONValue] = [
+        "chainId": .integer(Int64(chainID)),
+        "escrowContract": .string("0x5555555555555555555555555555555555555555"),
+    ]
+    if let minVoucherDelta { methodDetails["minVoucherDelta"] = .string(minVoucherDelta) }
     let request = EncodedJSON(json: .object([
         "amount": .string(amount),
         "recipient": .string("0x2222222222222222222222222222222222222222"),
         "currency": .string("0x3333333333333333333333333333333333333333"),
-        "methodDetails": .object([
-            "chainId": .integer(Int64(chainID)),
-            "escrowContract": .string("0x5555555555555555555555555555555555555555"),
-        ]),
+        "methodDetails": .object(methodDetails),
     ]))
     return try Challenge(
         id: "session-1", realm: "https://api.example.com",
@@ -75,7 +77,8 @@ func hex(_ data: Data) -> String {
 
 /// A voucher-action credential signed by key=1 over `cumulative`.
 func voucherCredential(
-    cumulative: String, action: String = "voucher", amount: String = "1"
+    cumulative: String, action: String = "voucher", amount: String = "1",
+    minVoucherDelta: String? = nil
 ) throws -> Credential {
     let voucher = try #require(Voucher(channelID: channelID, cumulativeAmount: cumulative))
     let signature = try voucher.sign(
@@ -84,7 +87,7 @@ func voucherCredential(
         with: signer(byte: 1)
     )
     return try Credential(
-        challenge: sessionChallenge(amount: amount), source: nil,
+        challenge: sessionChallenge(amount: amount, minVoucherDelta: minVoucherDelta), source: nil,
         payload: [
             "action": .string(action),
             "channelId": .string(hex(channelID)),
