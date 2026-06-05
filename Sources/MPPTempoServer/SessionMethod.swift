@@ -89,7 +89,7 @@ public struct SessionMethod: PaymentMethodServer {
         guard let chargeAmount = ChannelAmount(decimal: request.amount.rawValue) else {
             throw SessionError.malformedRequest
         }
-        let context = try SessionContext(
+        let context = SessionContext(
             method: challenge.method,
             challengeID: challenge.id,
             escrow: escrow,
