@@ -145,6 +145,15 @@ extension MPPServerMiddleware {
         return name
     }()
 
+    /// The `Accept-Payment` request header name (§6, non-standard, so built from a
+    /// compile-time-known-valid token).
+    static let acceptPaymentField: HTTPField.Name = {
+        guard let name = HTTPField.Name("Accept-Payment") else {
+            preconditionFailure("Accept-Payment is a valid HTTP field name")
+        }
+        return name
+    }()
+
     /// A `409` for an `Idempotency-Key` whose request is still in flight (§11.4): the client must
     /// not retry concurrently; it retries once the original completes (and then replays).
     static func conflictResponse() -> (HTTPResponse, Data) {
