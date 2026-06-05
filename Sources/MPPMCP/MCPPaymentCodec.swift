@@ -145,13 +145,13 @@ enum MCPPaymentCodec {
     // MARK: - The -32042 error.data frame
 
     static func errorData(
-        challenge: Challenge,
+        challenges: [Challenge],
         problem: ProblemDetails?,
         httpStatus: Int = 402
     ) throws -> [String: Value] {
         var data: [String: Value] = try [
             "httpStatus": .int(httpStatus),
-            "challenges": .array([value(for: challenge)]),
+            "challenges": .array(challenges.map { try value(for: $0) }),
         ]
         if let problem {
             let encoded = try JSONEncoder().encode(problem)

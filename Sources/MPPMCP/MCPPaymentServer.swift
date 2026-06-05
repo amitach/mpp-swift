@@ -65,8 +65,10 @@ public struct MCPPaymentServer: Sendable {
             case .payloadTooLarge:
                 // Unreachable: the MCP body is always empty here. Fail closed rather than proceed.
                 throw MCPError.internalError("payment gate: unexpected oversized body")
-            case let .challenge(challenge, problem):
-                // The re-challenge code depends on the configured compatibility mode. An ABSENT
+            case let .challenge(challenges, problem):
+                // Every offered method is advertised in `error.data.challenges` (the gate usually
+                // binds one, but a multi-method middleware is forwarded faithfully). The
+                // re-challenge code depends on the configured compatibility mode: an ABSENT
                 // credential is always -32042; a SUPPLIED-but-rejected one is -32042 in the
                 // peer-compatible default (the mppx client only retries on -32042) or -32043 in
                 // spec-correct mode. See the DIVERGING_FROM_SPEC note on `MCPErrorCodeMode`.
@@ -81,7 +83,7 @@ public struct MCPPaymentServer: Sendable {
                 throw try MCPError.paymentRequired(
                     code: code,
                     message: problem.detail ?? problem.title ?? "Payment Required",
-                    data: MCPPaymentCodec.errorData(challenge: challenge, problem: problem)
+                    data: MCPPaymentCodec.errorData(challenges: challenges, problem: problem)
                 )
             case let .problem(problem):
                 // A terminal §10.5 settlement problem (no retry challenge) only arises for a

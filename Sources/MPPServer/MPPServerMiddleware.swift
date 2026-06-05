@@ -27,8 +27,7 @@ import MPPCore
 public struct MPPServerMiddleware: Sendable {
     private let minter: ChallengeMinter
     private let verifier: PaymentVerifier
-    private let binding: RouteBinding
-    private let challengeRequest: EncodedJSON
+    private let offers: [MethodOffer]
     private let expiresIn: TimeInterval?
     private let maxBodyBytes: Int
     private let authorizer: (any RequestAuthorizer)?
@@ -97,8 +96,40 @@ public struct MPPServerMiddleware: Sendable {
     ) {
         self.minter = minter
         self.verifier = verifier
-        self.binding = binding
-        challengeRequest = request
+        offers = [MethodOffer(binding: binding, request: request)]
+        self.expiresIn = expiresIn
+        self.maxBodyBytes = maxBodyBytes
+        self.authorizer = authorizer
+        self.rateLimiter = rateLimiter
+        self.idempotencyStore = idempotencyStore
+        self.presenter = presenter
+        self.rateLimitKey = rateLimitKey
+        self.onEvent = onEvent
+    }
+
+    /// Creates a multi-method route from several ``MethodOffer``s, all minted and verified by the
+    /// shared `minter`/`verifier` (whose registered methods must cover the offers). A `402` carries
+    /// one `WWW-Authenticate` challenge per offer; a presented credential is verified against the
+    /// offer whose `(realm, method, intent)` binding it matches. Pass a single offer for a
+    /// one-method route (the primary initializer is the shortcut for that). Every other parameter
+    /// matches the primary initializer.
+    public init(
+        minter: ChallengeMinter,
+        verifier: PaymentVerifier,
+        offers: [MethodOffer],
+        expiresIn: TimeInterval? = 300,
+        maxBodyBytes: Int = 10 * 1024 * 1024,
+        authorizer: (any RequestAuthorizer)? = nil,
+        rateLimiter: (any RateLimiter)? = nil,
+        rateLimitKey: @escaping @Sendable (HTTPRequest) -> String? = { _ in nil },
+        idempotencyStore: (any IdempotencyStore)? = nil,
+        presenter: (any ChallengePresenter)? = nil,
+        onEvent: @escaping @Sendable (ServerEvent) -> Void = { _ in }
+    ) {
+        precondition(!offers.isEmpty, "A route must offer at least one payment method")
+        self.minter = minter
+        self.verifier = verifier
+        self.offers = offers
         self.expiresIn = expiresIn
         self.maxBodyBytes = maxBodyBytes
         self.authorizer = authorizer
@@ -137,9 +168,10 @@ public struct MPPServerMiddleware: Sendable {
     public enum Decision: Sendable {
         /// The body exceeded `maxBodyBytes`; answer `413` before any payment work.
         case payloadTooLarge
-        /// No valid (or a retryable-`402`) credential; answer `402` with this retry challenge
-        /// (offered in `WWW-Authenticate`) and problem body.
-        case challenge(Challenge, ProblemDetails)
+        /// No valid (or a retryable-`402`) credential; answer `402`, offering one retry challenge
+        /// per payment method (each in its own `WWW-Authenticate` header) and the problem body. The
+        /// array is never empty and its first element is the primary the problem body references.
+        case challenge([Challenge], ProblemDetails)
         /// A terminal settlement problem (§10.5): answer with the problem's own status (e.g. `410`
         /// for a closed/unknown channel, `400` for a malformed request) and body, offering no
         /// retry challenge. Distinct from ``challenge(_:_:)`` precisely so no challenge is minted,
@@ -165,14 +197,17 @@ public struct MPPServerMiddleware: Sendable {
         }
 
         guard let authorization else {
-            let challenge = mintChallenge(now: now)
-            onEvent(.challengeIssued(challenge))
-            let problem = Self.problem(for: .freshChallenge, challengeID: challenge.id)
-            return .challenge(challenge, problem)
+            let challenges = mintChallenges(now: now)
+            let problem = Self.problem(for: .freshChallenge, challengeID: challenges[0].id)
+            return .challenge(challenges, problem)
         }
 
+        // Verify against the offer whose binding the credential claims (so a multi-method route
+        // pins each credential to its own method); fall back to the primary so a credential for an
+        // unoffered method is rejected with a binding mismatch, not silently mis-pinned.
+        let expecting = offer(matching: authorization)?.binding ?? offers[0].binding
         let outcome = await verifier.verify(
-            authorization: authorization, body: body, now: now, expecting: binding
+            authorization: authorization, body: body, now: now, expecting: expecting
         )
         switch outcome {
         case let .verified(verified):
@@ -180,15 +215,17 @@ public struct MPPServerMiddleware: Sendable {
             return .proceed(verified)
         case let .rejected(rejection):
             onEvent(.paymentRejected(rejection))
-            // A 402 rejection offers a fresh retry challenge (and counts it as issued), so the
-            // client can present a corrected credential. A terminal 410/400 settlement problem
-            // (§10.5) offers none: it mints no challenge, fires no `challengeIssued`, and embeds
-            // no `challengeId` (the client cannot retry on a challenge it was never given).
+            // A 402 rejection re-offers every method a fresh retry challenge (each counted as
+            // issued), so the client can correct its credential or switch methods. A terminal
+            // 410/400 settlement problem (§10.5) offers none: it mints no challenge, fires no
+            // `challengeIssued`, and embeds no `challengeId` (no challenge to retry on).
             if Self.problemStatus(for: rejection) == 402 {
-                let challenge = mintChallenge(now: now)
-                onEvent(.challengeIssued(challenge))
-                let problem = Self.problem(for: .rejection(rejection), challengeID: challenge.id)
-                return .challenge(challenge, problem)
+                let challenges = mintChallenges(now: now)
+                let problem = Self.problem(
+                    for: .rejection(rejection),
+                    challengeID: challenges[0].id
+                )
+                return .challenge(challenges, problem)
             }
             return .problem(Self.problem(for: .rejection(rejection), challengeID: nil))
         }
@@ -279,15 +316,17 @@ public struct MPPServerMiddleware: Sendable {
         switch await evaluate(authorization: authorization, body: body, now: now) {
         case .payloadTooLarge:
             return guarded(Self.payloadTooLargeResponse(maxBodyBytes: maxBodyBytes))
-        case let .challenge(challenge, problem):
+        case let .challenge(challenges, problem):
+            // The 402 advertises every offer (one WWW-Authenticate per challenge). A presenter
+            // renders the primary for now; the multi-method page is layered on separately.
             if let presenter, let presented = await presenter.present(
-                request, challenge: challenge, problem: problem
+                request, challenge: challenges[0], problem: problem
             ) {
                 return guarded(
-                    Self.paymentRequiredResponse(challenge: challenge, presented: presented)
+                    Self.paymentRequiredResponse(challenges: challenges, presented: presented)
                 )
             }
-            return guarded(Self.paymentRequiredResponse(challenge: challenge, problem: problem))
+            return guarded(Self.paymentRequiredResponse(challenges: challenges, problem: problem))
         case let .problem(problem):
             return guarded(Self.problemResponse(problem))
         case let .proceed(verified):
@@ -295,12 +334,32 @@ public struct MPPServerMiddleware: Sendable {
         }
     }
 
-    private func mintChallenge(now: Date) -> Challenge {
-        minter.mint(
-            binding: binding,
-            request: challengeRequest,
-            expires: expiresIn.map { Expires(date: now.addingTimeInterval($0)) }
-        )
+    /// Mints one challenge per offer and emits a `challengeIssued` event for each, returning them
+    /// in offer order (the first is the primary). Never empty: a route always has at least one
+    /// offer.
+    private func mintChallenges(now: Date) -> [Challenge] {
+        let expires = expiresIn.map { Expires(date: now.addingTimeInterval($0)) }
+        return offers.map { offer in
+            let challenge = minter.mint(
+                binding: offer.binding,
+                request: offer.request,
+                expires: expires
+            )
+            onEvent(.challengeIssued(challenge))
+            return challenge
+        }
+    }
+
+    /// The offer whose binding matches the credential's echoed challenge, or `nil` if the
+    /// credential is unparseable or its `(realm, method, intent)` is not one this route offers.
+    private func offer(matching authorization: String) -> MethodOffer? {
+        guard let credential = try? Credential(headerValue: authorization) else { return nil }
+        let challenge = credential.challenge
+        return offers.first {
+            $0.binding.realm == challenge.realm
+                && $0.binding.method == challenge.method
+                && $0.binding.intent == challenge.intent
+        }
     }
 }
 
