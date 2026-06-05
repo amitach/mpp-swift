@@ -66,13 +66,19 @@ extension PaymentPage {
     static func contentScripts(_ entries: [PaymentPageEntry], hasTabs: Bool) -> String {
         guard hasTabs else { return entries[0].method.content }
         return entries
-            .map { entry in
-                entry.method.content.replacingOccurrences(
-                    of: "<script>",
-                    with: "<script \(PaymentPageAttrs.challengeID)="
-                        + "\"\(sanitizeHTML(entry.challenge.id))\">"
-                )
-            }
+            .map { bindChallenge($0.method.content, to: $0.challenge.id) }
             .joined(separator: "\n")
+    }
+
+    /// Inserts `data-mppx-challenge-id` into the first `<script` opening tag of a
+    /// method's content, tolerating any attributes (`<script>`,
+    /// `<script type="module">`, `<script defer>`), so the binding is not silently
+    /// skipped for a non-bare tag. Content with no `<script` opening tag is
+    /// emitted unchanged. Only the first tag is bound (a method contributes one
+    /// mounting script).
+    private static func bindChallenge(_ content: String, to challengeID: String) -> String {
+        guard let range = content.range(of: "<script") else { return content }
+        let attr = " \(PaymentPageAttrs.challengeID)=\"\(sanitizeHTML(challengeID))\""
+        return content.replacingCharacters(in: range.upperBound ..< range.upperBound, with: attr)
     }
 }

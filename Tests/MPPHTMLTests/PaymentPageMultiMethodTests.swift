@@ -45,6 +45,25 @@ struct PaymentPageMultiMethodTests {
         #expect(html.contains(".mppx-tablist {"))
     }
 
+    @Test("a method script with attributes is still bound to its challenge")
+    func boundScriptWithAttributes() throws {
+        let tempo = try makeChallenge(id: "c-tempo", method: "tempo")
+        let stripe = try makeChallenge(id: "c-stripe", method: "stripe")
+        let html = PaymentPage.render(entries: [
+            PaymentPageEntry(
+                challenge: tempo, formattedAmount: "1",
+                method: PaymentMethodContent(content: "<script type=\"module\">a()</script>")
+            ),
+            PaymentPageEntry(
+                challenge: stripe, formattedAmount: "2",
+                method: PaymentMethodContent(content: "<script defer>b()</script>")
+            ),
+        ])
+        let tempoTag = "<script data-mppx-challenge-id=\"c-tempo\" type=\"module\">a()</script>"
+        #expect(html.contains(tempoTag))
+        #expect(html.contains("<script data-mppx-challenge-id=\"c-stripe\" defer>b()</script>"))
+    }
+
     @Test("the data map keys each challenge with its own root mount")
     func perEntryData() throws {
         let html = try twoMethodPage()

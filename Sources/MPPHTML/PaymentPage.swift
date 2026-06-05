@@ -12,6 +12,11 @@ public struct PaymentMethodContent: Sendable {
     /// values the renderer sanitizes, `content` is emitted without escaping, so
     /// the host is responsible for ensuring it is safe (a server-controlled
     /// template, never an untrusted/end-user string).
+    ///
+    /// On a multi-method page the fragment must contain a `<script` opening tag
+    /// (any attributes are fine): the renderer binds it to its challenge with a
+    /// `data-mppx-challenge-id` so the script can find its data-map entry. A
+    /// single-method page emits the fragment unchanged.
     public var content: String
     /// Arbitrary method-specific configuration, embedded in the page data block
     /// for the method script to read.
@@ -95,6 +100,11 @@ public enum PaymentPage {
     /// Renders the page for one or more methods. A single entry renders one form;
     /// several render a tab per entry, the first selected, with the summary
     /// (amount/description/expiry) switching to the active tab client-side.
+    ///
+    /// Entries must have distinct challenge ids (the embedded data block is keyed
+    /// by id). Challenges minted by ``MPPServer`` are unique by construction (the
+    /// id is HMAC-derived over the binding); a caller passing hand-built entries
+    /// must keep them distinct, or an entry's form mount data is overwritten.
     public static func render(
         entries: [PaymentPageEntry],
         config: PaymentPageConfig = PaymentPageConfig(),
@@ -179,7 +189,7 @@ public enum PaymentPage {
         guard let expires = challenge.expires else { return "" }
         let (datetime, display) = expiryParts(expires)
         return "<p class=\"\(PaymentPageClassNames.summaryExpires)\">\(sanitizeHTML(text.expires)) "
-            + "<time datetime=\"\(datetime)\">\(display)</time></p>"
+            + "<time datetime=\"\(datetime)\">\(sanitizeHTML(display))</time></p>"
     }
 
     /// The normalized UTC `datetime` and the deterministic display string for an
