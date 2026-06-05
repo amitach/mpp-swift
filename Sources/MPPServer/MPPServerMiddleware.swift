@@ -321,10 +321,12 @@ public struct MPPServerMiddleware: Sendable {
                 break // fall through to mint a 402
             }
         }
-        // §7.4: honor the client's Accept-Payment preference when advertising offers. A malformed
-        // header is treated as absent (accept-any), not a request error.
-        let accept = request.headerFields[Self.acceptPaymentField]
-            .flatMap { try? AcceptPayment.parse($0) } ?? []
+        // §7.4: honor the client's Accept-Payment preference when advertising offers. Multiple
+        // header lines are combined (RFC 9110 §5.2: a list-based field); a malformed value is
+        // treated as absent (accept-any), not a request error.
+        let accept = (try? AcceptPayment.parse(
+            request.headerFields[values: Self.acceptPaymentField].joined(separator: ", ")
+        )) ?? []
         switch await evaluate(authorization: authorization, body: body, now: now, accept: accept) {
         case .payloadTooLarge:
             return guarded(Self.payloadTooLargeResponse(maxBodyBytes: maxBodyBytes))

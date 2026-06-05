@@ -14,10 +14,15 @@ func negotiatedOffers(_ offers: [MethodOffer], for accept: [PaymentRange]) -> [M
     guard !accept.isEmpty else { return offers }
     let ranked: [RankedOffer] = offers.enumerated().compactMap { entry in
         let (index, offer) = entry
-        // The most-specific matching range decides this offer's weight (specificity before q).
+        // The most-specific matching range decides this offer's weight (specificity before q);
+        // among equally-specific matches the higher q wins (RFC 9110 §12.5.1).
         let best = accept
             .filter { $0.matches(method: offer.binding.method, intent: offer.binding.intent) }
-            .max { specificity($0) < specificity($1) }
+            .max { lhs, rhs in
+                specificity(lhs) != specificity(rhs)
+                    ? specificity(lhs) < specificity(rhs)
+                    : lhs.quality < rhs.quality
+            }
         guard let best, best.quality > 0 else { return nil }
         return RankedOffer(offer: offer, quality: best.quality, index: index)
     }

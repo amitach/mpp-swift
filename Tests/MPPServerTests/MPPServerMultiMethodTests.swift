@@ -149,6 +149,37 @@ struct MPPServerMultiMethodTests {
         #expect(try await advertisedMethods(accept: "not-a-valid-header") == ["tempo", "stripe"])
     }
 
+    @Test("among equally-specific ranges the higher q wins, regardless of order")
+    func sameSpecificityHigherQWins() async throws {
+        // tempo appears twice (same specificity); q=1 must win over q=0, so tempo is kept (and
+        // stripe, with no matching range, is dropped) -- not picked positionally as q=0.
+        let lowThenHigh = try await advertisedMethods(accept: "tempo/charge;q=0, tempo/charge;q=1")
+        let highThenLow = try await advertisedMethods(accept: "tempo/charge;q=1, tempo/charge;q=0")
+        #expect(lowThenHigh == ["tempo"])
+        #expect(highThenLow == ["tempo"])
+    }
+
+    @Test("multiple Accept-Payment header lines are combined (RFC 9110 §5.2)")
+    func multipleHeaderLinesCombined() async throws {
+        let middleware = try multiMethodMiddleware()
+        var fields = HTTPFields()
+        let name = try #require(HTTPField.Name("Accept-Payment"))
+        fields.append(HTTPField(name: name, value: "tempo/charge;q=0.5"))
+        fields.append(HTTPField(name: name, value: "stripe/charge;q=1"))
+        let request = HTTPRequest(
+            method: .post, scheme: "https", authority: "api.example.com", path: "/r",
+            headerFields: fields
+        )
+        let (response, _) = await middleware.handle(request, body: Data(), now: now) { _, _ in
+            (HTTPResponse(status: .ok), Data())
+        }
+        let methods = response.headerFields[values: .wwwAuthenticate]
+            .flatMap { Challenge.challenges(inHeaderValue: $0) }
+            .map(\.method.rawValue)
+        // Both lines are honored: stripe (q=1) ahead of tempo (q=0.5).
+        #expect(methods == ["stripe", "tempo"])
+    }
+
     private func isProceed(_ decision: MPPServerMiddleware.Decision) -> Bool {
         if case .proceed = decision { return true }
         return false
