@@ -90,5 +90,8 @@ struct ContentDigestTests {
         let bare = framed.replacingOccurrences(of: "=:", with: "=")
         #expect(bare.hasPrefix("sha-256=") && !bare.contains(":")) // sanity: it is the bare form
         #expect(!ContentDigest.verify(body, matches: bare)) // fail closed despite the right digest
+        // The peer's form is also unpadded; strip the trailing base64 `=` to pin that exact shape.
+        let bareUnpadded = bare.hasSuffix("=") ? String(bare.dropLast()) : bare
+        #expect(!ContentDigest.verify(body, matches: bareUnpadded))
     }
 }
