@@ -51,6 +51,38 @@ struct PaymentPageEscapingTests {
         #expect(!html.contains("</script><script>x</script>"))
     }
 
+    @Test("a malicious theme value cannot break out of the <style> element")
+    func cssStyleBreakoutPrevented() throws {
+        // A host theme value containing `</style><script>`: the HTML parser ends a style element
+        // on the literal `</style>`, so the `<` must be CSS-escaped before it reaches the page.
+        let challenge = try makeChallenge()
+        let html = PaymentPage.render(
+            challenge: challenge,
+            formattedAmount: "1.00",
+            method: PaymentMethodContent(content: ""),
+            config: PaymentPageConfig(theme: PaymentPageTheme(
+                fontFamily: "x; } </style><script>alert(1)</script> .y { color"
+            ))
+        )
+        // The injected breakout sequence must never appear unescaped (the legitimate `</style>`
+        // closers remain, but the `</style><script>` injection specifically must not).
+        #expect(!html.contains("</style><script>"))
+        // The `<` was replaced by its CSS numeric escape.
+        #expect(html.contains("\\00003c /style"))
+    }
+
+    @Test("a malicious color value is also CSS-escaped")
+    func cssColorBreakoutPrevented() throws {
+        let challenge = try makeChallenge()
+        let html = PaymentPage.render(
+            challenge: challenge,
+            formattedAmount: "1.00",
+            method: PaymentMethodContent(content: ""),
+            config: PaymentPageConfig(theme: PaymentPageTheme(accent: "</style><script>x</script>"))
+        )
+        #expect(!html.contains("</style><script>x"))
+    }
+
     @Test("the embedded data block is deterministic across renders")
     func deterministic() throws {
         let challenge = try makeChallenge(description: "Hello & welcome")

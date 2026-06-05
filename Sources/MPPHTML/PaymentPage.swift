@@ -6,8 +6,12 @@ import MPPCore
 /// embedded in the page data, and an optional display `label` (defaulting to the
 /// challenge's method name).
 public struct PaymentMethodContent: Sendable {
-    /// The method's HTML fragment, injected after the page data block. Typically
-    /// a `<script>` that reads the embedded data and renders into `#root`.
+    /// The method's HTML fragment, injected verbatim after the page data block.
+    /// Typically a `<script>` that reads the embedded data and renders into
+    /// `#root`. This is a TRUSTED, raw HTML inclusion: unlike the text and theme
+    /// values the renderer sanitizes, `content` is emitted without escaping, so
+    /// the host is responsible for ensuring it is safe (a server-controlled
+    /// template, never an untrusted/end-user string).
     public var content: String
     /// Arbitrary method-specific configuration, embedded in the page data block
     /// for the method script to read.
@@ -115,7 +119,7 @@ public enum PaymentPage {
         <meta charset="UTF-8" />
             <meta name="viewport" content="width=device-width, initial-scale=1.0" />
             <meta name="robots" content="noindex" />
-            <meta name="color-scheme" content="\(theme.colorScheme)" />
+            <meta name="color-scheme" content="\(sanitizeHTML(theme.colorScheme))" />
             <title>\(text.title)</title>
             \(PaymentPagePreflight.style)
             \(PaymentPageStyle.favicon(theme, realm: realm))

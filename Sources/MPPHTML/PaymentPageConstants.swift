@@ -58,3 +58,16 @@ func sanitizeHTML(_ value: String) -> String {
     result = result.replacingOccurrences(of: "'", with: "&#39;")
     return result
 }
+
+/// Neutralizes the HTML-parser breakout vector in a value interpolated into a
+/// `<style>` element. The HTML parser ends a style element at the literal
+/// `</style>` substring regardless of CSS context, so any `<` (and, for
+/// symmetry, `>`) is replaced with its CSS numeric escape, which the CSS parser
+/// reads back as the original character while the HTML parser never sees a `<`.
+/// A defense-in-depth guard for host-supplied theme values (colors, fonts,
+/// sizes), which legitimately never contain these characters.
+func sanitizeCSS(_ value: String) -> String {
+    value
+        .replacingOccurrences(of: "<", with: "\\00003c ")
+        .replacingOccurrences(of: ">", with: "\\00003e ")
+}

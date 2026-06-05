@@ -16,11 +16,11 @@ enum PaymentPageStyle {
         return """
         <style>
           :root {
-            color-scheme: \(theme.colorScheme);
-            \(PaymentPageVars.fontFamily): \(theme.fontFamily);
-            \(PaymentPageVars.fontSizeBase): \(theme.fontSizeBase);
-            \(PaymentPageVars.radius): \(theme.radius);
-            \(PaymentPageVars.spacingUnit): \(theme.spacingUnit);
+            color-scheme: \(sanitizeCSS(theme.colorScheme));
+            \(PaymentPageVars.fontFamily): \(sanitizeCSS(theme.fontFamily));
+            \(PaymentPageVars.fontSizeBase): \(sanitizeCSS(theme.fontSizeBase));
+            \(PaymentPageVars.radius): \(sanitizeCSS(theme.radius));
+            \(PaymentPageVars.spacingUnit): \(sanitizeCSS(theme.spacingUnit));
             \(rootVars)
           }\(darkMedia)
         \(componentCSS)
@@ -42,7 +42,7 @@ enum PaymentPageStyle {
             (PaymentPageVars.border, theme.border),
         ]
         return tokens
-            .map { "\($0.0): \(dark ? $0.1.dark : $0.1.light);" }
+            .map { "\($0.0): \(sanitizeCSS(dark ? $0.1.dark : $0.1.light));" }
             .joined(separator: "\n        ")
     }
 
