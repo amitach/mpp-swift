@@ -67,6 +67,27 @@ struct ProxyCORSTests {
         #expect(response.headerFields[.accessControlMaxAge] == "600")
     }
 
+    @Test("a preflight echoes Access-Control-Request-Headers into Allow-Headers (Fetch spec)")
+    func preflightEchoesRequestedHeaders() async throws {
+        let proxy = try standardProxy(transport: RecordingTransport(), cors: .allowAnyOrigin)
+        let request = makeRequest(
+            .options, "/openapi.json",
+            headers: [.accessControlRequestHeaders: "X-Custom, Authorization"]
+        )
+        let (response, _) = await proxy.handle(request, body: Data(), now: proxyNow)
+        #expect(response.status.code == 204)
+        #expect(response.headerFields[.accessControlAllowHeaders] == "X-Custom, Authorization")
+    }
+
+    @Test("a preflight with no requested headers omits Allow-Headers")
+    func preflightWithoutRequestedHeaders() async throws {
+        let proxy = try standardProxy(transport: RecordingTransport(), cors: .allowAnyOrigin)
+        let (response, _) = await proxy.handle(
+            makeRequest(.options, "/llms.txt"), body: Data(), now: proxyNow
+        )
+        #expect(response.headerFields[.accessControlAllowHeaders] == nil)
+    }
+
     @Test("an OPTIONS preflight without a configured policy is not intercepted (404)")
     func optionsWithoutPolicy() async throws {
         let proxy = try standardProxy(transport: RecordingTransport())

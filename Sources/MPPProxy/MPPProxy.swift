@@ -93,7 +93,9 @@ public struct MPPProxy: Sendable {
         if Self.isDiscoveryPath(path) {
             // The discovery surfaces are the only paths a CORS policy applies to: serve the doc on
             // GET (with CORS headers if opted in) and answer an OPTIONS preflight.
-            if request.method == .options, let cors { return Self.corsPreflight(cors) }
+            if request.method == .options, let cors {
+                return Self.corsPreflight(cors, request: request)
+            }
             if request.method == .get, path == "/openapi.json" {
                 return applyCORS(Self.dataResponse(openAPIData, contentType: "application/json"))
             }
@@ -193,24 +195,36 @@ public struct MPPProxy: Sendable {
     }
 
     /// Adds the discovery CORS headers to `result` if a policy is configured; otherwise returns it
-    /// unchanged. A specific (non-wildcard) origin also sets `Vary: Origin` so a shared cache keys
-    /// the response by origin.
+    /// unchanged. A specific (non-wildcard) origin also appends `Vary: Origin` so a shared cache
+    /// keys the response by origin.
     private func applyCORS(_ result: (HTTPResponse, Data)) -> (HTTPResponse, Data) {
         guard let cors else { return result }
         var (response, body) = result
         response.headerFields[.accessControlAllowOrigin] = cors.allowOrigin
-        if cors.isOriginSpecific { response.headerFields[.vary] = "Origin" }
+        if cors.isOriginSpecific {
+            response.headerFields.append(.init(name: .vary, value: "Origin"))
+        }
         return (response, body)
     }
 
     /// The `OPTIONS` preflight response for a discovery path: `204` with the access-control headers
-    /// (the docs are read-only, so only `GET` is advertised).
-    private static func corsPreflight(_ cors: CORSPolicy) -> (HTTPResponse, Data) {
+    /// (the docs are read-only, so only `GET` is advertised). Any `Access-Control-Request-Headers`
+    /// the browser sends are echoed back in `Access-Control-Allow-Headers`, so a preflight carrying
+    /// a non-safelisted request header is still answered completely (the Fetch spec requires the
+    /// echo, or the browser rejects the actual request).
+    private static func corsPreflight(
+        _ cors: CORSPolicy, request: HTTPRequest
+    ) -> (HTTPResponse, Data) {
         var response = HTTPResponse(status: .noContent)
         response.headerFields[.accessControlAllowOrigin] = cors.allowOrigin
         response.headerFields[.accessControlAllowMethods] = "GET, OPTIONS"
+        if let requested = request.headerFields[.accessControlRequestHeaders] {
+            response.headerFields[.accessControlAllowHeaders] = requested
+        }
         response.headerFields[.accessControlMaxAge] = "600"
-        if cors.isOriginSpecific { response.headerFields[.vary] = "Origin" }
+        if cors.isOriginSpecific {
+            response.headerFields.append(.init(name: .vary, value: "Origin"))
+        }
         return (response, Data())
     }
 
