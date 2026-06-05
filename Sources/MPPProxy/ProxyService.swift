@@ -1,5 +1,6 @@
 import Foundation
 import HTTPTypes
+import MPPClient
 import MPPCore
 import MPPDiscovery
 import MPPServer
@@ -23,14 +24,33 @@ public struct ProxyService: Sendable {
     /// Injects upstream credentials into the forwarded request (applied after scrub, before send).
     public let rewriteRequest: (@Sendable (HTTPRequest) -> HTTPRequest)?
 
+    /// A service could not be configured.
+    public enum ConfigurationError: Error, Sendable, Hashable {
+        /// `baseURL` would carry the proxy's injected upstream credentials over plaintext to a
+        /// non-loopback origin (`scheme` to `host`). Use `https`, a loopback origin, or
+        /// `allowInsecureLocal` for a loopback `http` upstream.
+        case insecureUpstream(scheme: String, host: String)
+    }
+
     /// Creates a service with an explicit upstream-rewrite hook.
+    ///
+    /// The `baseURL` scheme is validated (`TransportSecurity`): a non-loopback `http` origin is
+    /// rejected, because the proxy injects upstream credentials and must never ship them in
+    /// plaintext over a network. `https` is always allowed; a loopback `http` upstream (a local
+    /// sidecar, a test origin) requires `allowInsecureLocal`.
     public init(
         id: String,
         baseURL: URL,
         routes: [ProxyRoute],
         categories: [String] = [],
+        allowInsecureLocal: Bool = false,
         rewriteRequest: (@Sendable (HTTPRequest) -> HTTPRequest)? = nil
-    ) {
+    ) throws(ConfigurationError) {
+        guard TransportSecurity.isAllowed(
+            scheme: baseURL.scheme, host: baseURL.host, allowInsecureLocal: allowInsecureLocal
+        ) else {
+            throw .insecureUpstream(scheme: baseURL.scheme ?? "", host: baseURL.host ?? "")
+        }
         self.id = id
         self.baseURL = baseURL
         self.routes = routes
@@ -44,9 +64,13 @@ public struct ProxyService: Sendable {
         baseURL: URL,
         routes: [ProxyRoute],
         categories: [String] = [],
+        allowInsecureLocal: Bool = false,
         bearer token: String
-    ) {
-        self.init(id: id, baseURL: baseURL, routes: routes, categories: categories) { request in
+    ) throws(ConfigurationError) {
+        try self.init(
+            id: id, baseURL: baseURL, routes: routes, categories: categories,
+            allowInsecureLocal: allowInsecureLocal
+        ) { request in
             var request = request
             request.headerFields[.authorization] = "Bearer \(token)"
             return request
@@ -59,9 +83,13 @@ public struct ProxyService: Sendable {
         baseURL: URL,
         routes: [ProxyRoute],
         categories: [String] = [],
+        allowInsecureLocal: Bool = false,
         headers: [String: String]
-    ) {
-        self.init(id: id, baseURL: baseURL, routes: routes, categories: categories) { request in
+    ) throws(ConfigurationError) {
+        try self.init(
+            id: id, baseURL: baseURL, routes: routes, categories: categories,
+            allowInsecureLocal: allowInsecureLocal
+        ) { request in
             var request = request
             for (name, value) in headers {
                 guard let fieldName = HTTPField.Name(name) else { continue }

@@ -44,7 +44,10 @@ func makeProxyConformance() throws -> MPPProxy {
                 endpoint: .paid(gate, payment: payment),
                 summary: "Proxy conformance: a paid passthrough to the free origin"
             ),
-        ]
+        ],
+        // The conformance origin is a loopback `http` echo server on this host, so the injected
+        // credential never leaves the machine.
+        allowInsecureLocal: true
     )
     return try MPPProxy(
         services: [service],
