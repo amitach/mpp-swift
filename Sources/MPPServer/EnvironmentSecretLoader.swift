@@ -1,4 +1,5 @@
 import Foundation
+import MPPCore
 
 /// Builds a ``SecretStore`` from the runtime environment, the spec security
 /// guidance's recommended delivery mechanism for the server secret: a secrets
@@ -16,9 +17,9 @@ import Foundation
 /// HMAC key is derived everywhere else, then validated by ``SecretStore``.
 public enum EnvironmentSecretLoader {
     /// The environment variable holding the current signing secret.
-    public static let currentVariable = "MPP_SECRET_KEY"
+    public static let currentVariable = MPPSensitiveSurfaces.currentSecretEnvironmentVariable
     /// The environment variable holding comma-separated previous (overlap) secrets.
-    public static let previousVariable = "MPP_SECRET_KEY_PREVIOUS"
+    public static let previousVariable = MPPSensitiveSurfaces.previousSecretEnvironmentVariable
 
     /// Builds a ``SecretStore`` from `environment`.
     ///

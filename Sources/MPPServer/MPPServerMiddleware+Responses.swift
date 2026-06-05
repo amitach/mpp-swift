@@ -44,9 +44,10 @@ extension MPPServerMiddleware {
     static let problemContentType = "application/problem+json"
 
     /// The `Payment-Receipt` response header name (non-standard, so built from a
-    /// compile-time-known-valid token).
+    /// compile-time-known-valid token). The name is the canonical
+    /// ``MPPSensitiveSurfaces/receiptHeader`` so the redaction registry cannot drift from it.
     static let paymentReceiptField: HTTPField.Name = {
-        guard let name = HTTPField.Name("Payment-Receipt") else {
+        guard let name = HTTPField.Name(MPPSensitiveSurfaces.receiptHeader) else {
             preconditionFailure("Payment-Receipt is a valid HTTP field name")
         }
         return name

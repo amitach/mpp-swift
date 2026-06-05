@@ -134,9 +134,11 @@ public struct PaymentClient: Sendable {
 
     /// The canonical `Accept-Payment` and `Payment-Receipt` field names this client
     /// reads and writes. Internal (not private) so tests assert against the same
-    /// constants instead of re-deriving the header strings, which could drift.
+    /// constants instead of re-deriving the header strings, which could drift. The
+    /// receipt name is the canonical ``MPPSensitiveSurfaces/receiptHeader`` (it carries
+    /// a secret-bearing surface); `Accept-Payment` is a preference header, not sensitive.
     static let acceptPayment = fieldName("Accept-Payment")
-    static let paymentReceipt = fieldName("Payment-Receipt")
+    static let paymentReceipt = fieldName(MPPSensitiveSurfaces.receiptHeader)
 
     /// A non-standard field name from a compile-time-known-valid token.
     private static func fieldName(_ token: String) -> HTTPField.Name {
