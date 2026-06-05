@@ -48,6 +48,7 @@ let package = Package(
         .library(name: "MPPTempoServer", targets: ["MPPTempoServer"]),
         .library(name: "MPPStripe", targets: ["MPPStripe"]),
         .library(name: "MPPStripeServer", targets: ["MPPStripeServer"]),
+        .library(name: "MPPHTML", targets: ["MPPHTML"]),
         .library(name: "MPPMCP", targets: ["MPPMCP"]),
         .library(name: "MPPProxy", targets: ["MPPProxy"]),
         .library(name: "MPPHummingbird", targets: ["MPPHummingbird"]),
@@ -377,6 +378,18 @@ let package = Package(
                 "MPPStripeServer", "MPPStripe", "MPPCore", "MPPServer", "MPPClient",
                 .product(name: "HTTPTypes", package: "swift-http-types"),
             ]
+        ),
+        // MPPHTML: the server-rendered HTML payment page. A pure renderer from a Challenge plus a
+        // payment method's HTML hook, themeable and opt-in; depends only on MPPCore (no server or
+        // transport), so a host wires it into any 402 path. Identifiers (DOM ids, classes, CSS
+        // vars) match the mppx peer for cross-implementation method-script interop.
+        .target(
+            name: "MPPHTML",
+            dependencies: ["MPPCore"]
+        ),
+        .testTarget(
+            name: "MPPHTMLTests",
+            dependencies: ["MPPHTML", "MPPCore"]
         ),
         // MPPMCP: binds the 402 flow to JSON-RPC / Model Context Protocol on the official MCP
         // SDK (module `MCP`). Rail-agnostic: it composes MPPServer's mint/verify pipeline and
