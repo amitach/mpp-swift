@@ -21,6 +21,12 @@ public struct TempoChargeRequest: Sendable, Hashable {
     /// The payee address for a settled transfer, surfaced for approval display.
     public let recipient: String?
     /// The token/currency address for a settled transfer, surfaced for approval.
+    ///
+    /// Optional by deliberate scoping (audit §5.1.1): the spec and the mppx peer mark `currency`
+    /// REQUIRED, but that applies to the *settled-transfer* rail, which is out of scope here. The
+    /// implemented zero-amount EIP-712 proof path settles no transfer and carries no currency, so
+    /// requiring it would reject a valid proof charge. It would become required alongside the
+    /// settled-transfer rail.
     public let currency: String?
     /// The escrow contract holding the channel, from `methodDetails.escrowContract`
     /// (present for a session challenge; absent for a plain charge).
