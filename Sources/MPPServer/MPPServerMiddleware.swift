@@ -34,6 +34,7 @@ public struct MPPServerMiddleware: Sendable {
     private let authorizer: (any RequestAuthorizer)?
     private let rateLimiter: (any RateLimiter)?
     private let rateLimitKey: @Sendable (HTTPRequest) -> String?
+    private let idempotencyStore: (any IdempotencyStore)?
     private let onEvent: @Sendable (ServerEvent) -> Void
 
     /// Creates a middleware for one route.
@@ -67,6 +68,10 @@ public struct MPPServerMiddleware: Sendable {
     ///     request (for example `request.headerFields[.init("X-Forwarded-For")!]`). Defaults
     ///     to returning `nil` (no key, so no limiting) since the transport remote address is
     ///     not in `HTTPRequest`; the host wires its own extractor.
+    ///   - idempotencyStore: An optional ``IdempotencyStore``. When set and the request carries an
+    ///     `Idempotency-Key` header (§11.4), `handle` replays the recorded response for a repeated
+    ///     key (no re-charge), answers `409` while one is in flight, and records only a settled
+    ///     response. Defaults to `nil` (no idempotency). Only used by `handle`.
     ///   - onEvent: A synchronous diagnostics sink; defaults to a no-op.
     ///
     /// A digest-bound, described, or opaque-carrying challenge is minted via
@@ -82,6 +87,7 @@ public struct MPPServerMiddleware: Sendable {
         authorizer: (any RequestAuthorizer)? = nil,
         rateLimiter: (any RateLimiter)? = nil,
         rateLimitKey: @escaping @Sendable (HTTPRequest) -> String? = { _ in nil },
+        idempotencyStore: (any IdempotencyStore)? = nil,
         onEvent: @escaping @Sendable (ServerEvent) -> Void = { _ in }
     ) {
         self.minter = minter
@@ -92,6 +98,7 @@ public struct MPPServerMiddleware: Sendable {
         self.maxBodyBytes = maxBodyBytes
         self.authorizer = authorizer
         self.rateLimiter = rateLimiter
+        self.idempotencyStore = idempotencyStore
         self.rateLimitKey = rateLimitKey
         self.onEvent = onEvent
     }
@@ -181,11 +188,12 @@ public struct MPPServerMiddleware: Sendable {
         }
     }
 
-    /// Runs the route over `apple/swift-http-types` values: reads the credential
-    /// and body, evaluates, and either answers `402`/`413` or runs `handler` and
-    /// enforces the `Cache-Control: private` floor on its response (§11.10): a
-    /// stricter directive the handler chose (`no-store`, or an explicit `private`)
-    /// is kept; anything weaker or absent becomes `private`.
+    /// Runs the route over `apple/swift-http-types` values. Two optional transport guards run first
+    /// when configured: a rate limit (§11.12, `429`) and idempotent retry (§11.4, replay a settled
+    /// response or `409` while one is in flight). The core then reads the credential and body,
+    /// evaluates, and either answers `402`/`413` or runs `handler` and enforces the `Cache-Control:
+    /// private` floor on its response (§11.10): a stricter directive the handler chose (`no-store`,
+    /// or an explicit `private`) is kept; anything weaker or absent becomes `private`.
     public func handle(
         _ request: HTTPRequest,
         body: Data,
@@ -200,10 +208,49 @@ public struct MPPServerMiddleware: Sendable {
             onEvent(.rateLimited(key: key))
             return Self.tooManyRequestsResponse(retryAfter: retryAfter)
         }
+        // Idempotent retry (§11.4): with a store and an `Idempotency-Key`, replay a settled
+        // response for a repeated key (no re-charge), answer `409` while one is in flight, and
+        // record only a settled (handler-run) response so an unsettled attempt can still pay later.
+        guard let idempotencyStore, let key = request.headerFields[Self.idempotencyKeyField] else {
+            let out = await handleCore(request, body: body, now: now, handler: handler)
+            return (out.response, out.body)
+        }
+        switch await idempotencyStore.begin(key) {
+        case let .replay(recorded):
+            return (recorded.response, recorded.body)
+        case .inProgress:
+            return Self.conflictResponse()
+        case .proceed:
+            let out = await handleCore(request, body: body, now: now, handler: handler)
+            if out.served {
+                let recorded = IdempotentResponse(response: out.response, body: out.body)
+                await idempotencyStore.complete(key, response: recorded)
+            } else {
+                await idempotencyStore.release(key)
+            }
+            return (out.response, out.body)
+        }
+    }
+
+    /// The body-cap + authorize + evaluate pipeline, reporting whether the protected handler ran
+    /// (`served`) so the idempotency wrapper records only a settled response.
+    private func handleCore(
+        _ request: HTTPRequest,
+        body: Data,
+        now: Date,
+        handler: (HTTPRequest, MPPVerified) async -> (HTTPResponse, Data)
+    ) async -> CoreResult {
+        func served(_ pair: (HTTPResponse, Data)) -> CoreResult {
+            CoreResult(pair, served: true)
+        }
+        func guarded(_ pair: (HTTPResponse, Data)) -> CoreResult {
+            CoreResult(pair, served: false)
+        }
+
         // Bound the body before any payment or authorize work. `evaluate` enforces the same cap for
         // its own callers; the authorize path below bypasses `evaluate`, so it is checked here too.
         if body.count > maxBodyBytes {
-            return Self.payloadTooLargeResponse(maxBodyBytes: maxBodyBytes)
+            return guarded(Self.payloadTooLargeResponse(maxBodyBytes: maxBodyBytes))
         }
         let authorization = request.headerFields[.authorization]
         // A credential-less request: consult an operator-configured authorizer (for example a
@@ -215,51 +262,23 @@ public struct MPPServerMiddleware: Sendable {
                 // counts include credential-less returning subscribers.
                 let verified = MPPVerified(credential: nil, receipt: receipt)
                 onEvent(.paymentVerified(verified))
-                return await serve(request, verified: verified, handler: handler)
+                return await served(serve(request, verified: verified, handler: handler))
             case let .respond(response, responseBody):
-                return (response, responseBody)
+                return guarded((response, responseBody))
             case .none:
                 break // fall through to mint a 402
             }
         }
         switch await evaluate(authorization: authorization, body: body, now: now) {
         case .payloadTooLarge:
-            return Self.payloadTooLargeResponse(maxBodyBytes: maxBodyBytes)
+            return guarded(Self.payloadTooLargeResponse(maxBodyBytes: maxBodyBytes))
         case let .challenge(challenge, problem):
-            return Self.paymentRequiredResponse(challenge: challenge, problem: problem)
+            return guarded(Self.paymentRequiredResponse(challenge: challenge, problem: problem))
         case let .problem(problem):
-            return Self.problemResponse(problem)
+            return guarded(Self.problemResponse(problem))
         case let .proceed(verified):
-            return await serve(request, verified: verified, handler: handler)
+            return await served(serve(request, verified: verified, handler: handler))
         }
-    }
-
-    /// Runs the protected handler for an authorized request, enforcing the §11.10 `Cache-Control:
-    /// private` floor and attaching the `Payment-Receipt` when the token carries one. Shared by the
-    /// verified-credential path and the credential-less authorize path.
-    private func serve(
-        _ request: HTTPRequest,
-        verified: MPPVerified,
-        handler: (HTTPRequest, MPPVerified) async -> (HTTPResponse, Data)
-    ) async -> (HTTPResponse, Data) {
-        var (response, responseBody) = await handler(request, verified)
-        // §11.10 floor: a paid response must be at least `private`. Keep a directive that already
-        // meets it (the stricter `no-store`, or an explicit `private`); otherwise enforce
-        // `private`,
-        // covering an absent value, a `public`, or a bare `max-age` a handler may have set.
-        let cacheControl = response.headerFields[.cacheControl]
-        let meetsFloor = cacheControl.map { $0.contains("no-store") || $0.contains("private") }
-        if meetsFloor != true {
-            response.headerFields[.cacheControl] = "private"
-        }
-        // Attach the settlement receipt (Payment-Receipt), when one was minted. The header is
-        // optional (spec: for auditability), so an encoding failure on an otherwise-valid receipt
-        // is
-        // swallowed rather than failing the response the client already earned.
-        if let receipt = verified.receipt, let value = try? receipt.headerValue {
-            response.headerFields[Self.paymentReceiptField] = value
-        }
-        return (response, responseBody)
     }
 
     private func mintChallenge(now: Date) -> Challenge {
@@ -355,5 +374,20 @@ public struct MPPServerMiddleware: Sendable {
                 status: problem.status
             )
         }
+    }
+}
+
+/// The result of `MPPServerMiddleware.handleCore`: the response plus whether the protected handler
+/// ran (`served`), so the idempotency wrapper records only a settled response. File-scope so it
+/// does not count against the method's body length.
+private struct CoreResult {
+    let response: HTTPResponse
+    let body: Data
+    let served: Bool
+
+    init(_ pair: (HTTPResponse, Data), served: Bool) {
+        response = pair.0
+        body = pair.1
+        self.served = served
     }
 }

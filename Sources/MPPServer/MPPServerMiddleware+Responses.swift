@@ -6,6 +6,34 @@ import MPPCore
 // the length limits. These are internal `static` helpers (called as `Self.…` from
 // `handle`/`serve`).
 extension MPPServerMiddleware {
+    /// Runs the protected handler for an authorized request, enforcing the §11.10 `Cache-Control:
+    /// private` floor and attaching the `Payment-Receipt` when the token carries one. Shared by the
+    /// verified-credential path and the credential-less authorize path.
+    func serve(
+        _ request: HTTPRequest,
+        verified: MPPVerified,
+        handler: (HTTPRequest, MPPVerified) async -> (HTTPResponse, Data)
+    ) async -> (HTTPResponse, Data) {
+        var (response, responseBody) = await handler(request, verified)
+        // §11.10 floor: a paid response must be at least `private`. Keep a directive that already
+        // meets it (the stricter `no-store`, or an explicit `private`); otherwise enforce
+        // `private`,
+        // covering an absent value, a `public`, or a bare `max-age` a handler may have set.
+        let cacheControl = response.headerFields[.cacheControl]
+        let meetsFloor = cacheControl.map { $0.contains("no-store") || $0.contains("private") }
+        if meetsFloor != true {
+            response.headerFields[.cacheControl] = "private"
+        }
+        // Attach the settlement receipt (Payment-Receipt), when one was minted. The header is
+        // optional (spec: for auditability), so an encoding failure on an otherwise-valid receipt
+        // is
+        // swallowed rather than failing the response the client already earned.
+        if let receipt = verified.receipt, let value = try? receipt.headerValue {
+            response.headerFields[Self.paymentReceiptField] = value
+        }
+        return (response, responseBody)
+    }
+
     static let problemContentType = "application/problem+json"
 
     /// The `Payment-Receipt` response header name (non-standard, so built from a
@@ -68,6 +96,29 @@ extension MPPServerMiddleware {
             title: "Too Many Requests",
             status: 429,
             detail: "Rate limit exceeded; retry after \(seconds) second(s)."
+        )
+        return (response, encodedProblem(problem))
+    }
+
+    /// The `Idempotency-Key` request header name (non-standard, so built from a
+    /// compile-time-known-valid token).
+    static let idempotencyKeyField: HTTPField.Name = {
+        guard let name = HTTPField.Name("Idempotency-Key") else {
+            preconditionFailure("Idempotency-Key is a valid HTTP field name")
+        }
+        return name
+    }()
+
+    /// A `409` for an `Idempotency-Key` whose request is still in flight (§11.4): the client must
+    /// not retry concurrently; it retries once the original completes (and then replays).
+    static func conflictResponse() -> (HTTPResponse, Data) {
+        var response = HTTPResponse(status: .init(code: 409))
+        response.headerFields[.cacheControl] = "no-store"
+        response.headerFields[.contentType] = problemContentType
+        let problem = ProblemDetails(
+            title: "Conflict",
+            status: 409,
+            detail: "A request with this Idempotency-Key is already in progress."
         )
         return (response, encodedProblem(problem))
     }
