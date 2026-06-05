@@ -21,4 +21,9 @@ public enum ServerEvent: Sendable {
     /// A request was rejected with `429` by the configured ``RateLimiter`` before any payment
     /// work (§11.12). Carries the client key the limit was keyed on. Fires for no other branch.
     case rateLimited(key: String)
+    /// A request carrying an already-settled `Idempotency-Key` replayed its recorded response from
+    /// the configured ``IdempotencyStore`` (§11.4): the protected handler did not run again, so no
+    /// ``paymentVerified(_:)`` fires for it. Carries the `Idempotency-Key`. A replay is not a new
+    /// payment; this event lets an operator observe replays without conflating them with payments.
+    case idempotentReplay(key: String)
 }

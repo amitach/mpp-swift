@@ -95,6 +95,8 @@ import MPPTempoServer
                 log("[server] rejected (session) \(rejection)")
             case let .rateLimited(key):
                 log("[server] RATE-LIMITED (session) key=\(key)")
+            case let .idempotentReplay(key):
+                log("[server] IDEMPOTENT-REPLAY (session) key=\(key)")
             }
         }
     }
@@ -183,6 +185,8 @@ import MPPTempoServer
                 log("[server] rejected (subscription-live) \(rejection)")
             case let .rateLimited(key):
                 log("[server] RATE-LIMITED (subscription-live) key=\(key)")
+            case let .idempotentReplay(key):
+                log("[server] IDEMPOTENT-REPLAY (subscription-live) key=\(key)")
             }
         }
     }
