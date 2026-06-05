@@ -97,10 +97,10 @@ struct TempoProofIntegrationTests {
         // No credential -> a challenge is issued.
         guard case let .challenge(issued, _) = await middleware.evaluate(
             authorization: nil, body: Data(), now: now
-        ) else { Issue.record("expected a challenge"); return }
+        ), let challenge = issued.first else { Issue.record("expected a challenge"); return }
 
         // The client pays it.
-        let credential = try await method().buildCredential(for: issued)
+        let credential = try await method().buildCredential(for: challenge)
 
         // The paid retry verifies and proceeds.
         let decision = try await middleware.evaluate(

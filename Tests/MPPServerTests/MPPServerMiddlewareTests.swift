@@ -25,7 +25,9 @@ private func rejectionProblemType(
 private func challengeOf(
     _ decision: MPPServerMiddleware.Decision
 ) -> (Challenge, ProblemDetails)? {
-    if case let .challenge(challenge, problem) = decision { return (challenge, problem) }
+    if case let .challenge(challenges, problem) = decision, let challenge = challenges.first {
+        return (challenge, problem)
+    }
     return nil
 }
 

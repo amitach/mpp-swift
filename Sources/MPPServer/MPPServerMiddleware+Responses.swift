@@ -52,30 +52,46 @@ extension MPPServerMiddleware {
         return name
     }()
 
-    /// A `402` offering `challenge` in `WWW-Authenticate` (the retry challenge), with the problem
-    /// body. Only the retryable `402` path reaches here; a terminal settlement problem uses
+    /// A `402` offering each `challenges` element in its own `WWW-Authenticate` header (RFC 9110
+    /// §11.6.1: a client may be offered several challenges at once), with the problem body. Only
+    /// the
+    /// retryable `402` path reaches here; a terminal settlement problem uses
     /// ``problemResponse(_:)``.
     static func paymentRequiredResponse(
-        challenge: Challenge, problem: ProblemDetails
+        challenges: [Challenge], problem: ProblemDetails
     ) -> (HTTPResponse, Data) {
         var response = HTTPResponse(status: .init(code: 402))
-        response.headerFields[.wwwAuthenticate] = challenge.headerValue
+        offerChallenges(challenges, on: &response)
         response.headerFields[.cacheControl] = "no-store"
         response.headerFields[.contentType] = problemContentType
         return (response, encodedProblem(problem))
     }
 
     /// A `402` carrying a ``ChallengePresenter``'s alternative representation (e.g. an HTML page):
-    /// the same `WWW-Authenticate` retry challenge and `no-store` floor as the default, with the
-    /// presenter's content type and body in place of the problem document.
+    /// the same per-offer `WWW-Authenticate` challenges and `no-store` floor as the default, with
+    /// the presenter's content type and body in place of the problem document.
     static func paymentRequiredResponse(
-        challenge: Challenge, presented: PresentedChallenge
+        challenges: [Challenge], presented: PresentedChallenge
     ) -> (HTTPResponse, Data) {
         var response = HTTPResponse(status: .init(code: 402))
-        response.headerFields[.wwwAuthenticate] = challenge.headerValue
+        offerChallenges(challenges, on: &response)
         response.headerFields[.cacheControl] = "no-store"
         response.headerFields[.contentType] = presented.contentType
         return (response, presented.body)
+    }
+
+    /// Appends one `WWW-Authenticate: Payment …` header per challenge (a separate header line each,
+    /// the shape the client parses via `headerFields[values: .wwwAuthenticate]`).
+    private static func offerChallenges(
+        _ challenges: [Challenge],
+        on response: inout HTTPResponse
+    ) {
+        for challenge in challenges {
+            response.headerFields.append(HTTPField(
+                name: .wwwAuthenticate,
+                value: challenge.headerValue
+            ))
+        }
     }
 
     /// A terminal settlement problem (§10.5): the problem's own status (e.g. `410` / `400`) and
