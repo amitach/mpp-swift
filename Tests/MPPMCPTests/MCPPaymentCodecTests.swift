@@ -204,7 +204,7 @@ struct MCPPaymentCodecTests {
             detail: "pay up",
             extensions: ["challengeId": .string("cid-1")]
         )
-        let data = try MCPPaymentCodec.errorData(challenge: challenge, problem: problem)
+        let data = try MCPPaymentCodec.errorData(challenges: [challenge], problem: problem)
         #expect(data["httpStatus"] == .int(402))
         #expect(data["challenges"]?.arrayValue?.count == 1)
 
@@ -219,8 +219,23 @@ struct MCPPaymentCodecTests {
 
     @Test("errorData with no problem omits the key")
     func errorDataNoProblem() throws {
-        let data = try MCPPaymentCodec.errorData(challenge: sampleChallenge(), problem: nil)
+        let data = try MCPPaymentCodec.errorData(challenges: [sampleChallenge()], problem: nil)
         #expect(data["problem"] == nil)
         #expect(try MCPPaymentCodec.problem(fromErrorData: data) == nil)
+    }
+
+    @Test("errorData carries every offered challenge (multi-method)")
+    func errorDataMultipleChallenges() throws {
+        let tempo = try sampleChallenge()
+        let stripe = try Challenge(
+            id: "cid-2", realm: "example", method: MethodName("stripe"),
+            intent: IntentName("charge"), request: EncodedJSON("e30"),
+            expires: Expires("2026-05-31T00:00:00Z")
+        )
+        let data = try MCPPaymentCodec.errorData(challenges: [tempo, stripe], problem: nil)
+        #expect(data["challenges"]?.arrayValue?.count == 2)
+        let parsed = try MCPPaymentCodec.challenges(fromErrorData: data)
+        #expect(parsed.map(\.id) == ["cid-1", "cid-2"])
+        #expect(parsed.map(\.method.rawValue) == ["tempo", "stripe"])
     }
 }
