@@ -46,11 +46,11 @@ public struct ProxyService: Sendable {
         allowInsecureLocal: Bool = false,
         rewriteRequest: (@Sendable (HTTPRequest) -> HTTPRequest)? = nil
     ) throws(ConfigurationError) {
+        let host = baseURL.host(percentEncoded: false)
         guard TransportSecurity.isAllowed(
-            scheme: baseURL.scheme, host: baseURL.host(percentEncoded: false),
-            allowInsecureLocal: allowInsecureLocal
+            scheme: baseURL.scheme, host: host, allowInsecureLocal: allowInsecureLocal
         ) else {
-            throw .insecureUpstream(scheme: baseURL.scheme ?? "", host: baseURL.host ?? "")
+            throw .insecureUpstream(scheme: baseURL.scheme ?? "", host: host ?? "")
         }
         self.id = id
         self.baseURL = baseURL
