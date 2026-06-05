@@ -46,27 +46,27 @@ public struct PaymentPagePresenter: ChallengePresenter {
 
     public func present(
         _ request: HTTPRequest,
-        challenge: Challenge,
+        challenges: [Challenge],
         problem _: ProblemDetails
     ) async -> PresentedChallenge? {
         guard acceptsHTML(request) else { return nil }
-        let amount = await formatAmount(challenge)
-        let method = composed(methodContent(challenge))
+        var entries: [PaymentPageEntry] = []
+        for challenge in challenges {
+            await entries.append(PaymentPageEntry(
+                challenge: challenge,
+                formattedAmount: formatAmount(challenge),
+                method: methodContent(challenge)
+            ))
+        }
+        // The bootstrap is emitted once as a page script (defining `window.__mppx.submit` before
+        // any method script), rather than folded into a method's content, so a multi-method page's
+        // per-method `data-mppx-challenge-id` injection targets only the method scripts.
         let html = PaymentPage.render(
-            challenge: challenge, formattedAmount: amount, method: method, config: config
+            entries: entries,
+            config: config,
+            pageScript: injectsClientBootstrap ? PaymentPageClientScript.scriptTag : nil
         )
         return PresentedChallenge(contentType: "text/html; charset=utf-8", body: Data(html.utf8))
-    }
-
-    /// The method content, with the client bootstrap prepended when enabled so
-    /// `window.__mppx.submit` is defined before the method script runs.
-    private func composed(_ base: PaymentMethodContent) -> PaymentMethodContent {
-        guard injectsClientBootstrap else { return base }
-        return PaymentMethodContent(
-            content: PaymentPageClientScript.scriptTag + "\n" + base.content,
-            config: base.config,
-            label: base.label
-        )
     }
 
     /// Whether the client's `Accept` header offers `text/html`, matching the peer

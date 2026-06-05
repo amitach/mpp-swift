@@ -317,10 +317,10 @@ public struct MPPServerMiddleware: Sendable {
         case .payloadTooLarge:
             return guarded(Self.payloadTooLargeResponse(maxBodyBytes: maxBodyBytes))
         case let .challenge(challenges, problem):
-            // The 402 advertises every offer (one WWW-Authenticate per challenge). A presenter
-            // renders the primary for now; the multi-method page is layered on separately.
+            // The 402 advertises every offer (one WWW-Authenticate per challenge), and a presenter
+            // receives them all so it can render one method or a chooser across several.
             if let presenter, let presented = await presenter.present(
-                request, challenge: challenges[0], problem: problem
+                request, challenges: challenges, problem: problem
             ) {
                 return guarded(
                     Self.paymentRequiredResponse(challenges: challenges, presented: presented)

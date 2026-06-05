@@ -6,14 +6,28 @@
 /// `mppx` peer's HTML feature verbatim (`__MPPX_DATA__`, `root`, `mppx-*`
 /// classes, `--mppx-*` vars) so a method script written against either
 /// implementation interoperates with a page rendered by the other. They are not
-/// invented here; changing them would silently break that interop. (The
-/// service-worker query params and the multi-method tab/attribute identifiers
-/// land with the features that use them.)
+/// invented here; changing them would silently break that interop.
 enum PaymentPageIDs {
     /// The `<script type="application/json">` tag holding the per-challenge data map.
     static let data = "__MPPX_DATA__"
-    /// The element where a single method's payment form mounts.
+    /// The element where a single method's payment form mounts (`root-{i}` per panel
+    /// on a multi-method page).
     static let root = "root"
+}
+
+/// Query parameters the page and a browser-side script agree on.
+enum PaymentPageParams {
+    /// Carries the selected tab slug on a multi-method page, so the choice survives a reload.
+    static let tab = "__mppx_tab"
+}
+
+/// `data-*` attributes the multi-method page and the tab script agree on.
+enum PaymentPageAttrs {
+    /// Binds a method's injected `<script>` to its challenge on a multi-method page,
+    /// so the method script can find its own entry in the data map.
+    static let challengeID = "data-mppx-challenge-id"
+    /// The number of challenges still to be processed, on the data `<script>`.
+    static let remaining = "data-remaining"
 }
 
 enum PaymentPageClassNames {
@@ -24,6 +38,9 @@ enum PaymentPageClassNames {
     static let summaryAmount = "mppx-summary-amount"
     static let summaryDescription = "mppx-summary-description"
     static let summaryExpires = "mppx-summary-expires"
+    static let tab = "mppx-tab"
+    static let tabList = "mppx-tablist"
+    static let tabPanel = "mppx-tabpanel"
 }
 
 /// The `--mppx-*` CSS custom-property names, in the order they are emitted, so
