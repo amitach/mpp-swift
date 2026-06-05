@@ -5,8 +5,7 @@
 /// The surfaces:
 /// - ``credentialHeader`` (`Authorization`): the request header carrying a client's `Payment`
 ///   credential (the Shared Payment Token or signed proof).
-/// - ``receiptHeader`` (`Payment-Receipt`): the response header carrying the settlement
-/// ``Receipt``.
+/// - ``receiptHeader`` (`Payment-Receipt`): the response header carrying the settlement receipt.
 /// - ``currentSecretEnvironmentVariable`` / ``previousSecretEnvironmentVariable``
 ///   (`MPP_SECRET_KEY` / `MPP_SECRET_KEY_PREVIOUS`): the HMAC signing key(s).
 ///
