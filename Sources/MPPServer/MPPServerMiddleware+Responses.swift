@@ -65,6 +65,19 @@ extension MPPServerMiddleware {
         return (response, encodedProblem(problem))
     }
 
+    /// A `402` carrying a ``ChallengePresenter``'s alternative representation (e.g. an HTML page):
+    /// the same `WWW-Authenticate` retry challenge and `no-store` floor as the default, with the
+    /// presenter's content type and body in place of the problem document.
+    static func paymentRequiredResponse(
+        challenge: Challenge, presented: PresentedChallenge
+    ) -> (HTTPResponse, Data) {
+        var response = HTTPResponse(status: .init(code: 402))
+        response.headerFields[.wwwAuthenticate] = challenge.headerValue
+        response.headerFields[.cacheControl] = "no-store"
+        response.headerFields[.contentType] = presented.contentType
+        return (response, presented.body)
+    }
+
     /// A terminal settlement problem (§10.5): the problem's own status (e.g. `410` / `400`) and
     /// body, with no `WWW-Authenticate` (no retry challenge is offered), matching the mppx peer,
     /// which associates the challenge with `402` responses alone.

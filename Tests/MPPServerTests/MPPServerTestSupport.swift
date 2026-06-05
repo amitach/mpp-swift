@@ -30,6 +30,7 @@ func makeMiddleware(
     rateLimiter: (any RateLimiter)? = nil,
     rateLimitKey: @escaping @Sendable (HTTPRequest) -> String? = { _ in nil },
     idempotencyStore: (any IdempotencyStore)? = nil,
+    presenter: (any ChallengePresenter)? = nil,
     onEvent: @escaping @Sendable (ServerEvent) -> Void = { _ in }
 ) throws -> MPPServerMiddleware {
     let signer = ChallengeSigner(secret: secret)
@@ -44,6 +45,7 @@ func makeMiddleware(
         rateLimiter: rateLimiter,
         rateLimitKey: rateLimitKey,
         idempotencyStore: idempotencyStore,
+        presenter: presenter,
         onEvent: onEvent
     )
 }
