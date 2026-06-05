@@ -91,16 +91,19 @@ public struct MPPProxy: Sendable {
         let (path, query) = Self.splitQuery(pathname)
 
         if Self.isDiscoveryPath(path) {
-            // The discovery surfaces are the only paths a CORS policy applies to: serve the doc on
-            // GET (with CORS headers if opted in) and answer an OPTIONS preflight.
+            // The discovery surfaces are the only paths a CORS policy applies to. Serve the doc on
+            // GET (with CORS headers if opted in), the same headers with an empty body on HEAD
+            // (RFC 9110 §9.3.2: support HEAD wherever GET is supported), and answer an OPTIONS
+            // preflight.
             if request.method == .options, let cors {
                 return Self.corsPreflight(cors, request: request)
             }
-            if request.method == .get, path == "/openapi.json" {
-                return applyCORS(Self.dataResponse(openAPIData, contentType: "application/json"))
-            }
-            if request.method == .get, path == "/llms.txt" {
-                return applyCORS(Self.textResponse(llmsText))
+            if request.method == .get || request.method == .head {
+                // `isDiscoveryPath` guarantees `path` is one of the two surfaces.
+                let full = path == "/openapi.json"
+                    ? applyCORS(Self.dataResponse(openAPIData, contentType: "application/json"))
+                    : applyCORS(Self.textResponse(llmsText))
+                return request.method == .head ? (full.0, Data()) : full
             }
         }
 

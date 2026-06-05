@@ -99,6 +99,34 @@ struct ProxyCORSTests {
         #expect(response.status.code == 404)
     }
 
+    @Test("HEAD on a discovery path returns the GET headers with an empty body (RFC 9110 §9.3.2)")
+    func headReturnsHeadersNoBody() async throws {
+        // HEAD is answered for the discovery surfaces with or without a CORS policy.
+        let proxy = try standardProxy(transport: RecordingTransport())
+        for (path, contentType) in [
+            ("/openapi.json", "application/json"),
+            ("/llms.txt", "text/plain; charset=utf-8"),
+        ] {
+            let (response, body) = await proxy.handle(
+                makeRequest(.head, path), body: Data(), now: proxyNow
+            )
+            #expect(response.status.code == 200)
+            #expect(body.isEmpty)
+            #expect(response.headerFields[.contentType] == contentType)
+        }
+    }
+
+    @Test("HEAD on a discovery path carries the CORS header when a policy is set")
+    func headCarriesCORS() async throws {
+        let proxy = try standardProxy(transport: RecordingTransport(), cors: .allowAnyOrigin)
+        let (response, body) = await proxy.handle(
+            makeRequest(.head, "/openapi.json"), body: Data(), now: proxyNow
+        )
+        #expect(response.status.code == 200)
+        #expect(body.isEmpty)
+        #expect(response.headerFields[acao] == "*")
+    }
+
     @Test("the CORS policy never adds headers to a proxied (non-discovery) route")
     func noCORSOnProxiedRoute() async throws {
         let proxy = try standardProxy(
