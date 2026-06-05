@@ -217,6 +217,7 @@ public struct MPPServerMiddleware: Sendable {
         }
         switch await idempotencyStore.begin(key) {
         case let .replay(recorded):
+            onEvent(.idempotentReplay(key: key))
             return (recorded.response, recorded.body)
         case .inProgress:
             return Self.conflictResponse()

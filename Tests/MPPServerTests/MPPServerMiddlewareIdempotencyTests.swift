@@ -51,6 +51,23 @@ struct MPPServerMiddlewareIdempotencyTests {
         #expect(await runs.value == 1) // handler ran exactly once: no re-charge
     }
 
+    @Test("a replay emits idempotentReplay, not a second paymentVerified")
+    func replayEmitsEvent() async throws {
+        let box = EventBox()
+        let middleware = try makeMiddleware(
+            idempotencyStore: InMemoryIdempotencyStore(), onEvent: box.add
+        )
+        let request = try idempotentRequest(authorization: paidHeader(), key: "K4")
+        @Sendable func run() async {
+            _ = await middleware.handle(request, body: Data(), now: now) { _, _ in
+                (HTTPResponse(status: .ok), Data())
+            }
+        }
+        await run() // settles: paymentVerified
+        await run() // replays: idempotentReplay, handler does not run
+        #expect(eventNames(box) == ["paymentVerified", "idempotentReplay"])
+    }
+
     @Test("an Idempotency-Key whose request is in flight answers 409 Conflict")
     func conflictWhileInFlight() async throws {
         let store = InMemoryIdempotencyStore()

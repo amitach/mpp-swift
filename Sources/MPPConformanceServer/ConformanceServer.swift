@@ -68,6 +68,8 @@ func makeMiddleware() throws -> MPPServerMiddleware {
             log("[server] rejected     \(rejection)")
         case let .rateLimited(key):
             log("[server] RATE-LIMITED key=\(key)")
+        case let .idempotentReplay(key):
+            log("[server] IDEMPOTENT-REPLAY key=\(key)")
         }
     }
 }
@@ -131,6 +133,8 @@ private func makeSubscriptionMiddleware() async throws -> MPPServerMiddleware {
             log("[server] rejected (subscription) \(rejection)")
         case let .rateLimited(key):
             log("[server] RATE-LIMITED (subscription) key=\(key)")
+        case let .idempotentReplay(key):
+            log("[server] IDEMPOTENT-REPLAY (subscription) key=\(key)")
         }
     }
 }

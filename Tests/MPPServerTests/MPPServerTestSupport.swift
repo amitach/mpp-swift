@@ -146,6 +146,7 @@ func eventName(_ event: ServerEvent) -> String {
     case .paymentVerified: "paymentVerified"
     case .paymentRejected: "paymentRejected"
     case .rateLimited: "rateLimited"
+    case .idempotentReplay: "idempotentReplay"
     }
 }
 

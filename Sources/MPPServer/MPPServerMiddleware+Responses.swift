@@ -9,6 +9,13 @@ extension MPPServerMiddleware {
     /// Runs the protected handler for an authorized request, enforcing the §11.10 `Cache-Control:
     /// private` floor and attaching the `Payment-Receipt` when the token carries one. Shared by the
     /// verified-credential path and the credential-less authorize path.
+    ///
+    /// Internal (not `private`) only so `handleCore` in the main file can reach it across the
+    /// file split; it is not a public or guarded entry point. Reaching it still requires an
+    /// `MPPVerified`, which only this module can mint (via the verifier or authorizer), so the
+    /// transport guards (rate limit, idempotency, body cap) and payment verification are not
+    /// bypassable in practice. Do not call it directly; the guarded entry point is
+    /// ``handle(_:body:now:handler:)``.
     func serve(
         _ request: HTTPRequest,
         verified: MPPVerified,

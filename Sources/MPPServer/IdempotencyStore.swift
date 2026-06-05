@@ -8,6 +8,7 @@ public struct IdempotentResponse: Sendable {
     /// The response body to replay.
     public let body: Data
 
+    /// Creates a captured response for idempotent replay.
     public init(response: HTTPResponse, body: Data) {
         self.response = response
         self.body = body
@@ -58,6 +59,7 @@ public actor InMemoryIdempotencyStore: IdempotencyStore {
 
     private var states: [String: State] = [:]
 
+    /// Creates an empty store.
     public init() {}
 
     public func begin(_ key: String) -> IdempotencyOutcome {
