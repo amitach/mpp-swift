@@ -62,24 +62,29 @@ public struct EthereumAddress: Sendable, Hashable {
     /// an expected address. Shared by the proof and voucher verify paths.
     public static func recover(hash: Data, signature: Data) -> EthereumAddress? {
         guard let recoverable = RecoverableSignature(ethereumWire: signature) else { return nil }
-        guard let publicKey = Secp256k1Signer.recoverPublicKey(
-            hash: hash, signature: recoverable
-        ) else { return nil }
-        return EthereumAddress(uncompressedPublicKey: publicKey)
+        return recover(hash: hash, recoverable: recoverable)
     }
 
     /// Recovers the signer under a ``SignatureMalleabilityPolicy``: identical to
     /// ``recover(hash:signature:)`` except that ``SignatureMalleabilityPolicy/rejectHighS`` returns
-    /// `nil` for a non-canonical high-`s` signature before recovering.
-    /// ``SignatureMalleabilityPolicy/accepted``
-    /// (the default elsewhere) is exactly the policy-free behavior.
+    /// `nil` for a non-canonical high-`s` signature. ``SignatureMalleabilityPolicy/accepted`` (the
+    /// default elsewhere) is exactly the policy-free behavior.
     public static func recover(
         hash: Data, signature: Data, malleability: SignatureMalleabilityPolicy
     ) -> EthereumAddress? {
-        if case .rejectHighS = malleability {
-            guard let parsed = RecoverableSignature(ethereumWire: signature),
-                  parsed.isLowS else { return nil }
-        }
-        return recover(hash: hash, signature: signature)
+        guard let recoverable = RecoverableSignature(ethereumWire: signature),
+              malleability.allows(recoverable) else { return nil }
+        return recover(hash: hash, recoverable: recoverable)
+    }
+
+    /// The recovery core, from an already-parsed signature: both public overloads parse the wire
+    /// bytes exactly once and delegate here.
+    private static func recover(
+        hash: Data, recoverable: RecoverableSignature
+    ) -> EthereumAddress? {
+        guard let publicKey = Secp256k1Signer.recoverPublicKey(
+            hash: hash, signature: recoverable
+        ) else { return nil }
+        return EthereumAddress(uncompressedPublicKey: publicKey)
     }
 }
