@@ -28,6 +28,21 @@ public struct PaymentMethodContent: Sendable {
     }
 }
 
+/// One method on a payment page: a challenge, its display amount, and the
+/// method's HTML contribution. A page with several entries renders a tab per
+/// entry; with one, a single form.
+public struct PaymentPageEntry: Sendable {
+    public let challenge: Challenge
+    public let formattedAmount: String
+    public let method: PaymentMethodContent
+
+    public init(challenge: Challenge, formattedAmount: String, method: PaymentMethodContent) {
+        self.challenge = challenge
+        self.formattedAmount = formattedAmount
+        self.method = method
+    }
+}
+
 /// Page-level customization: the labels (``PaymentPageText``) and the visual
 /// theme (``PaymentPageTheme``). Both default to a neutral light/dark scheme.
 public struct PaymentPageConfig: Sendable {
@@ -49,48 +64,54 @@ public struct PaymentPageConfig: Sendable {
 /// Renders the server-side HTML payment page a browser sees when it hits a
 /// paywalled endpoint with `Accept: text/html`. The page presents the amount,
 /// description, and expiry from a ``Challenge``, is themeable, and embeds a JSON
-/// data block plus the payment method's own `<script>` so the method can drive
-/// the form client-side.
-///
-/// This is the single-method renderer; multi-method (tabbed) pages and the
-/// browser service worker that submits the credential are layered on separately.
+/// data block plus each method's own `<script>` so the method can drive the form
+/// client-side. With several methods it renders an accessible tab per method.
 public enum PaymentPage {
     /// Renders the page for one challenge and one payment method.
     ///
     /// - Parameters:
     ///   - challenge: The minted challenge; its `realm`, `description`, and
     ///     `expires` drive the page, and its `id` keys the embedded data.
-    ///   - formattedAmount: The human-readable amount to display (e.g.
-    ///     `1.50 USDC`). The caller formats it; the renderer sanitizes it.
+    ///   - formattedAmount: The human-readable amount (e.g. `1.50 USDC`); the
+    ///     caller formats it, the renderer sanitizes it.
     ///   - method: The payment method's HTML contribution.
     ///   - config: Page text and theme overrides.
+    ///   - pageScript: An optional raw `<script>` emitted once before the method
+    ///     content (e.g. a credential-submission bootstrap).
     /// - Returns: a complete HTML document.
     public static func render(
         challenge: Challenge,
         formattedAmount: String,
         method: PaymentMethodContent,
-        config: PaymentPageConfig = PaymentPageConfig()
+        config: PaymentPageConfig = PaymentPageConfig(),
+        pageScript: String? = nil
     ) -> String {
+        let entry = PaymentPageEntry(
+            challenge: challenge, formattedAmount: formattedAmount, method: method
+        )
+        return render(entries: [entry], config: config, pageScript: pageScript)
+    }
+
+    /// Renders the page for one or more methods. A single entry renders one form;
+    /// several render a tab per entry, the first selected, with the summary
+    /// (amount/description/expiry) switching to the active tab client-side.
+    public static func render(
+        entries: [PaymentPageEntry],
+        config: PaymentPageConfig = PaymentPageConfig(),
+        pageScript: String? = nil
+    ) -> String {
+        precondition(!entries.isEmpty, "A payment page needs at least one entry")
         let theme = config.theme.resolved()
         let text = config.text.resolved()
-        let label = method.label ?? challenge.method.rawValue
-
-        let data = PageData(
-            label: label,
-            rootId: PaymentPageIDs.root,
-            formattedAmount: formattedAmount,
-            config: method.config,
-            challenge: challenge,
-            text: text,
-            theme: theme
-        )
-        let dataJSON = encodeData([challenge.id: data])
-
+        let hasTabs = entries.count > 1
+        let first = entries[0]
+        let dataJSON = encodeData(pageData(entries, hasTabs: hasTabs, text: text, theme: theme))
+        let remaining = hasTabs ? " \(PaymentPageAttrs.remaining)=\"\(entries.count)\"" : ""
         return """
         <!doctype html>
         <html lang="en">
           <head>
-            \(headTags(theme, text: text, realm: challenge.realm))
+            \(headTags(theme, text: text, realm: first.challenge.realm, hasTabs: hasTabs))
           </head>
           <body>
             <main>
@@ -98,27 +119,26 @@ public enum PaymentPage {
                 \(PaymentPageStyle.logo(theme))
                 <span>\(sanitizeHTML(text.paymentRequired))</span>
               </header>
-              <section class="\(PaymentPageClassNames.summary)" aria-label="Payment summary">
-                <h1 class="\(PaymentPageClassNames.summaryAmount)">\(sanitizeHTML(formattedAmount))\
-        </h1>
-                \(summaryDescription(challenge))
-                \(summaryExpires(challenge, text: text))
-              </section>
-              <div id="\(PaymentPageIDs.root)" aria-label="Payment form"></div>
-              <script id="\(PaymentPageIDs.data)" type="application/json">
+              \(summarySection(first, text: text))
+              \(tabList(entries, text: text, hasTabs: hasTabs))
+              \(panels(entries, hasTabs: hasTabs))
+              <script id="\(PaymentPageIDs.data)" type="application/json"\(remaining)>
                 \(dataJSON)
               </script>
-              \(method.content)
+              \(pageScript ?? "")
+              \(contentScripts(entries, hasTabs: hasTabs))
+              \(hasTabs ? PaymentPageTabs.script : "")
             </main>
           </body>
         </html>
         """
     }
 
-    /// The `<head>` contents: metadata, the resolved title, and the preflight,
-    /// favicon, font, and themed style blocks.
+    /// The `<head>` contents: metadata, the resolved title, the preflight,
+    /// favicon, font, and themed style blocks, plus the tab style on a
+    /// multi-method page.
     private static func headTags(
-        _ theme: ResolvedTheme, text: ResolvedText, realm: String
+        _ theme: ResolvedTheme, text: ResolvedText, realm: String, hasTabs: Bool
     ) -> String {
         """
         <meta charset="UTF-8" />
@@ -130,7 +150,19 @@ public enum PaymentPage {
             \(PaymentPageStyle.favicon(theme, realm: realm))
             \(PaymentPageStyle.font(theme))
             \(PaymentPageStyle.style(theme))
+            \(hasTabs ? PaymentPageTabs.style : "")
         """
+    }
+
+    /// The payment summary for the (first) entry: its amount, and the optional
+    /// description and expiry rows. On a multi-method page the tab script swaps
+    /// these to the active tab.
+    private static func summarySection(_ entry: PaymentPageEntry, text: ResolvedText) -> String {
+        let amount = "<h1 class=\"\(PaymentPageClassNames.summaryAmount)\">"
+            + "\(sanitizeHTML(entry.formattedAmount))</h1>"
+        return "<section class=\"\(PaymentPageClassNames.summary)\" aria-label=\"Payment summary\">"
+            + "\(amount)\(summaryDescription(entry.challenge))"
+            + "\(summaryExpires(entry.challenge, text: text))</section>"
     }
 
     /// The optional `<p>` showing the challenge description, sanitized; empty
@@ -142,21 +174,47 @@ public enum PaymentPage {
     }
 
     /// The optional `<p>` showing the expiry as a `<time>` element; empty when
-    /// the challenge has no deadline. `datetime` carries the normalized UTC
-    /// instant; the visible text is a deterministic UTC rendering (the peer uses
-    /// the server locale, which a server-rendered page cannot make reproducible).
+    /// the challenge has no deadline.
     private static func summaryExpires(_ challenge: Challenge, text: ResolvedText) -> String {
         guard let expires = challenge.expires else { return "" }
-        // Formatters are built locally: `ISO8601DateFormatter`/`DateFormatter` are
-        // non-Sendable, so they cannot be shared statics under Swift 6 strict concurrency.
+        let (datetime, display) = expiryParts(expires)
+        return "<p class=\"\(PaymentPageClassNames.summaryExpires)\">\(sanitizeHTML(text.expires)) "
+            + "<time datetime=\"\(datetime)\">\(display)</time></p>"
+    }
+
+    /// The normalized UTC `datetime` and the deterministic display string for an
+    /// expiry. `datetime` is ISO 8601; the display is a fixed `en_US_POSIX`/UTC
+    /// rendering (the peer uses the server locale, which a server-rendered page
+    /// cannot make reproducible). Built locally: the formatters are non-Sendable
+    /// under Swift 6 strict concurrency, so they cannot be shared statics.
+    static func expiryParts(_ expires: Expires) -> (datetime: String, display: String) {
         let datetime = ISO8601DateFormatter().string(from: expires.date)
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "UTC")
         formatter.dateFormat = "MMM d, yyyy, h:mm:ss a 'UTC'"
-        let display = formatter.string(from: expires.date)
-        return "<p class=\"\(PaymentPageClassNames.summaryExpires)\">\(sanitizeHTML(text.expires)) "
-            + "<time datetime=\"\(datetime)\">\(display)</time></p>"
+        return (datetime, formatter.string(from: expires.date))
+    }
+
+    /// The per-challenge data map. Each entry's form mounts at `root` (single
+    /// method) or `root-{i}` (one per tab panel).
+    private static func pageData(
+        _ entries: [PaymentPageEntry], hasTabs: Bool, text: ResolvedText, theme: ResolvedTheme
+    ) -> [String: PageData] {
+        var map: [String: PageData] = [:]
+        for (index, entry) in entries.enumerated() {
+            let rootId = hasTabs ? "\(PaymentPageIDs.root)-\(index)" : PaymentPageIDs.root
+            map[entry.challenge.id] = PageData(
+                label: entry.method.label ?? entry.challenge.method.rawValue,
+                rootId: rootId,
+                formattedAmount: entry.formattedAmount,
+                config: entry.method.config,
+                challenge: entry.challenge,
+                text: text,
+                theme: theme
+            )
+        }
+        return map
     }
 
     /// JSON-encodes the per-challenge data map deterministically (sorted keys),

@@ -9,11 +9,12 @@ let secret = Data("test-secret-key-12345".utf8)
 let now = Date(timeIntervalSince1970: 1_767_312_000)
 
 /// A challenge minted for the test route, so the presenter has a realistic value.
-func makeChallenge() throws -> Challenge {
+/// Pass a distinct `method` to mint a distinct challenge (e.g. for multi-method).
+func makeChallenge(method: String = "tempo") throws -> Challenge {
     let signer = ChallengeSigner(secret: secret)
     let binding = try RouteBinding(
         realm: "api.example.com",
-        method: MethodName("tempo"),
+        method: MethodName(method),
         intent: .charge
     )
     return ChallengeMinter(signer: signer).mint(

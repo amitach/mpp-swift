@@ -31,11 +31,13 @@ public struct PresentedChallenge: Sendable {
 /// `MPPHTMLServer`) into ``MPPServerMiddleware``.
 public protocol ChallengePresenter: Sendable {
     /// Optionally renders the challenge body. `request` carries the negotiation
-    /// inputs (e.g. the `Accept` header); `challenge` and `problem` are the same
-    /// values the default response would carry. Return `nil` to use the default.
+    /// inputs (e.g. the `Accept` header); `challenges` is every offered method's
+    /// challenge (one per `WWW-Authenticate` header, the first being the primary)
+    /// and `problem` is the same value the default response would carry. Return
+    /// `nil` to use the default.
     func present(
         _ request: HTTPRequest,
-        challenge: Challenge,
+        challenges: [Challenge],
         problem: ProblemDetails
     ) async -> PresentedChallenge?
 }
