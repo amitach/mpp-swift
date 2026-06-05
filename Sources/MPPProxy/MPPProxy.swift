@@ -33,6 +33,9 @@ public struct MPPProxy: Sendable {
     private let transport: any MPPHTTPTransport
     private let openAPIData: Data
     private let llmsText: String
+    /// An opt-in CORS policy for the discovery surfaces, or `nil` to emit no CORS headers
+    /// (the default, byte-identical to the reference peer).
+    private let cors: CORSPolicy?
 
     /// Creates a proxy over `services`.
     ///
@@ -44,6 +47,8 @@ public struct MPPProxy: Sendable {
     ///   - transport: the seam used to forward to origins; defaults to ``URLSessionTransport``.
     ///   - title: the human title for `/llms.txt`; defaults to `info.title`.
     ///   - description: the `/llms.txt` description line.
+    ///   - cors: an optional CORS policy for the discovery surfaces; `nil` (default) emits no CORS
+    ///     headers, matching the reference peer. ``CORSPolicy/allowAnyOrigin`` enables `*`.
     /// - Throws: if the discovery document cannot be generated from the route tables.
     public init(
         services: [ProxyService],
@@ -51,7 +56,8 @@ public struct MPPProxy: Sendable {
         basePath: String? = nil,
         transport: any MPPHTTPTransport = URLSessionTransport(),
         title: String? = nil,
-        description: String = "Paid API proxy powered by the Machine Payments Protocol."
+        description: String = "Paid API proxy powered by the Machine Payments Protocol.",
+        cors: CORSPolicy? = nil
     ) throws {
         // Deduplicate by service id (first wins) preserving declaration order, then build routing,
         // /openapi.json, and /llms.txt all from that one list so they describe an identical set of
@@ -70,6 +76,7 @@ public struct MPPProxy: Sendable {
             services: uniqueServices, title: title ?? info.title, description: description,
             basePath: basePath
         )
+        self.cors = cors
     }
 
     /// Evaluates one request and produces its response.
@@ -83,11 +90,16 @@ public struct MPPProxy: Sendable {
         }
         let (path, query) = Self.splitQuery(pathname)
 
-        if request.method == .get, path == "/openapi.json" {
-            return Self.dataResponse(openAPIData, contentType: "application/json")
-        }
-        if request.method == .get, path == "/llms.txt" {
-            return Self.textResponse(llmsText)
+        if Self.isDiscoveryPath(path) {
+            // The discovery surfaces are the only paths a CORS policy applies to: serve the doc on
+            // GET (with CORS headers if opted in) and answer an OPTIONS preflight.
+            if request.method == .options, let cors { return Self.corsPreflight(cors) }
+            if request.method == .get, path == "/openapi.json" {
+                return applyCORS(Self.dataResponse(openAPIData, contentType: "application/json"))
+            }
+            if request.method == .get, path == "/llms.txt" {
+                return applyCORS(Self.textResponse(llmsText))
+            }
         }
 
         let segments = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
@@ -172,6 +184,34 @@ public struct MPPProxy: Sendable {
         guard !basePath.isEmpty, basePath != "/" else { return path }
         let trimmed = basePath.hasSuffix("/") ? String(basePath.dropLast()) : basePath
         return "\(trimmed)\(path)"
+    }
+
+    // MARK: - CORS
+
+    private static func isDiscoveryPath(_ path: String) -> Bool {
+        path == "/openapi.json" || path == "/llms.txt"
+    }
+
+    /// Adds the discovery CORS headers to `result` if a policy is configured; otherwise returns it
+    /// unchanged. A specific (non-wildcard) origin also sets `Vary: Origin` so a shared cache keys
+    /// the response by origin.
+    private func applyCORS(_ result: (HTTPResponse, Data)) -> (HTTPResponse, Data) {
+        guard let cors else { return result }
+        var (response, body) = result
+        response.headerFields[.accessControlAllowOrigin] = cors.allowOrigin
+        if cors.isOriginSpecific { response.headerFields[.vary] = "Origin" }
+        return (response, body)
+    }
+
+    /// The `OPTIONS` preflight response for a discovery path: `204` with the access-control headers
+    /// (the docs are read-only, so only `GET` is advertised).
+    private static func corsPreflight(_ cors: CORSPolicy) -> (HTTPResponse, Data) {
+        var response = HTTPResponse(status: .noContent)
+        response.headerFields[.accessControlAllowOrigin] = cors.allowOrigin
+        response.headerFields[.accessControlAllowMethods] = "GET, OPTIONS"
+        response.headerFields[.accessControlMaxAge] = "600"
+        if cors.isOriginSpecific { response.headerFields[.vary] = "Origin" }
+        return (response, Data())
     }
 
     // MARK: - Responses
