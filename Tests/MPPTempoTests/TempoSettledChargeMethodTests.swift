@@ -62,10 +62,6 @@ struct TempoSettledChargeMethodTests {
         )
     }
 
-    private func hex(_ data: Data) -> String {
-        data.map { String(format: "%02x", $0) }.joined()
-    }
-
     // MARK: supports
 
     @Test("supports a non-zero charge with recipient + currency and pull allowed")
@@ -167,6 +163,31 @@ struct TempoSettledChargeMethodTests {
             _ = try await method(builder: StubTransferBuilder(), approval: .deny)
                 .buildCredential(for: chargeChallenge())
         }
+    }
+
+    @Test("a malformed server-pinned memo is rejected (fail closed)")
+    func rejectsInvalidPinnedMemo() async throws {
+        // Not hex.
+        await #expect(throws: TempoSettledChargeError.invalidMemo) {
+            _ = try await method(builder: StubTransferBuilder())
+                .buildCredential(for: chargeChallenge(memo: "0xnothex"))
+        }
+        // Valid hex, wrong length (16 bytes, not 32).
+        await #expect(throws: TempoSettledChargeError.invalidMemo) {
+            _ = try await method(builder: StubTransferBuilder())
+                .buildCredential(for: chargeChallenge(memo: "0x" + String(
+                    repeating: "ab",
+                    count: 16
+                )))
+        }
+    }
+
+    @Test("advertises exactly the tempo/charge payment range")
+    func advertisesChargeRange() throws {
+        let ranges = try method(builder: StubTransferBuilder()).paymentRanges
+        #expect(ranges.count == 1)
+        #expect(ranges.first?.method == .value(TempoMethod.name))
+        #expect(ranges.first?.intent == .value(.charge))
     }
 }
 

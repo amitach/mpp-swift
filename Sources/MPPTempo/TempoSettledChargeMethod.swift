@@ -160,7 +160,7 @@ public struct TempoSettledChargeMethod: PaymentMethodClient {
                 parameters, chainID: chainId
             )
         } catch {
-            throw TempoSettledChargeError.buildFailed(error)
+            throw TempoSettledChargeError.buildFailed(String(describing: error))
         }
 
         let payload: [String: JSONValue] = [
@@ -195,7 +195,8 @@ public struct TempoSettledChargeMethod: PaymentMethodClient {
     /// `validBefore` for the expiring-nonce tx: `now + window`, capped at the challenge's own
     /// expiry, in unix seconds. Mirrors the reference client.
     private func validBefore(for expires: Expires?) -> UInt64 {
-        let windowDeadline = UInt64(now().timeIntervalSince1970) + windowSeconds
+        // `max(0, ...)` so a clock returning a pre-epoch date cannot trap the UInt64 conversion.
+        let windowDeadline = UInt64(max(0, now().timeIntervalSince1970)) + windowSeconds
         guard let expires else { return windowDeadline }
         let challengeExpiry = UInt64(max(0, expires.date.timeIntervalSince1970))
         return min(windowDeadline, challengeExpiry)
@@ -219,7 +220,7 @@ public struct TempoSettledChargeMethod: PaymentMethodClient {
 }
 
 /// A reason ``TempoSettledChargeMethod`` could not build a credential.
-public enum TempoSettledChargeError: Error, Sendable {
+public enum TempoSettledChargeError: Error, Sendable, Hashable {
     /// The challenge is not a Tempo charge (wrong `method` or `intent`).
     case wrongMethodOrIntent
     /// The challenge `request` could not be decoded.
@@ -236,6 +237,7 @@ public enum TempoSettledChargeError: Error, Sendable {
     case invalidMemo
     /// The pre-sign approval policy rejected the charge.
     case approvalDenied
-    /// The transfer transaction could not be built (an underlying builder error).
-    case buildFailed(any Error)
+    /// The transfer transaction could not be built; carries the underlying builder error's
+    /// description (a `String`, so the type stays `Hashable` like its peers).
+    case buildFailed(String)
 }
