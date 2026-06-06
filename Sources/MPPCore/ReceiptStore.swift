@@ -12,7 +12,9 @@
 /// should log and recover internally; one that needs guaranteed durability should make its write
 /// durable (a write-ahead log or transaction) rather than rely on the caller to retry.
 public protocol ReceiptStore: Sendable {
-    /// Records `receipt`. Best-effort: never throws, never blocks the settled response.
+    /// Records `receipt`. Best-effort: it never throws. The 402 client awaits it after the payment
+    /// has settled (so the receipt is recorded before the caller proceeds), so a durable
+    /// implementation should keep the write fast or hand it off to its own queue rather than block.
     func record(_ receipt: Receipt) async
 }
 
