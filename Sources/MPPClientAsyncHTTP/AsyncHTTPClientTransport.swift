@@ -2,6 +2,7 @@ import AsyncHTTPClient
 import Foundation
 import HTTPTypes
 import MPPClient
+import NIOConcurrencyHelpers
 import NIOCore
 import NIOHTTP1
 
@@ -32,6 +33,9 @@ public final class AsyncHTTPClientTransport: MPPHTTPTransport {
     private let ownsClient: Bool
     private let requestTimeout: TimeAmount
     private let maxResponseBytes: Int
+    // Guards the owned client against a double shutdown (which traps). A locked flag, not an actor,
+    // so `send` stays non-isolated and concurrent over the pooled client.
+    private let didShutDown = NIOLockedValueBox(false)
 
     /// Creates a transport that owns a private, redirect-disallowing ``HTTPClient`` over SwiftNIO's
     /// shared singleton event-loop group.
@@ -74,9 +78,17 @@ public final class AsyncHTTPClientTransport: MPPHTTPTransport {
     }
 
     /// Shuts down the owned ``HTTPClient``; a no-op for an injected client (its owner shuts it
-    /// down). Safe to call once -- calling it again after shutdown traps, like the client itself.
+    /// down). Idempotent: the first call shuts the client down, later calls return without
+    /// re-entering `HTTPClient.shutdown()` (which itself traps on a second call), so the transport
+    /// is safe to shut down on both a success and an error path.
     public func shutdown() async throws {
-        if ownsClient { try await client.shutdown() }
+        guard ownsClient else { return }
+        let shouldShutDown = didShutDown.withLockedValue { alreadyDown in
+            if alreadyDown { return false }
+            alreadyDown = true
+            return true
+        }
+        if shouldShutDown { try await client.shutdown() }
     }
 
     public func send(_ request: HTTPRequest, body: Data) async throws -> (HTTPResponse, Data) {
