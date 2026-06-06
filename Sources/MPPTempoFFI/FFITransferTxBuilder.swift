@@ -32,7 +32,9 @@ public struct FFITransferTxBuilder: TempoTransferTxBuilder {
         _ parameters: TempoTransferParameters,
         chainID: UInt64
     ) async throws -> Data {
-        let nonce = try await nonceProvider(parameters.payer)
+        // Push mode reads the payer's sequential nonce; pull mode's expiring-nonce tx ignores it
+        // (replay-guarded by the tx hash), so skip the nonce read entirely there.
+        let nonce = parameters.validBefore == nil ? try await nonceProvider(parameters.payer) : 0
         do {
             return try MPPTempoFFI.buildTransferTransaction(
                 chainId: chainID,
@@ -45,7 +47,8 @@ public struct FFITransferTxBuilder: TempoTransferTxBuilder {
                 currency: parameters.currency.bytes,
                 recipient: parameters.recipient.bytes,
                 amount: parameters.amount,
-                memo: parameters.memo
+                memo: parameters.memo,
+                validBefore: parameters.validBefore
             )
         } catch let error as FfiError {
             throw FFITempoTxBuilder.map(error)

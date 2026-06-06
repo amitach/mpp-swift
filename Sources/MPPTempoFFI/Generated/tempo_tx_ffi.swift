@@ -592,6 +592,30 @@ public func FfiConverterTypeFfiError_lower(_ value: FfiError) -> RustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
+    typealias SwiftType = UInt64?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt64.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt64.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionData: FfiConverterRustBuffer {
     typealias SwiftType = Data?
 
@@ -712,9 +736,12 @@ public func buildTopUpTransaction(chainId: UInt64, nonce: UInt64, maxFeePerGas: 
  * UniFFI entry point: build + sign + RLP-encode a one-time settled-charge `0x76` tx (one
  * `transferWithMemo` call, signed directly by the payer). `amount` is a decimal `u256` string;
  * `currency` / `recipient` are 20-byte addresses; `private_key` (the payer) and `memo` are 32
- * bytes; `fee_token` is the optional 20-byte gas token.
+ * bytes; `fee_token` is the optional 20-byte gas token. `valid_before` selects the mode: `None`
+ * builds a sequential-nonce tx for the payer to broadcast (push / `hash` credential); `Some(unix
+ * seconds)` builds an expiring-nonce tx the 402 server broadcasts within the window (pull /
+ * `transaction` credential).
  */
-public func buildTransferTransaction(chainId: UInt64, nonce: UInt64, maxFeePerGas: String, maxPriorityFeePerGas: String, gasLimit: UInt64, feeToken: Data?, privateKey: Data, currency: Data, recipient: Data, amount: String, memo: Data)throws  -> Data  {
+public func buildTransferTransaction(chainId: UInt64, nonce: UInt64, maxFeePerGas: String, maxPriorityFeePerGas: String, gasLimit: UInt64, feeToken: Data?, privateKey: Data, currency: Data, recipient: Data, amount: String, memo: Data, validBefore: UInt64?)throws  -> Data  {
     return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
     uniffi_tempo_tx_ffi_fn_func_build_transfer_transaction(
         FfiConverterUInt64.lower(chainId),
@@ -727,7 +754,8 @@ public func buildTransferTransaction(chainId: UInt64, nonce: UInt64, maxFeePerGa
         FfiConverterData.lower(currency),
         FfiConverterData.lower(recipient),
         FfiConverterString.lower(amount),
-        FfiConverterData.lower(memo),$0
+        FfiConverterData.lower(memo),
+        FfiConverterOptionUInt64.lower(validBefore),$0
     )
 })
 }
@@ -759,7 +787,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tempo_tx_ffi_checksum_func_build_top_up_transaction() != 53419) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tempo_tx_ffi_checksum_func_build_transfer_transaction() != 13661) {
+    if (uniffi_tempo_tx_ffi_checksum_func_build_transfer_transaction() != 22009) {
         return InitializationResult.apiChecksumMismatch
     }
 

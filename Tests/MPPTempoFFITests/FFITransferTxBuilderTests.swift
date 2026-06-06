@@ -46,14 +46,30 @@ struct FFITransferTxBuilderTests {
         data.map { String(format: "%02x", $0) }.joined()
     }
 
-    private func parameters(privateKey: Data? = nil) throws -> TempoTransferParameters {
+    // The pull-mode (expiring-nonce) golden, shared with the Rust GOLDEN_SETTLED_CHARGE_PULL_TX:
+    // the a0ffff..ff is the expiring nonce key (U256::MAX), 80 is nonce 0, 8469570a99 is the
+    // validBefore (1767312025) the server broadcasts before.
+    private static let goldenTransferPull =
+        "76f8ff82a5bf830f4240843b9aca00830186a0f87ef87c9420c000000000000000000000000000000000" +
+        "000180b86495777d59000000000000000000000000111111111111111111111111111111111111111100" +
+        "000000000000000000000000000000000000000000000000000000000f4240ababababababababababab" +
+        "abababababababababababababababababababababc0a0ffffffffffffffffffffffffffffffffffffff" +
+        "ffffffffffffffffffffffffff808469570a99808080c0b84172b990027d92453d0f99f7cf41614e7de6" +
+        "edc371469dcb71a423692b5c65f1cc5c9c403cf1af0ec14b82ec9887277e9c40eeac489089ed6131715b" +
+        "a2cef0e9211b"
+
+    private func parameters(
+        privateKey: Data? = nil,
+        validBefore: UInt64? = nil
+    ) throws -> TempoTransferParameters {
         try TempoTransferParameters(
             payerPrivateKey: privateKey ?? payerKey,
             payer: #require(EthereumAddress(hex: payerHex)),
             currency: #require(EthereumAddress(hex: "0x20c0000000000000000000000000000000000001")),
             recipient: #require(EthereumAddress(hex: "0x1111111111111111111111111111111111111111")),
             amount: "1000000",
-            memo: Data(repeating: 0xAB, count: 32)
+            memo: Data(repeating: 0xAB, count: 32),
+            validBefore: validBefore
         )
     }
 
@@ -77,6 +93,22 @@ struct FFITransferTxBuilderTests {
         })
         _ = try await builder.buildTransferTransaction(parameters(), chainID: chainID)
         #expect(seen.value == expected)
+    }
+
+    @Test("pull mode builds the byte-exact expiring-nonce charge, without reading the nonce")
+    func buildsGoldenPullTransfer() async throws {
+        let probed = LockedTransferAddress()
+        let builder = builder(nonceProvider: { [nonce] address in
+            probed.set(address)
+            return nonce
+        })
+        let transaction = try await builder.buildTransferTransaction(
+            parameters(validBefore: 1_767_312_025), chainID: chainID
+        )
+        #expect(transaction.first == 0x76)
+        #expect(hex(transaction) == Self.goldenTransferPull)
+        #expect(hex(transaction) != Self.goldenTransfer) // differs from the push tx
+        #expect(probed.value == nil) // pull mode does not read a sequential nonce
     }
 
     @Test("an invalid payer key surfaces as a typed error, not a crash")

@@ -30,15 +30,23 @@ public struct TempoTransferParameters: Sendable {
     public let amount: String
     /// The 32-byte MPP attribution memo carried by `transferWithMemo` (see ``Attribution``).
     public let memo: Data
+    /// The charge's submission mode, per `draft-tempo-charge-00`:
+    /// - `nil` -- **push**: a sequential-nonce tx the payer broadcasts itself (the `hash`
+    ///   credential); the builder reads ``payer``'s nonce.
+    /// - a unix-seconds deadline (at most 30s out) -- **pull**: an expiring-nonce tx the 402 server
+    ///   broadcasts within the window (the `transaction` credential). The sequential nonce is
+    ///   unused -- an expiring-nonce tx is replay-guarded by its hash.
+    public let validBefore: UInt64?
 
-    /// Creates the transfer inputs.
+    /// Creates the transfer inputs. `validBefore` defaults to `nil` (push mode).
     public init(
         payerPrivateKey: Data,
         payer: EthereumAddress,
         currency: EthereumAddress,
         recipient: EthereumAddress,
         amount: String,
-        memo: Data
+        memo: Data,
+        validBefore: UInt64? = nil
     ) {
         self.payerPrivateKey = payerPrivateKey
         self.payer = payer
@@ -46,6 +54,7 @@ public struct TempoTransferParameters: Sendable {
         self.recipient = recipient
         self.amount = amount
         self.memo = memo
+        self.validBefore = validBefore
     }
 }
 
