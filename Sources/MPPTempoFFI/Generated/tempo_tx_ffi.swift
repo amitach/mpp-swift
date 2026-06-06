@@ -708,6 +708,29 @@ public func buildTopUpTransaction(chainId: UInt64, nonce: UInt64, maxFeePerGas: 
     )
 })
 }
+/**
+ * UniFFI entry point: build + sign + RLP-encode a one-time settled-charge `0x76` tx (one
+ * `transferWithMemo` call, signed directly by the payer). `amount` is a decimal `u256` string;
+ * `currency` / `recipient` are 20-byte addresses; `private_key` (the payer) and `memo` are 32
+ * bytes; `fee_token` is the optional 20-byte gas token.
+ */
+public func buildTransferTransaction(chainId: UInt64, nonce: UInt64, maxFeePerGas: String, maxPriorityFeePerGas: String, gasLimit: UInt64, feeToken: Data?, privateKey: Data, currency: Data, recipient: Data, amount: String, memo: Data)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_tempo_tx_ffi_fn_func_build_transfer_transaction(
+        FfiConverterUInt64.lower(chainId),
+        FfiConverterUInt64.lower(nonce),
+        FfiConverterString.lower(maxFeePerGas),
+        FfiConverterString.lower(maxPriorityFeePerGas),
+        FfiConverterUInt64.lower(gasLimit),
+        FfiConverterOptionData.lower(feeToken),
+        FfiConverterData.lower(privateKey),
+        FfiConverterData.lower(currency),
+        FfiConverterData.lower(recipient),
+        FfiConverterString.lower(amount),
+        FfiConverterData.lower(memo),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -734,6 +757,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tempo_tx_ffi_checksum_func_build_top_up_transaction() != 53419) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tempo_tx_ffi_checksum_func_build_transfer_transaction() != 13661) {
         return InitializationResult.apiChecksumMismatch
     }
 
