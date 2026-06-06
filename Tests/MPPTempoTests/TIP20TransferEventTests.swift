@@ -80,6 +80,20 @@ struct TIP20TransferEventTests {
         #expect(TIP20TransferEvent.transferWithMemo(from: threeTopics) == nil)
     }
 
+    @Test("an address topic with non-zero high padding bytes is rejected")
+    func rejectsNonZeroAddressPadding() throws {
+        let log = try validLog()
+        // Corrupt the high padding of the `from` topic (byte 0 set): not a valid indexed address.
+        var corruptWord = try #require(Data(hexPrefixed: log.topics[1]))
+        corruptWord[corruptWord.startIndex] = 0x01
+        let corrupt = EVMLog(
+            address: log.address,
+            topics: [log.topics[0], corruptWord.hexPrefixed] + log.topics.dropFirst(2),
+            data: log.data
+        )
+        #expect(TIP20TransferEvent.transferWithMemo(from: corrupt) == nil)
+    }
+
     @Test("a non-32-byte memo topic is rejected")
     func rejectsShortMemo() throws {
         let log = try validLog()

@@ -64,9 +64,13 @@ public enum TIP20TransferEvent {
     }
 
     /// An address from a 32-byte indexed topic word: the address is right-aligned in the low 20
-    /// bytes (the high 12 are zero padding).
+    /// bytes, and the high 12 bytes MUST be zero padding (EVM ABI). A non-zero high half is a
+    /// malformed topic and is rejected, so a verifier never reads a corrupted word as a valid
+    /// address.
     private static func address(fromTopic topic: String) -> EthereumAddress? {
-        guard let word = Data(hexPrefixed: topic), word.count == 32 else { return nil }
+        guard let word = Data(hexPrefixed: topic), word.count == 32,
+              word.prefix(12).allSatisfy({ $0 == 0 })
+        else { return nil }
         return EthereumAddress(bytes: Data(word.suffix(20)))
     }
 }
