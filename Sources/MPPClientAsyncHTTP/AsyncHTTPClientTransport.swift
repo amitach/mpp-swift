@@ -98,7 +98,9 @@ public final class AsyncHTTPClientTransport: MPPHTTPTransport {
         var outbound = HTTPClientRequest(url: "\(scheme)://\(authority)\(request.path ?? "")")
         outbound.method = HTTPMethod(rawValue: request.method.rawValue)
         for field in request.headerFields {
-            outbound.headers.add(name: field.name.canonicalName, value: field.value)
+            // `rawName` preserves the caller's casing (`Authorization`, not `authorization`),
+            // matching URLSessionTransport; HTTP/1.1 field names are case-insensitive either way.
+            outbound.headers.add(name: field.name.rawName, value: field.value)
         }
         if !body.isEmpty { outbound.body = .bytes(body) }
 

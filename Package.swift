@@ -41,6 +41,7 @@ let package = Package(
         .library(name: "MPPBodyDigest", targets: ["MPPBodyDigest"]),
         .library(name: "MPPServer", targets: ["MPPServer"]),
         .library(name: "MPPClient", targets: ["MPPClient"]),
+        .library(name: "MPPClientAsyncHTTP", targets: ["MPPClientAsyncHTTP"]),
         .library(name: "MPPAuth", targets: ["MPPAuth"]),
         .library(name: "MPPEVM", targets: ["MPPEVM"]),
         .library(name: "MPPDiscovery", targets: ["MPPDiscovery"]),
