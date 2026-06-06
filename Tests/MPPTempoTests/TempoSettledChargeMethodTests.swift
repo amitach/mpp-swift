@@ -77,6 +77,9 @@ struct TempoSettledChargeMethodTests {
             .supports(chargeChallenge(amount: "0")) == false) // zero is the proof path
         #expect(try subject.supports(chargeChallenge(recipient: nil)) == false)
         #expect(try subject.supports(chargeChallenge(currency: nil)) == false)
+        // present but not a valid address -> unsupported (supports() agrees with buildCredential)
+        #expect(try subject.supports(chargeChallenge(currency: "not-an-address")) == false)
+        #expect(try subject.supports(chargeChallenge(recipient: "0x1234")) == false)
         #expect(try subject.supports(chargeChallenge(supportedModes: ["push"])) == false)
         #expect(try subject.supports(chargeChallenge(intent: "session")) == false)
     }

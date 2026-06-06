@@ -81,12 +81,18 @@ public struct TempoSettledChargeMethod: PaymentMethodClient {
     }
 
     /// Whether this is a `tempo` / `charge` challenge with a decodable **non-zero** request that
-    /// carries a `recipient` and `currency` and is not constrained to push-only modes.
+    /// carries a valid-address `recipient` and `currency` and is not constrained to push-only
+    /// modes.
+    ///
+    /// The addresses are parsed here (not merely checked for presence), so `supports` agrees with
+    /// ``buildCredential(for:)`` -- which also requires them to parse -- and the flow never selects
+    /// this method for a charge it would then reject (matching ``TempoChannelMethod``).
     public func supports(_ challenge: Challenge) -> Bool {
         guard challenge.method == TempoMethod.name, challenge.intent == .charge,
               let request = try? TempoChargeRequest(challenge: challenge),
               !request.isZeroAmount,
-              request.recipient != nil, request.currency != nil
+              let currency = request.currency, EthereumAddress(hex: currency) != nil,
+              let recipient = request.recipient, EthereumAddress(hex: recipient) != nil
         else { return false }
         return Self.allowsPull(request.supportedModes)
     }
