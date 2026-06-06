@@ -1135,6 +1135,49 @@ mod tests {
 
     const GOLDEN_SETTLED_CHARGE_TX: &str = "76f8db82a5bf830f4240843b9aca00830186a0f87ef87c9420c000000000000000000000000000000000000180b86495777d59000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000f4240ababababababababababababababababababababababababababababababababc0800780808080c0b841d7b99f66aef71299b88eafbde28f651fff83f108f2991e33f7b0df70d4e6b70840330de8ed936d7def1a41d93e67da4a194b0d59170ed49763c6a91e2c7501971c";
 
+    /// The UniFFI wrapper for the settled charge parses the FFI-friendly types (scalars,
+    /// `Vec<u8>`, decimal `String`s) to the same inputs and produces the identical golden bytes,
+    /// so the boundary marshalling is faithful (parity with the close/open/topUp wrapper tests).
+    #[test]
+    fn ffi_transfer_wrapper_matches_golden() {
+        use alloy_primitives::address;
+        let bytes = build_transfer_transaction(
+            42431,
+            7,
+            "1000000000".into(),
+            "1000000".into(),
+            100_000,
+            None,
+            vec![0x01; 32],
+            address!("20c0000000000000000000000000000000000001").to_vec(),
+            address!("1111111111111111111111111111111111111111").to_vec(),
+            "1000000".into(),
+            vec![0xAB; 32],
+        )
+        .expect("build");
+        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, GOLDEN_SETTLED_CHARGE_TX);
+    }
+
+    #[test]
+    fn ffi_transfer_wrapper_rejects_bad_lengths() {
+        // A 31-byte key -> InvalidInput, not a panic.
+        let result = build_transfer_transaction(
+            42431,
+            7,
+            "1".into(),
+            "1".into(),
+            1,
+            None,
+            vec![0x01; 31],
+            vec![0x20; 20],
+            vec![0x11; 20],
+            "1".into(),
+            vec![0xAB; 32],
+        );
+        assert!(matches!(result, Err(FfiError::InvalidInput(_))));
+    }
+
     /// The sponsored provisioning charge: a gas sponsor (`fee_payer`) signs the fee-payer
     /// signature so the access key's per-period spending limit only has to cover the transfer
     /// (the chain meters gas in the fee token and would otherwise draw it from that limit). Locks
