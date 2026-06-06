@@ -5,8 +5,11 @@
 //! version bump rather than a hand-maintained Swift port. No hand-rolled encoding.
 //!
 //! Builds the escrow `open`, `topUp`, and `close` transactions (open/topUp are two-call
-//! txs: an ERC-20 `approve` then the escrow call). Two surfaces each: the typed Rust
-//! builders (`build_open_tx` / `build_top_up_tx` / `build_close_tx`, used by the in-crate
+//! txs: an ERC-20 `approve` then the escrow call), plus the two `transferWithMemo` builders:
+//! the recurring subscription charge (signed by an access key as a V2 keychain signature,
+//! optional fee-payer sponsor) and the one-time settled charge (signed directly by the payer).
+//! Two surfaces each: the typed Rust builders (`build_open_tx` / `build_top_up_tx` /
+//! `build_close_tx` / `build_subscription_charge_tx` / `build_transfer_tx`, used by the in-crate
 //! tests) and the UniFFI exports (FFI-friendly types: scalars, `Vec<u8>`, and decimal
 //! `String`s for `u128` / `u256`) that the Swift wrapper calls. It is
 //! packaged into the `TempoTxFFI` xcframework (`build-xcframework.sh`, macOS + iOS
