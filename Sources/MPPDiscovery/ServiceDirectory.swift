@@ -21,6 +21,23 @@ public struct ServiceDirectoryEntry: Sendable, Hashable, Codable {
     /// directory.
     public let categories: [String]
 
+    /// Creates a directory entry. Decoding from the directory's JSON is the usual path; this
+    /// initializer lets a consumer build one directly (a fixture, a test, a hand-assembled
+    /// directory), matching the explicit `public init` every other ``MPPDiscovery`` model declares.
+    public init(
+        id: String,
+        name: String,
+        serviceURL: String,
+        description: String,
+        categories: [String]
+    ) {
+        self.id = id
+        self.name = name
+        self.serviceURL = serviceURL
+        self.description = description
+        self.categories = categories
+    }
+
     /// ``serviceURL`` parsed, or `nil` if it is not a valid URL.
     public var url: URL? {
         URL(string: serviceURL)
@@ -44,7 +61,7 @@ public struct ServiceDirectoryEntry: Sendable, Hashable, Codable {
 /// fetches the text over its own transport and calls ``parse(_:)``.
 public enum ServiceDirectory {
     /// Parses directory `text` into entries. Accepts either the raw JSON array or the full
-    /// `llms.txt` markdown (the fenced ```` ```json ```` block is extracted &mdash; the markdown
+    /// `llms.txt` markdown (the fenced ```` ```json ```` block is extracted -- the markdown
     /// preamble may itself contain bracketed example JSON, so a naive first-`[`-to-last-`]` scan
     /// would be wrong).
     ///
@@ -65,21 +82,38 @@ public enum ServiceDirectory {
     }
 
     /// The content of the first ```` ```json … ``` ```` fenced block, or `nil` if the text carries
-    /// no such fence (a raw JSON payload). The opening tag must be followed by a fence boundary
-    /// (whitespace / newline), so a ```` ```jsonl ````/```` ```jsonc ```` block is not mistaken for
-    /// it.
+    /// no such fence (a raw JSON payload). The opening tag must be followed by an ASCII fence
+    /// boundary (space, tab, or line break) so a ```` ```jsonl ````/```` ```jsonc ```` block is not
+    /// mistaken for it, and the closing ```` ``` ```` must begin its own line so a literal
+    /// ```` ``` ```` inside a JSON string value cannot close the block early.
     private static func jsonBlock(in text: String) -> String? {
         var from = text.startIndex
         while let open = text.range(of: "```json", range: from ..< text.endIndex) {
             let after = open.upperBound
-            if after == text.endIndex || text[after].isWhitespace {
-                guard let close = text.range(of: "```", range: after ..< text.endIndex) else {
-                    return nil
+            if after == text.endIndex || isFenceBoundary(text[after]) {
+                var searchFrom = after
+                while let close = text.range(of: "```", range: searchFrom ..< text.endIndex) {
+                    // A real closing fence sits at the start of its own line. `after` is past the
+                    // 7-char opening tag, so the char before `close` always exists.
+                    if text[text.index(before: close.lowerBound)] == "\n" {
+                        return String(text[after ..< close.lowerBound])
+                    }
+                    // A mid-line ``` (e.g. inside a JSON string value): keep looking.
+                    searchFrom = close.upperBound
                 }
-                return String(text[after ..< close.lowerBound])
+                return nil // an opening fence with no line-anchored closing fence
             }
             from = after // a longer tag like ```jsonl: keep scanning
         }
         return nil
+    }
+
+    /// The ASCII whitespace that bounds a fence's language token. A ```` ```json ```` opener counts
+    /// only when `json` is followed by one of these (or by end of text). Deliberately *not*
+    /// `Character.isWhitespace`, which also matches Unicode spaces (U+00A0 and kin) that a markdown
+    /// renderer would not treat as an info-string boundary.
+    private static func isFenceBoundary(_ char: Character) -> Bool {
+        char == " " || char == "\t" || char == "\n" || char == "\r"
+            || char == "\u{000B}" || char == "\u{000C}"
     }
 }

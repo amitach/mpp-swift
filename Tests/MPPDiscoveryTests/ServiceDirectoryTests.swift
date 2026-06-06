@@ -75,4 +75,35 @@ struct ServiceDirectoryTests {
             try ServiceDirectory.parse("# MPP Services\n\nNo services here.")
         }
     }
+
+    @Test("the public initializer builds an entry directly, matching the decoded shape")
+    func memberwiseInit() throws {
+        let built = ServiceDirectoryEntry(
+            id: "exa",
+            name: "Exa",
+            serviceURL: "https://exa.mpp.tempo.xyz",
+            description: "Search.",
+            categories: ["search", "ai"]
+        )
+        let decoded = try ServiceDirectory.parse(llmsText).first { $0.id == "exa" }
+        #expect(built == decoded)
+        #expect(built.url == URL(string: "https://exa.mpp.tempo.xyz"))
+        #expect(built.isIn(category: "AI"))
+    }
+
+    @Test("a literal ``` inside a JSON string value does not close the fence early")
+    func backticksInsideStringDoNotCloseFence() throws {
+        // The description carries a mid-line ``` -- a content-unaware scanner would cut the block
+        // here and fail to decode; the line-anchored closing fence reads the whole array.
+        let text = """
+        ## Services
+        ```json
+        [{"id":"exa","name":"Exa","description":"Fence ``` inside.","categories":["search"],
+          "serviceUrl":"https://exa.mpp.tempo.xyz"}]
+        ```
+        """
+        let entries = try ServiceDirectory.parse(text)
+        #expect(entries.map(\.id) == ["exa"])
+        #expect(entries[0].description == "Fence ``` inside.")
+    }
 }
