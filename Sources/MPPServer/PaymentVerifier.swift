@@ -9,7 +9,7 @@ import MPPCore
 /// challenge MAY never lapse), but the mppx reference peer requires it at verification
 /// (server/Mppx.ts calls Expires.assert). The default matches the peer; select ``optional`` for
 /// the spec's optional-`expires` semantics.
-public enum ChallengeExpiryPolicy: Sendable {
+public enum ChallengeExpiryPolicy: Sendable, Hashable {
     /// A challenge with no `expires` is rejected (matches the mppx peer). The default, so a
     /// credential's presentation window is always bounded.
     case required

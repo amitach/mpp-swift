@@ -2,17 +2,12 @@ import MPPCore
 import MPPServer
 import Testing
 
-// B9: the challenge-expiry switch derived from a compatibility profile. ChallengeExpiryPolicy is
-// Sendable-only (not Equatable), so match by case.
+// B9: the challenge-expiry switch derived from a compatibility profile.
 @Suite("MPPCompatibility profile (server switch)")
 struct MPPCompatibilityServerTests {
-    private func isRequired(_ policy: ChallengeExpiryPolicy) -> Bool {
-        if case .required = policy { true } else { false }
-    }
-
     @Test("mppx requires expires; specCorrect makes it optional")
     func expiryPolicy() {
-        #expect(isRequired(ChallengeExpiryPolicy(.mppx)))
-        #expect(!isRequired(ChallengeExpiryPolicy(.specCorrect)))
+        #expect(ChallengeExpiryPolicy(.mppx) == .required)
+        #expect(ChallengeExpiryPolicy(.specCorrect) == .optional)
     }
 }
