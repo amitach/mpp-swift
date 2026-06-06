@@ -47,6 +47,22 @@ public enum Attribution {
         return memo
     }
 
+    /// Whether `memo` is an MPP attribution memo bound to `serverId` and `challengeId`: the `tag`,
+    /// `version`, server fingerprint (bytes 5..14), and challenge nonce (bytes 25..31) must all
+    /// match. The **client fingerprint (bytes 15..24) is deliberately not checked** -- the server
+    /// does not pin the client identity, so a verifier accepts a memo from any client. Used by the
+    /// settled-charge verifier to confirm an auto-generated memo settled for *this* challenge, so
+    /// an
+    /// on-chain transfer's hash cannot be reused to satisfy a different challenge.
+    public static func matches(memo: Data, serverId: String, challengeId: String) -> Bool {
+        let bytes = Data(memo) // normalize a possible slice to 0-based indices
+        guard bytes.count == 32 else { return false }
+        return bytes[0 ..< 4] == tag
+            && bytes[4] == version
+            && bytes[5 ..< 15] == fingerprint(serverId)
+            && bytes[25 ..< 32] == Keccak256.hash(Data(challengeId.utf8)).prefix(7)
+    }
+
     /// A 10-byte fingerprint of `value`: `keccak256(value)[0..9]`.
     private static func fingerprint(_ value: String) -> Data {
         Keccak256.hash(Data(value.utf8)).prefix(10)
