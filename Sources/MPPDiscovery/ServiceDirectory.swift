@@ -65,11 +65,21 @@ public enum ServiceDirectory {
     }
 
     /// The content of the first ```` ```json … ``` ```` fenced block, or `nil` if the text carries
-    /// no such fence (a raw JSON payload).
+    /// no such fence (a raw JSON payload). The opening tag must be followed by a fence boundary
+    /// (whitespace / newline), so a ```` ```jsonl ````/```` ```jsonc ```` block is not mistaken for
+    /// it.
     private static func jsonBlock(in text: String) -> String? {
-        guard let open = text.range(of: "```json") else { return nil }
-        let rest = text[open.upperBound...]
-        guard let close = rest.range(of: "```") else { return nil }
-        return String(rest[rest.startIndex ..< close.lowerBound])
+        var from = text.startIndex
+        while let open = text.range(of: "```json", range: from ..< text.endIndex) {
+            let after = open.upperBound
+            if after == text.endIndex || text[after].isWhitespace {
+                guard let close = text.range(of: "```", range: after ..< text.endIndex) else {
+                    return nil
+                }
+                return String(text[after ..< close.lowerBound])
+            }
+            from = after // a longer tag like ```jsonl: keep scanning
+        }
+        return nil
     }
 }

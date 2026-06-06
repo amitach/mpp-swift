@@ -53,6 +53,22 @@ struct ServiceDirectoryTests {
         #expect(entries.filter { $0.isIn(category: "search") }.map(\.id) == ["exa"])
     }
 
+    @Test("a ```jsonl block before the real ```json fence is not mistaken for it")
+    func ignoresLongerFenceTag() throws {
+        let text = """
+        ## Examples
+        ```jsonl
+        {"not":"the services array"}
+        ```
+        ## Services
+        ```json
+        [{"id":"exa","name":"Exa","description":"Search.","categories":["search"],
+          "serviceUrl":"https://exa.mpp.tempo.xyz"}]
+        ```
+        """
+        #expect(try ServiceDirectory.parse(text).map(\.id) == ["exa"])
+    }
+
     @Test("text with no JSON array throws notJSON")
     func notJSON() {
         #expect(throws: ServiceDirectory.ParseError.notJSON) {
