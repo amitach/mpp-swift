@@ -41,6 +41,7 @@ let package = Package(
         .library(name: "MPPBodyDigest", targets: ["MPPBodyDigest"]),
         .library(name: "MPPServer", targets: ["MPPServer"]),
         .library(name: "MPPClient", targets: ["MPPClient"]),
+        .library(name: "MPPClientAsyncHTTP", targets: ["MPPClientAsyncHTTP"]),
         .library(name: "MPPAuth", targets: ["MPPAuth"]),
         .library(name: "MPPEVM", targets: ["MPPEVM"]),
         .library(name: "MPPDiscovery", targets: ["MPPDiscovery"]),
@@ -108,8 +109,9 @@ let package = Package(
         ),
         // Hummingbird 2: the live HTTP-server binding for MPPProxy. Built natively on
         // swift-http-types (so the binding is a thin adapter; chosen over Vapor for that) and
-        // reachable only from MPPHummingbird, so no other consumer pulls swift-nio in. FLOOR range
-        // (Apple-package pinning policy); swift-nio is already in the graph via the MCP SDK.
+        // reachable only from MPPHummingbird (the server stack). FLOOR range (Apple-package pinning
+        // policy); swift-nio is already in the graph via the MCP SDK (and the MPPClientAsyncHTTP
+        // transport links it directly).
         .package(
             url: "https://github.com/hummingbird-project/hummingbird.git",
             "2.25.0" ..< "3.0.0"
@@ -136,6 +138,20 @@ let package = Package(
         // (Apple-package pinning policy); reachable only from the `mpp` executable, so no library
         // consumer pulls it.
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
+        // async-http-client: the SwiftNIO HTTP client backing MPPClientAsyncHTTP's transport, the
+        // server-side / Linux-native counterpart to the URLSession transport. Reachable only from
+        // that one library target, so a consumer that uses the URLSession transport pulls neither
+        // it nor swift-nio. FLOOR range (Apple-ecosystem pinning policy); already in the graph
+        // (resolved 1.33.1 transitively via the Hummingbird / MCP stacks).
+        .package(
+            url: "https://github.com/swift-server/async-http-client.git",
+            "1.33.0" ..< "2.0.0"
+        ),
+        // swift-nio: NIOCore (ByteBuffer) + NIOHTTP1 (HTTPMethod / HTTPHeaders / HTTPResponseStatus)
+        // for that transport's request/response mapping. Declared directly so the products are
+        // importable; already in the graph (resolved 2.100.0 via Hummingbird / async-http-client).
+        // FLOOR range (Apple-ecosystem pinning policy).
+        .package(url: "https://github.com/apple/swift-nio.git", "2.100.0" ..< "3.0.0"),
     ],
     targets: [
         .target(name: "MPPCore"),
@@ -178,6 +194,34 @@ let package = Package(
         .testTarget(
             name: "MPPClientTests",
             dependencies: ["MPPClient", "MPPCore", "MPPDiscovery"]
+        ),
+        // MPPClientAsyncHTTP: an MPPHTTPTransport backed by async-http-client (SwiftNIO), the
+        // server-side / Linux-native counterpart to MPPClient's URLSession transport. Isolated in
+        // its own target so a consumer on the URLSession transport links neither async-http-client
+        // nor swift-nio (only this target and the server-side MPPHummingbird pull swift-nio).
+        // Mirrors URLSessionTransport's redirect block.
+        .target(
+            name: "MPPClientAsyncHTTP",
+            dependencies: [
+                "MPPClient",
+                .product(name: "AsyncHTTPClient", package: "async-http-client"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+            ]
+        ),
+        // The live round-trip test boots a real Hummingbird server on an ephemeral loopback port
+        // and
+        // drives the transport over genuine network I/O (a stub cannot prove redirect handling).
+        .testTarget(
+            name: "MPPClientAsyncHTTPTests",
+            dependencies: [
+                "MPPClientAsyncHTTP",
+                .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+            ]
         ),
         // MPPAuth: concrete PaymentAuthorizer implementations for an interactive or headless
         // payer (a terminal y/n prompt, and an Apple-only Touch ID / device-auth prompt). The
@@ -254,7 +298,8 @@ let package = Package(
             dependencies: ["MPPProxy", "MPPServer", "MPPClient", "MPPCore", "MPPDiscovery"]
         ),
         // MPPHummingbird: live HTTP-server binding for MPPProxy; the only target linking Hummingbird
-        // / swift-nio; entry points @available macOS 14 (package platform stays 13).
+        // (it shares swift-nio with the MPPClientAsyncHTTP transport); entry points @available
+        // macOS 14 (package platform stays 13).
         .target(
             name: "MPPHummingbird",
             dependencies: [
