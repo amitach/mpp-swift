@@ -78,7 +78,8 @@ struct TempoSettledChargeVerifierTests {
         from: String? = payer,
         recipient: String? = recipient,
         amount: String = "1000000",
-        memo: Data? = nil
+        memo: Data? = nil,
+        hash: String = txHash
     ) throws -> TransactionReceipt {
         let log = try EVMLog(
             address: currency ?? Self.currency,
@@ -91,7 +92,7 @@ struct TempoSettledChargeVerifierTests {
             data: #require(EIP712.uint256(decimal: amount)).hexPrefixed
         )
         return TransactionReceipt(
-            transactionHash: Self.txHash, succeeded: succeeded, blockNumber: 1, logs: [log]
+            transactionHash: hash, succeeded: succeeded, blockNumber: 1, logs: [log]
         )
     }
 
@@ -232,6 +233,18 @@ struct TempoSettledChargeVerifierTests {
         let subject = verifier(settlement: StubSettlement(receipt: nil))
         let cred = try credential(chargeChallenge(), type: "hash", field: ("hash", Self.txHash))
         await #expect(throws: TempoSettledChargeVerifier.VerifyError.self) {
+            _ = try await subject.verify(cred, now: now)
+        }
+    }
+
+    @Test("a receipt for a different transaction than the named hash is rejected")
+    func receiptHashMismatchRejected() async throws {
+        // The RPC returns a (valid, matching-transfer) receipt, but for a DIFFERENT tx hash than
+        // the credential named: it must not settle the named charge.
+        let other = try receipt(hash: "0xC0FFEE")
+        let subject = try verifier(settlement: StubSettlement(receipt: other))
+        let cred = try credential(chargeChallenge(), type: "hash", field: ("hash", Self.txHash))
+        await #expect(throws: TempoSettledChargeVerifier.VerifyError.receiptHashMismatch) {
             _ = try await subject.verify(cred, now: now)
         }
     }

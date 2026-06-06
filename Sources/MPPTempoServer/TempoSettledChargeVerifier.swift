@@ -139,6 +139,12 @@ public struct TempoSettledChargeVerifier: PaymentMethodServer {
                 throw .chainUnavailable(String(describing: error))
             }
             guard let receipt else { throw .transactionNotFound }
+            // Defense in depth: the receipt must be for the hash the client named, so the
+            // single-use consume and the minted reference bind to the presented transaction -- a
+            // misbehaving or proxied RPC cannot substitute a receipt for a different tx.
+            guard receipt.transactionHash.caseInsensitiveCompare(hash) == .orderedSame else {
+                throw .receiptHashMismatch
+            }
             return receipt
         case "transaction":
             guard let hex = payload["signature"]?.stringValue
@@ -238,6 +244,9 @@ public struct TempoSettledChargeVerifier: PaymentMethodServer {
         case chainUnavailable(String)
         /// A `hash` credential named a transaction that is not on-chain.
         case transactionNotFound
+        /// The receipt the RPC returned was for a different transaction than the `hash` credential
+        /// named (a misbehaving or proxied RPC); the named transfer was not confirmed as itself.
+        case receiptHashMismatch
         /// A `transaction` credential could not be broadcast (carries the cause).
         case broadcastFailed(String)
         /// The transaction reverted (its hash is carried); a reverted transfer is not a payment.
