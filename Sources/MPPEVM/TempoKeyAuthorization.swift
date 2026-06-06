@@ -264,7 +264,7 @@ public struct TempoKeyAuthorization: Sendable, Hashable {
             guard case let .bytes(periodBytes) = fields[2] else { throw .malformedSerialization }
             period = try uint64(periodBytes)
         }
-        return Limit(token: address, limit: decimalString(fromBigEndian: amount), period: period)
+        return Limit(token: address, limit: EIP712.uint256Decimal(amount), period: period)
     }
 
     private static func parseScopeGroup(_ item: RLP.Item) throws(AuthorizationError) -> [Scope] {
@@ -319,25 +319,6 @@ public struct TempoKeyAuthorization: Sendable, Hashable {
     /// decoder.
     private static func requireMinimalInteger(_ bytes: Data) throws(AuthorizationError) {
         if bytes.first == 0 { throw .malformedSerialization }
-    }
-
-    /// A big-endian byte string as a base-10 integer string (the inverse of
-    /// ``EIP712/uint256(decimal:)``).
-    private static func decimalString(fromBigEndian bytes: Data) -> String {
-        var digits: [UInt8] = [0]
-        for byte in bytes {
-            var carry = Int(byte)
-            for index in digits.indices {
-                let value = Int(digits[index]) * 256 + carry
-                digits[index] = UInt8(value % 10)
-                carry = value / 10
-            }
-            while carry > 0 {
-                digits.append(UInt8(carry % 10))
-                carry /= 10
-            }
-        }
-        return String(digits.reversed().map { Character(UnicodeScalar(0x30 + $0)) })
     }
 }
 
