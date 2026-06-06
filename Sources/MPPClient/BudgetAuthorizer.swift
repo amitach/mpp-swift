@@ -45,8 +45,13 @@ public actor BudgetAuthorizer: PaymentAuthorizer {
         }
         // No `await` between the check above and this debit, so the actor admits exactly the
         // approved set even under concurrent calls. `amount <= remaining`, so the difference is a
-        // canonical non-negative integer and `Amount(_:)` cannot fail.
-        remaining = (try? Amount(Self.subtract(remaining.rawValue, amount.rawValue))) ?? remaining
+        // canonical non-negative integer and `Amount(_:)` succeeds. If it somehow did not, fail
+        // CLOSED -- deny the spend and leave the budget unchanged -- rather than approve a payment
+        // without debiting it (which would let the budget be overspent).
+        guard let debited = try? Amount(Self.subtract(remaining.rawValue, amount.rawValue)) else {
+            throw PaymentDenied.overCap(amount: amount, cap: remaining)
+        }
+        remaining = debited
     }
 
     /// Adds `amount` to the remaining budget (a recharge / top-up).
