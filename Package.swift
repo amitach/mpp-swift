@@ -108,8 +108,9 @@ let package = Package(
         ),
         // Hummingbird 2: the live HTTP-server binding for MPPProxy. Built natively on
         // swift-http-types (so the binding is a thin adapter; chosen over Vapor for that) and
-        // reachable only from MPPHummingbird, so no other consumer pulls swift-nio in. FLOOR range
-        // (Apple-package pinning policy); swift-nio is already in the graph via the MCP SDK.
+        // reachable only from MPPHummingbird (the server stack). FLOOR range (Apple-package pinning
+        // policy); swift-nio is already in the graph via the MCP SDK (and the MPPClientAsyncHTTP
+        // transport links it directly).
         .package(
             url: "https://github.com/hummingbird-project/hummingbird.git",
             "2.25.0" ..< "3.0.0"
@@ -195,9 +196,9 @@ let package = Package(
         ),
         // MPPClientAsyncHTTP: an MPPHTTPTransport backed by async-http-client (SwiftNIO), the
         // server-side / Linux-native counterpart to MPPClient's URLSession transport. Isolated in
-        // its own target so it is the only library pulling async-http-client / swift-nio: a
-        // consumer
-        // on the URLSession transport links neither. Mirrors URLSessionTransport's redirect block.
+        // its own target so a consumer on the URLSession transport links neither async-http-client
+        // nor swift-nio (only this target and the server-side MPPHummingbird pull swift-nio).
+        // Mirrors URLSessionTransport's redirect block.
         .target(
             name: "MPPClientAsyncHTTP",
             dependencies: [
@@ -296,7 +297,8 @@ let package = Package(
             dependencies: ["MPPProxy", "MPPServer", "MPPClient", "MPPCore", "MPPDiscovery"]
         ),
         // MPPHummingbird: live HTTP-server binding for MPPProxy; the only target linking Hummingbird
-        // / swift-nio; entry points @available macOS 14 (package platform stays 13).
+        // (it shares swift-nio with the MPPClientAsyncHTTP transport); entry points @available
+        // macOS 14 (package platform stays 13).
         .target(
             name: "MPPHummingbird",
             dependencies: [
