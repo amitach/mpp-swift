@@ -106,4 +106,29 @@ struct ServiceDirectoryTests {
         #expect(entries.map(\.id) == ["exa"])
         #expect(entries[0].description == "Fence ``` inside.")
     }
+
+    @Test("a mid-line ```json in prose is not treated as an opening fence")
+    func midLineFenceIsNotAnOpener() throws {
+        // The preamble mentions ```json inline; only the real column-0 fence opens the block.
+        let text = """
+        Wrap the array in a ```json block, like this:
+        ```json
+        [{"id":"exa","name":"Exa","description":"Search.","categories":["search"],
+          "serviceUrl":"https://exa.mpp.tempo.xyz"}]
+        ```
+        """
+        #expect(try ServiceDirectory.parse(text).map(\.id) == ["exa"])
+    }
+
+    @Test("a directory with CRLF line endings parses")
+    func parsesCRLF() throws {
+        let text = [
+            "## Services", "```json",
+            #"[{"id":"exa","name":"Exa","description":"Search.","categories":["search"],"#,
+            #"  "serviceUrl":"https://exa.mpp.tempo.xyz"}]"#, "```",
+        ].joined(separator: "\r\n")
+        let entries = try ServiceDirectory.parse(text)
+        #expect(entries.map(\.id) == ["exa"])
+        #expect(entries[0].url == URL(string: "https://exa.mpp.tempo.xyz"))
+    }
 }

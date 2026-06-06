@@ -6,8 +6,10 @@ import Foundation
 ///
 /// Rail-agnostic: the directory entry says what a service *is* and *where* it is, not how it bills;
 /// the rail and price are negotiated by the live `402` at the endpoint (which ``MPPDiscovery`` and
-/// the `402` client handle). `serviceURL` is kept as the raw string and exposed as a parsed ``url``
-/// so one malformed entry can never fail decoding of the whole directory.
+/// the `402` client handle). `serviceURL` is kept as the raw string and exposed as a parsed
+/// ``url``,
+/// so a malformed *URL* in one entry never fails decoding of the whole directory. (An entry missing
+/// a required field is a structural error and does surface as a `DecodingError` for the array.)
 public struct ServiceDirectoryEntry: Sendable, Hashable, Codable {
     /// The stable directory id (for example `anthropic`, `exa`).
     public let id: String
@@ -82,34 +84,70 @@ public enum ServiceDirectory {
     }
 
     /// The content of the first ```` ```json … ``` ```` fenced block, or `nil` if the text carries
-    /// no such fence (a raw JSON payload). The opening tag must be followed by an ASCII fence
-    /// boundary (space, tab, or line break) so a ```` ```jsonl ````/```` ```jsonc ```` block is not
-    /// mistaken for it, and the closing ```` ``` ```` must begin its own line so a literal
-    /// ```` ``` ```` inside a JSON string value cannot close the block early.
+    /// no such fence (a raw JSON payload). Scans line by line, so both fences are line-anchored (a
+    /// markdown fence opens and closes its own line): a ```` ```json ```` in prose is never an
+    /// opener, and a literal ```` ``` ```` inside a JSON string value never closes the block early.
+    /// One linear pass, no repeated substring search.
     private static func jsonBlock(in text: String) -> String? {
-        var from = text.startIndex
-        while let open = text.range(of: "```json", range: from ..< text.endIndex) {
-            let after = open.upperBound
-            if after == text.endIndex || isFenceBoundary(text[after]) {
-                var searchFrom = after
-                while let close = text.range(of: "```", range: searchFrom ..< text.endIndex) {
-                    // A real closing fence sits at the start of its own line. `after` is past the
-                    // 7-char opening tag, so the char before `close` always exists.
-                    if text[text.index(before: close.lowerBound)] == "\n" {
-                        return String(text[after ..< close.lowerBound])
-                    }
-                    // A mid-line ``` (e.g. inside a JSON string value): keep looking.
-                    searchFrom = close.upperBound
-                }
-                return nil // an opening fence with no line-anchored closing fence
+        var inside = false
+        var content: [Substring] = []
+        // Split on a newline predicate, not the `"\n"` Character: a CRLF is a single grapheme
+        // cluster, so splitting on `"\n"` would never match `\r\n`. Matching `\n` / `\r\n` / `\r`
+        // covers all three endings and consumes the CR, leaving no trailing `\r` on a line.
+        for line in text.split(omittingEmptySubsequences: false, whereSeparator: isLineBreak) {
+            if inside {
+                if isClosingFence(line) { return content.joined(separator: "\n") }
+                content.append(line)
+            } else if isJSONOpeningFence(line) {
+                inside = true
             }
-            from = after // a longer tag like ```jsonl: keep scanning
         }
-        return nil
+        return nil // no opening fence, or one that was never closed
+    }
+
+    /// Whether `char` is a line break: LF, a CRLF grapheme cluster, or a bare CR.
+    private static func isLineBreak(_ char: Character) -> Bool {
+        char == "\n" || char == "\r\n" || char == "\r"
+    }
+
+    /// Whether `line` opens a JSON fence: up to three spaces of CommonMark indent, then ````
+    /// ```json
+    /// ````, then a fence boundary (so ```` ```jsonl ````/```` ```jsonc ```` is not mistaken for
+    /// it).
+    private static func isJSONOpeningFence(_ line: Substring) -> Bool {
+        let body = trimmedFenceLine(line)
+        guard body.hasPrefix("```json"), let after = body.index(
+            body.startIndex, offsetBy: 7, limitedBy: body.endIndex
+        ) else { return false }
+        return after == body.endIndex || isFenceBoundary(body[after])
+    }
+
+    /// Whether `line` is a bare closing fence: indent, then ```` ``` ````, then nothing (a closing
+    /// fence carries no info string). `trimmedFenceLine` has already removed any trailing
+    /// CR/spaces.
+    private static func isClosingFence(_ line: Substring) -> Bool {
+        trimmedFenceLine(line) == "```"
+    }
+
+    /// `line` with up to three leading spaces (CommonMark's fence indent) and all trailing ASCII
+    /// whitespace stripped, so fence classification ignores indentation and a trailing CR (`\r\n`
+    /// line endings) or trailing spaces.
+    private static func trimmedFenceLine(_ line: Substring) -> Substring {
+        var start = line.startIndex
+        var indent = 0
+        while indent < 3, start < line.endIndex, line[start] == " " {
+            start = line.index(after: start)
+            indent += 1
+        }
+        var end = line.endIndex
+        while end > start, isFenceBoundary(line[line.index(before: end)]) {
+            end = line.index(before: end)
+        }
+        return line[start ..< end]
     }
 
     /// The ASCII whitespace that bounds a fence's language token. A ```` ```json ```` opener counts
-    /// only when `json` is followed by one of these (or by end of text). Deliberately *not*
+    /// only when `json` is followed by one of these (or by end of line). Deliberately *not*
     /// `Character.isWhitespace`, which also matches Unicode spaces (U+00A0 and kin) that a markdown
     /// renderer would not treat as an info-string boundary.
     private static func isFenceBoundary(_ char: Character) -> Bool {
