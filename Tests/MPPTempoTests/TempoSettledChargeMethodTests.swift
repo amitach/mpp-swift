@@ -141,7 +141,7 @@ struct TempoSettledChargeMethodTests {
 
     // MARK: rejections
 
-    @Test("a push-only challenge is rejected (pull is the only mode this method submits)")
+    @Test("a push-only challenge is rejected when no broadcaster is configured")
     func rejectsPushOnly() async throws {
         await #expect(throws: TempoSettledChargeError.self) {
             _ = try await method(builder: StubTransferBuilder()).buildCredential(
