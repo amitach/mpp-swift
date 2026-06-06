@@ -25,9 +25,11 @@ import NIOHTTP1
 /// the same way.
 ///
 /// - Important: a non-singleton `HTTPClient` must be shut down before it is dropped or it traps in
-///   `deinit`. This transport therefore owns its client explicitly and exposes an async
-///   ``shutdown()``; await it once the transport is no longer needed. An *injected* client is left
-///   untouched -- its owner shuts it down.
+///   `deinit`. For a scoped use, prefer the static helper
+///   ``withTransport(requestTimeout:maxResponseBytes:_:)``, which cleans up on every path.
+///   Otherwise own the transport and await the async ``shutdown()`` once it is no longer needed
+///   (the long-lived-broker pattern). An *injected* client is left untouched -- its owner shuts it
+///   down.
 public final class AsyncHTTPClientTransport: MPPHTTPTransport {
     private let client: HTTPClient
     private let ownsClient: Bool
@@ -75,6 +77,32 @@ public final class AsyncHTTPClientTransport: MPPHTTPTransport {
         ownsClient = false
         self.requestTimeout = requestTimeout
         self.maxResponseBytes = maxResponseBytes
+    }
+
+    /// Runs `body` with a fresh owned transport and shuts it down afterwards, on both the success
+    /// and the error path -- the scoped, safe-by-default way to use an owned transport (an owned
+    /// `HTTPClient` traps in `deinit` if dropped un-shut, so a thrown error must not skip cleanup).
+    /// Prefer this over a bare ``init(requestTimeout:maxResponseBytes:)`` unless the transport must
+    /// outlive a single scope (a long-lived broker holding one transport), in which case own it and
+    /// call ``shutdown()`` at end of life.
+    ///
+    /// - Returns: whatever `body` returns.
+    public static func withTransport<T>(
+        requestTimeout: TimeAmount = .seconds(60),
+        maxResponseBytes: Int = 50 * 1024 * 1024,
+        _ body: (AsyncHTTPClientTransport) async throws -> T
+    ) async throws -> T {
+        let transport = AsyncHTTPClientTransport(
+            requestTimeout: requestTimeout, maxResponseBytes: maxResponseBytes
+        )
+        do {
+            let result = try await body(transport)
+            try await transport.shutdown()
+            return result
+        } catch {
+            try? await transport.shutdown()
+            throw error
+        }
     }
 
     /// Shuts down the owned ``HTTPClient``; a no-op for an injected client (its owner shuts it

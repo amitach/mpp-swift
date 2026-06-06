@@ -63,28 +63,11 @@ struct AsyncHTTPClientTransportTests {
         HTTPRequest(method: .get, scheme: "http", authority: "127.0.0.1:\(port)", path: path)
     }
 
-    /// Runs `body` with a fresh owned transport, shutting it down on both the success and the error
-    /// path -- an owned `HTTPClient` traps in `deinit` if dropped un-shut, so a throwing assertion
-    /// must not skip cleanup. `shutdown()` is idempotent, so this is safe even if `body` shuts down
-    /// too.
-    private func withTransport(
-        _ body: (AsyncHTTPClientTransport) async throws -> Void
-    ) async throws {
-        let transport = AsyncHTTPClientTransport()
-        do {
-            try await body(transport)
-        } catch {
-            try? await transport.shutdown()
-            throw error
-        }
-        try await transport.shutdown()
-    }
-
     @Test("a real round-trip returns the body", .timeLimit(.minutes(1)))
     func roundTrip() async throws {
         guard #available(macOS 14, iOS 17, tvOS 17, visionOS 1, *) else { return }
         try await withLiveServer { port in
-            try await withTransport { transport in
+            try await AsyncHTTPClientTransport.withTransport { transport in
                 let (response, body) = try await transport.send(get(port, "/ok"), body: Data())
                 #expect(response.status.code == 200)
                 #expect(String(bytes: body, encoding: .utf8) == "PONG")
@@ -96,7 +79,7 @@ struct AsyncHTTPClientTransportTests {
     func forwardsBody() async throws {
         guard #available(macOS 14, iOS 17, tvOS 17, visionOS 1, *) else { return }
         try await withLiveServer { port in
-            try await withTransport { transport in
+            try await AsyncHTTPClientTransport.withTransport { transport in
                 var request = get(port, "/echo")
                 request.method = .post
                 let (response, body) = try await transport.send(
@@ -115,7 +98,7 @@ struct AsyncHTTPClientTransportTests {
     func doesNotFollowRedirects() async throws {
         guard #available(macOS 14, iOS 17, tvOS 17, visionOS 1, *) else { return }
         try await withLiveServer { port in
-            try await withTransport { transport in
+            try await AsyncHTTPClientTransport.withTransport { transport in
                 let (response, _) = try await transport.send(get(port, "/redirect"), body: Data())
                 // Default AsyncHTTPClient would follow the 301 to /ok and return 200 "PONG";
                 // .disallow returns the 301 itself so the caller re-applies its own policy.
@@ -127,7 +110,7 @@ struct AsyncHTTPClientTransportTests {
 
     @Test("a request without scheme or authority is rejected before any network call")
     func rejectsUnroutableRequest() async throws {
-        try await withTransport { transport in
+        try await AsyncHTTPClientTransport.withTransport { transport in
             var request = HTTPRequest(method: .get, scheme: "https", authority: "x", path: "/x")
             request.scheme = nil
             request.authority = nil
@@ -135,6 +118,12 @@ struct AsyncHTTPClientTransportTests {
                 _ = try await transport.send(request, body: Data())
             }
         }
+    }
+
+    @Test("withTransport returns the body's value and cleans up")
+    func scopedHelperReturnsValue() async throws {
+        let answer = try await AsyncHTTPClientTransport.withTransport { _ in 42 }
+        #expect(answer == 42)
     }
 
     @Test("shutdown is idempotent -- a second call is a safe no-op")
