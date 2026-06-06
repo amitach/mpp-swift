@@ -32,7 +32,16 @@ public struct FFITransferTxBuilder: TempoTransferTxBuilder {
         _ parameters: TempoTransferParameters,
         chainID: UInt64
     ) async throws -> Data {
-        let nonce = try await nonceProvider(parameters.payer)
+        // A `validBefore` of 0 is not a usable expiring deadline (it would build a tx with the
+        // expiring nonce key but no deadline, which the chain rejects). Reject it before the FFI,
+        // so the guard holds against any published binary, not only one carrying the Rust check.
+        if parameters.validBefore == 0 {
+            throw FFITempoTxError
+                .invalidInput("validBefore must be a nonzero unix-seconds deadline")
+        }
+        // Push mode reads the payer's sequential nonce; pull mode's expiring-nonce tx ignores it
+        // (replay-guarded by the tx hash), so skip the nonce read entirely there.
+        let nonce = parameters.validBefore == nil ? try await nonceProvider(parameters.payer) : 0
         do {
             return try MPPTempoFFI.buildTransferTransaction(
                 chainId: chainID,
@@ -45,7 +54,8 @@ public struct FFITransferTxBuilder: TempoTransferTxBuilder {
                 currency: parameters.currency.bytes,
                 recipient: parameters.recipient.bytes,
                 amount: parameters.amount,
-                memo: parameters.memo
+                memo: parameters.memo,
+                validBefore: parameters.validBefore
             )
         } catch let error as FfiError {
             throw FFITempoTxBuilder.map(error)
