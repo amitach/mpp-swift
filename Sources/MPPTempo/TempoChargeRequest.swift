@@ -44,6 +44,14 @@ public struct TempoChargeRequest: Sendable, Hashable {
     /// Overrides the channel session verifier's static default; a voucher whose delta over the
     /// highest accepted falls below it is rejected (the spec's anti-griefing minimum).
     public let minVoucherDelta: String?
+    /// The submission modes the server accepts for a settled charge, from
+    /// `methodDetails.supportedModes` (`"pull"` / `"push"`), if set. `nil` means the server did not
+    /// constrain it (both are acceptable, per the reference SDK). A settled-charge client selects a
+    /// mode from this set.
+    public let supportedModes: [String]?
+    /// A `bytes32` attribution memo the server pins for the transfer, from `methodDetails.memo`
+    /// (a `0x`-hex string), if set. When absent, the client derives an ``Attribution`` memo.
+    public let memo: String?
 
     /// Whether this is a zero-amount charge (the EIP-712 proof path).
     ///
@@ -78,6 +86,8 @@ public struct TempoChargeRequest: Sendable, Hashable {
         suggestedDeposit = wire.suggestedDeposit
         suggestedChannelID = wire.methodDetails?.channelId.flatMap(Data.init(hexPrefixed:))
         minVoucherDelta = wire.methodDetails?.minVoucherDelta
+        supportedModes = wire.methodDetails?.supportedModes
+        memo = wire.methodDetails?.memo
     }
 
     /// Whether `challenge` is a `tempo`/`charge` challenge carrying a decodable zero-amount
@@ -119,11 +129,14 @@ private struct ChargeRequestWire: Decodable {
 }
 
 /// The `methodDetails` sub-object: `chainId` (proof + session), the session's
-/// `escrowContract`, an optional `channelId` the server suggests reusing, and the
-/// optional per-challenge `minVoucherDelta` (a decimal base-units string).
+/// `escrowContract`, an optional `channelId` the server suggests reusing, the optional
+/// per-challenge `minVoucherDelta` (a decimal base-units string), and the settled charge's
+/// `supportedModes` + pinned `memo`.
 private struct MethodDetails: Decodable {
     let chainId: UInt64?
     let escrowContract: String?
     let channelId: String?
     let minVoucherDelta: String?
+    let supportedModes: [String]?
+    let memo: String?
 }
