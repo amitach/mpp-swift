@@ -111,6 +111,15 @@ struct FFITransferTxBuilderTests {
         #expect(probed.value == nil) // pull mode does not read a sequential nonce
     }
 
+    @Test("a zero validBefore is rejected (not a usable expiring deadline)")
+    func zeroValidBeforeThrows() async throws {
+        await #expect(throws: FFITempoTxError.self) {
+            _ = try await builder().buildTransferTransaction(
+                parameters(validBefore: 0), chainID: chainID
+            )
+        }
+    }
+
     @Test("an invalid payer key surfaces as a typed error, not a crash")
     func invalidPayerKeyThrows() async throws {
         await #expect(throws: FFITempoTxError.self) {

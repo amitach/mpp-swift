@@ -49,6 +49,9 @@ pub enum BuildError {
     InvalidKey,
     /// Signing the transaction hash failed.
     SigningFailed,
+    /// An expiring-nonce transfer was requested with a `valid_before` of 0, which is not a usable
+    /// deadline (it would build a tx with the expiring nonce key but no `valid_before`).
+    InvalidValidBefore,
 }
 
 /// A single escrow/token call to a contract: ABI-encoded `calldata` sent `to` an
@@ -397,6 +400,14 @@ pub fn build_transfer_tx(
     memo: [u8; 32],
     valid_before: Option<u64>,
 ) -> Result<Vec<u8>, BuildError> {
+    // `valid_before == Some(0)` is not a usable deadline: `NonZeroU64::new(0)` is `None`, so the tx
+    // would carry the expiring nonce key with no `valid_before` (a malformed tx the chain rejects).
+    // Reject it here -- wiping the key first, to honour the crate's zeroization discipline on every
+    // return path -- rather than emit the inconsistent transaction.
+    if valid_before == Some(0) {
+        private_key.zeroize();
+        return Err(BuildError::InvalidValidBefore);
+    }
     let transfer = transferWithMemoCall {
         recipient,
         amount,
@@ -406,6 +417,7 @@ pub fn build_transfer_tx(
     // Pull mode (`valid_before` set): an expiring-nonce tx the server broadcasts within the window;
     // the tx hash is the replay guard, so the nonce field is 0 and the nonce key is the expiring
     // sentinel. Push mode (`None`): a normal sequential-nonce tx the payer broadcasts itself.
+    // `valid_before` is now nonzero where present, so `NonZeroU64::new` is always `Some`.
     let (nonce_key, nonce, valid_before) = match valid_before {
         Some(deadline) => (TEMPO_EXPIRING_NONCE_KEY, 0, NonZeroU64::new(deadline)),
         None => (U256::ZERO, nonce, None),
@@ -500,6 +512,9 @@ fn map_build_error(error: BuildError) -> FfiError {
     match error {
         BuildError::InvalidKey => FfiError::InvalidKey,
         BuildError::SigningFailed => FfiError::SigningFailed,
+        BuildError::InvalidValidBefore => {
+            FfiError::InvalidInput("valid_before: must be a nonzero unix-seconds deadline".into())
+        }
     }
 }
 
@@ -1261,6 +1276,44 @@ mod tests {
             pull.iter().map(|b| format!("{b:02x}")).collect::<String>(),
             GOLDEN_SETTLED_CHARGE_PULL_TX
         );
+    }
+
+    /// `valid_before == Some(0)` is not a usable expiring deadline: rejected with a typed error
+    /// (mapped to `FfiError::InvalidInput` across the FFI), never a malformed expiring-nonce tx.
+    #[test]
+    fn settled_charge_rejects_zero_valid_before() {
+        use alloy_primitives::{address, U256};
+        let typed = build_transfer_tx(
+            42431,
+            7,
+            1_000_000_000,
+            1_000_000,
+            100_000,
+            None,
+            [0x01u8; 32],
+            address!("20c0000000000000000000000000000000000001"),
+            address!("1111111111111111111111111111111111111111"),
+            U256::from(1_000_000u64),
+            [0xabu8; 32],
+            Some(0),
+        );
+        assert!(matches!(typed, Err(BuildError::InvalidValidBefore)));
+
+        let wrapped = build_transfer_transaction(
+            42431,
+            7,
+            "1".into(),
+            "1".into(),
+            1,
+            None,
+            vec![0x01; 32],
+            address!("20c0000000000000000000000000000000000001").to_vec(),
+            address!("1111111111111111111111111111111111111111").to_vec(),
+            "1000000".into(),
+            vec![0xAB; 32],
+            Some(0),
+        );
+        assert!(matches!(wrapped, Err(FfiError::InvalidInput(_))));
     }
 
     const GOLDEN_SETTLED_CHARGE_PULL_TX: &str = "76f8ff82a5bf830f4240843b9aca00830186a0f87ef87c9420c000000000000000000000000000000000000180b86495777d59000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000f4240ababababababababababababababababababababababababababababababababc0a0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff808469570a99808080c0b84172b990027d92453d0f99f7cf41614e7de6edc371469dcb71a423692b5c65f1cc5c9c403cf1af0ec14b82ec9887277e9c40eeac489089ed6131715ba2cef0e9211b";
