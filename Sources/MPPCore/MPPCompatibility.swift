@@ -1,13 +1,17 @@
 /// A compatibility profile that selects, in one place, how the SDK resolves each behavior where the
 /// `mppx` reference peer diverges from the published specification.
 ///
-/// The SDK exposes a small set of independent divergence switches, each defaulting to the peer form
-/// for live interop (per the AGENTS.md "switch, not silent inheritance" rule): the MCP error-code
-/// mode (`MCPErrorCodeMode`), the challenge-expiry policy (`ChallengeExpiryPolicy`), the Tempo
+/// The SDK exposes a small set of independent divergence switches, each behind a compatibility
+/// switch per the AGENTS.md "switch, not silent inheritance" rule: the MCP error-code mode
+/// (`MCPErrorCodeMode`), the challenge-expiry policy (`ChallengeExpiryPolicy`), the Tempo
 /// zero-amount proof shape (`ProofVariant`), and the signature malleability policy
-/// (`SignatureMalleabilityPolicy`). Each of those types provides an `init(_:)` that maps a profile
-/// to its corresponding value, so a deployment can choose one profile and derive every switch from
-/// it consistently rather than setting four knobs by hand:
+/// (`SignatureMalleabilityPolicy`). AGENTS.md prescribes *defaulting* to the spec-correct form;
+/// these switches instead default to the peer (`mppx`) form, a deliberate deviation ratified in the
+/// parity/security audit because the spec-correct default breaks live interop with the reference
+/// SDK (for example its client recognizes only the `-32042` MCP error code, not the spec `-32043`).
+/// Each type provides an `init(_:)` that maps a profile to its corresponding value, so a deployment
+/// can choose one profile and derive every switch from it consistently rather than setting four
+/// knobs by hand:
 ///
 /// ```swift
 /// let profile = MPPCompatibility.mppx
