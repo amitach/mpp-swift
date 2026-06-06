@@ -111,11 +111,40 @@ public struct EVMRPC: Sendable {
         guard let status = UInt64(hexQuantity: statusHex) else {
             throw .malformedResponse("receipt status is not a hex quantity")
         }
-        return TransactionReceipt(
+        return try TransactionReceipt(
             transactionHash: hash,
             succeeded: status == 1, // EVM status: 0x1 success, 0x0 reverted
-            blockNumber: blockNumber
+            blockNumber: blockNumber,
+            logs: decodeLogs(fields["logs"])
         )
+    }
+
+    /// Decodes a receipt's `logs` array (absent or JSON `null` is `[]`). A malformed entry is an
+    /// error, not a silently dropped log -- a verifier reads these to confirm a payment, so a bad
+    /// shape must not pass as "no matching transfer".
+    private func decodeLogs(_ value: JSONValue?) throws(EVMRPCError) -> [EVMLog] {
+        guard let value else { return [] }
+        if case .null = value { return [] }
+        guard case let .array(entries) = value else {
+            throw .malformedResponse("receipt logs is not an array")
+        }
+        var logs: [EVMLog] = []
+        for entry in entries {
+            guard let fields = entry.objectValue,
+                  let address = fields["address"]?.stringValue,
+                  let data = fields["data"]?.stringValue,
+                  case let .array(topicValues)? = fields["topics"]
+            else { throw .malformedResponse("receipt log has an unexpected shape") }
+            var topics: [String] = []
+            for topic in topicValues {
+                guard let hex = topic.stringValue else {
+                    throw .malformedResponse("receipt log topic is not a string")
+                }
+                topics.append(hex)
+            }
+            logs.append(EVMLog(address: address, topics: topics, data: data))
+        }
+        return logs
     }
 
     // MARK: - Account + gas (transaction-building inputs)
@@ -257,11 +286,34 @@ public struct TransactionReceipt: Sendable, Hashable {
     /// `true` when the on-chain status is `0x1` (success), `false` on a revert.
     public let succeeded: Bool
     public let blockNumber: UInt64?
+    /// The event logs the transaction emitted, in order. A settled-charge verifier reads these to
+    /// confirm the `transferWithMemo` (recipient, amount, memo) the charge required.
+    public let logs: [EVMLog]
 
-    public init(transactionHash: String, succeeded: Bool, blockNumber: UInt64?) {
+    public init(
+        transactionHash: String,
+        succeeded: Bool,
+        blockNumber: UInt64?,
+        logs: [EVMLog] = []
+    ) {
         self.transactionHash = transactionHash
         self.succeeded = succeeded
         self.blockNumber = blockNumber
+        self.logs = logs
+    }
+}
+
+/// One event log in a transaction receipt: the emitting contract `address`, the indexed `topics`
+/// (`topics[0]` is the event-signature hash), and the non-indexed `data`, all `0x`-hex.
+public struct EVMLog: Sendable, Hashable {
+    public let address: String
+    public let topics: [String]
+    public let data: String
+
+    public init(address: String, topics: [String], data: String) {
+        self.address = address
+        self.topics = topics
+        self.data = data
     }
 }
 

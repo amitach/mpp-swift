@@ -99,6 +99,44 @@ struct EVMRPCTests {
         #expect(receipt == nil)
     }
 
+    @Test("a receipt's event logs decode (address, topics, data); absent logs are empty")
+    func receiptLogs() async throws {
+        let stub = StubHTTP(json: #"""
+        {"jsonrpc":"2.0","id":1,"result":{
+          "status":"0x1","transactionHash":"0xfeed",
+          "logs":[{"address":"0x20c0","topics":["0xaaaa","0xbbbb"],"data":"0xdead"}]
+        }}
+        """#)
+        let rpc = try EVMRPC(transport: stub, url: rpcURL)
+        let receipt = try #require(await rpc.transactionReceipt("0xfeed"))
+        #expect(receipt.logs.count == 1)
+        #expect(receipt.logs.first?.address == "0x20c0")
+        #expect(receipt.logs.first?.topics == ["0xaaaa", "0xbbbb"])
+        #expect(receipt.logs.first?.data == "0xdead")
+
+        let noLogs = StubHTTP(json: #"""
+        {"jsonrpc":"2.0","id":1,"result":{"status":"0x1","transactionHash":"0xfeed"}}
+        """#)
+        let receipt2 = try #require(await EVMRPC(transport: noLogs, url: rpcURL)
+            .transactionReceipt("0xfeed"))
+        #expect(receipt2.logs.isEmpty)
+    }
+
+    @Test("a malformed log entry is rejected, not silently dropped")
+    func receiptMalformedLog() async throws {
+        // Missing `topics` -> a verifier must not read this as "no matching transfer".
+        let stub = StubHTTP(json: #"""
+        {"jsonrpc":"2.0","id":1,"result":{
+          "status":"0x1","transactionHash":"0xfeed",
+          "logs":[{"address":"0x20c0","data":"0xdead"}]
+        }}
+        """#)
+        let rpc = try EVMRPC(transport: stub, url: rpcURL)
+        await #expect(throws: EVMRPCError.self) {
+            try await rpc.transactionReceipt("0xfeed")
+        }
+    }
+
     @Test("a JSON-RPC error member is surfaced as .rpc")
     func rpcError() async throws {
         let stub =
