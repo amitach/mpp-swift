@@ -106,10 +106,9 @@ public actor BudgetAuthorizer: PaymentAuthorizer {
             }
             digits.append(diff)
         }
-        var result = Array(digits.reversed())
-        while result.count > 1, result.first == 0 {
-            result.removeFirst()
-        }
-        return String(result.map { Character(String($0)) })
+        // Drop the leading zeros in one linear pass (canonical form has none, except "0" itself).
+        // `drop(while:)` avoids the O(n^2) of repeated `removeFirst` element shifts.
+        let canonical = Array(digits.reversed().drop(while: { $0 == 0 }))
+        return canonical.isEmpty ? "0" : String(canonical.map { Character(String($0)) })
     }
 }

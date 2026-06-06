@@ -63,6 +63,18 @@ struct BudgetAuthorizerTests {
         }
     }
 
+    @Test("a pinned currency denies a charge that carries no currency (fail closed)")
+    func currencyPinDeniesAbsentCurrency() async throws {
+        let authorizer = try BudgetAuthorizer(budget: Amount("100"), currency: "USD")
+        do {
+            try await authorizer.authorize(request("10", currency: nil))
+            Issue.record("expected denial")
+        } catch {
+            #expect(isDenied(error) { if case .currencyMismatch = $0 { true } else { false } })
+        }
+        #expect(try await authorizer.remaining == Amount("100")) // budget untouched
+    }
+
     @Test("topUp adds to the remaining budget (a recharge)")
     func topUp() async throws {
         let authorizer = try BudgetAuthorizer(budget: Amount("100"))
