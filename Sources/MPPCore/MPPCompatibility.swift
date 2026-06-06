@@ -11,12 +11,19 @@
 ///
 /// ```swift
 /// let profile = MPPCompatibility.mppx
+/// // Server switches:
 /// let verifier = PaymentVerifier(..., expiryPolicy: .init(profile))
-/// let proofVerifier = TempoProofVerifier(
-///     acceptedVariants: [.init(profile)], malleability: .init(profile)
-/// )
+/// let proofVerifier = TempoProofVerifier(malleability: .init(profile))
 /// let mcpServer = MCPPaymentServer(..., codeMode: .init(profile))
+/// // Client: the single proof shape to emit.
+/// let proofMethod = TempoProofMethod(..., variant: .init(profile))
 /// ```
+///
+/// Note on `ProofVariant`: `.init(profile)` is the single proof shape a *client* emits (and the
+/// *primary* shape a peer expects). A server verifier accepts a *set* and deliberately defaults to
+/// all three shapes for leniency; pass `acceptedVariants: [.init(profile)]` only when you actually
+/// want to restrict it to exactly that shape (a stricter-than-default choice), not as the routine
+/// way to apply a profile.
 ///
 /// Because the switches live in different modules (and not every deployment links all of them),
 /// this is a lightweight selector in `MPPCore` rather than an aggregate that imports every rail.
