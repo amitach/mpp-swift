@@ -58,12 +58,12 @@ public actor BudgetAuthorizer: PaymentAuthorizer {
     ///
     /// - Throws: ``Amount/ValidationError`` if the recharged total is somehow not a canonical
     ///   ``Amount``. The sum of two canonical base-units integers always is one, so this does not
-    ///   throw for any real input; it is declared `throws` rather than swallowing the failure with
-    ///   `try?` and leaving the budget unchanged, so an impossible miscomputation surfaces to the
-    ///   caller instead of silently denying a later spend the caller believed was funded. This
-    ///   mirrors the throw-on-failure top-up the Tempo channel uses, and the REVIEW.md rule to
-    ///   audit every `try?` on a value that gates money.
-    public func topUp(_ amount: Amount) throws {
+    ///   throw for any real input; it is declared with a typed `throws` rather than swallowing the
+    ///   failure with `try?` and leaving the budget unchanged, so an impossible miscomputation
+    ///   surfaces to the caller instead of silently denying a later spend the caller believed was
+    ///   funded. This mirrors the throw-on-failure top-up the Tempo channel uses, and the REVIEW.md
+    ///   rule to audit every `try?` on a value that gates money.
+    public func topUp(_ amount: Amount) throws(Amount.ValidationError) {
         remaining = try Amount(Self.add(remaining.rawValue, amount.rawValue))
     }
 
@@ -106,6 +106,11 @@ public actor BudgetAuthorizer: PaymentAuthorizer {
             }
             digits.append(diff)
         }
+        // A leftover borrow means rhs > lhs: the precondition was violated and the digits are a
+        // wrong (wrapped) result. The sole caller guards `amount <= remaining`, so this never fires
+        // in practice; the assert enforces the invariant in debug/test builds rather than returning
+        // bad money in a release build that somehow reached here.
+        assert(borrow == 0, "subtract requires lhs >= rhs")
         // Drop the leading zeros in one linear pass (canonical form has none, except "0" itself).
         // `drop(while:)` avoids the O(n^2) of repeated `removeFirst` element shifts.
         let canonical = Array(digits.reversed().drop(while: { $0 == 0 }))
