@@ -55,11 +55,23 @@ public actor BudgetAuthorizer: PaymentAuthorizer {
     }
 
     /// Adds `amount` to the remaining budget (a recharge / top-up).
-    public func topUp(_ amount: Amount) {
-        remaining = (try? Amount(Self.add(remaining.rawValue, amount.rawValue))) ?? remaining
+    ///
+    /// - Throws: ``Amount/ValidationError`` if the recharged total is somehow not a canonical
+    ///   ``Amount``. The sum of two canonical base-units integers always is one, so this does not
+    ///   throw for any real input; it is declared `throws` rather than swallowing the failure with
+    ///   `try?` and leaving the budget unchanged, so an impossible miscomputation surfaces to the
+    ///   caller instead of silently denying a later spend the caller believed was funded. This
+    ///   mirrors the throw-on-failure top-up the Tempo channel uses, and the REVIEW.md rule to
+    ///   audit every `try?` on a value that gates money.
+    public func topUp(_ amount: Amount) throws {
+        remaining = try Amount(Self.add(remaining.rawValue, amount.rawValue))
     }
 
     // MARK: - Decimal arithmetic over canonical non-negative base-units strings
+
+    // Both helpers only ever receive `Amount.rawValue`, which `Amount.validate` constrains to ASCII
+    // digits (0x30...0x39). So `wholeNumberValue` is never nil for these characters and the `?? 0`
+    // below is an unreachable default, present only because the optional API forces a fallback.
 
     /// `lhs + rhs` for two canonical non-negative integer decimal strings.
     private static func add(_ lhs: String, _ rhs: String) -> String {
