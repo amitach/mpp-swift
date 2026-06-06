@@ -108,13 +108,12 @@ public struct TempoSettledChargeVerifier: PaymentMethodServer {
 
         let receipt = try await settle(credential.payload)
         guard receipt.succeeded else { throw .reverted(receipt.transactionHash) }
-        guard let transfer = matchingTransfer(
-            in: receipt, currency: currency, from: parsed.address,
-            recipient: recipient, amount: request.amount
-        ) else {
-            throw .noMatchingTransfer
-        }
-        try verifyMemo(transfer.memo, request: request, challenge: challenge)
+        let expected = ExpectedTransfer(
+            currency: currency, from: parsed.address, recipient: recipient, amount: request.amount
+        )
+        try requireMatchingTransfer(
+            in: receipt, expected: expected, request: request, challenge: challenge
+        )
 
         // Single-use: the receipt is verified, so consume the hash atomically -- first wins.
         guard await replayStore.consume(receipt.transactionHash) else {
@@ -142,10 +141,9 @@ public struct TempoSettledChargeVerifier: PaymentMethodServer {
             guard let receipt else { throw .transactionNotFound }
             return receipt
         case "transaction":
-            guard let hex = payload["signature"]?.stringValue,
-                  let raw = Data(hexPrefixed: hex) else {
-                throw .missingField("signature")
-            }
+            guard let hex = payload["signature"]?.stringValue
+            else { throw .missingField("signature") }
+            guard let raw = Data(hexPrefixed: hex) else { throw .malformedSignature }
             do {
                 return try await settlement.broadcast(raw)
             } catch {
@@ -156,42 +154,63 @@ public struct TempoSettledChargeVerifier: PaymentMethodServer {
         }
     }
 
-    /// The first `TransferWithMemo` log in `receipt` whose currency/from/recipient/amount match.
-    private func matchingTransfer(
+    /// Requires `receipt` to carry a `TransferWithMemo` log matching the challenge's
+    /// currency/from/recipient/amount **and** an acceptable memo
+    /// (``memoAccepted(_:request:challenge:)``).
+    ///
+    /// It scans **all** logs rather than the first financial match: a transaction may carry several
+    /// transfers with identical currency/from/recipient/amount but different memos (e.g. a batched
+    /// or multi-call tx), and the charge settles iff one of them carries the right memo. This
+    /// mirrors the reference SDK's `assertTransferLogs`, which folds the memo into the match.
+    ///
+    /// - Throws: ``VerifyError/memoMismatch`` when a financially matching transfer existed but none
+    ///   carried an acceptable memo (so the distinction survives), else
+    ///   ``VerifyError/noMatchingTransfer`` when nothing matched the amount/parties at all.
+    private func requireMatchingTransfer(
         in receipt: TransactionReceipt,
-        currency: EthereumAddress,
-        from: EthereumAddress,
-        recipient: EthereumAddress,
-        amount: Amount
-    ) -> TIP20Transfer? {
-        for log in receipt.logs {
-            guard let transfer = TIP20TransferEvent.transferWithMemo(from: log) else { continue }
-            if transfer.currency == currency, transfer.from == from,
-               transfer.recipient == recipient, transfer.amount == amount {
-                return transfer
-            }
-        }
-        return nil
-    }
-
-    /// The on-chain memo must equal the server-pinned `methodDetails.memo` exactly, or -- when the
-    /// charge auto-generated one -- be bound to this realm and challenge.
-    private func verifyMemo(
-        _ memo: Data,
+        expected: ExpectedTransfer,
         request: TempoChargeRequest,
         challenge: Challenge
     ) throws(VerifyError) {
+        var sawFinancialMatch = false
+        for log in receipt.logs {
+            guard let transfer = TIP20TransferEvent.transferWithMemo(from: log),
+                  expected.financiallyMatches(transfer) else { continue }
+            sawFinancialMatch = true
+            if memoAccepted(transfer.memo, request: request, challenge: challenge) { return }
+        }
+        throw sawFinancialMatch ? .memoMismatch : .noMatchingTransfer
+    }
+
+    /// The currency, payer, recipient, and amount a settled charge's transfer must carry (the
+    /// memo is matched separately, since several transfers may share these financials).
+    private struct ExpectedTransfer {
+        let currency: EthereumAddress
+        let from: EthereumAddress
+        let recipient: EthereumAddress
+        let amount: Amount
+
+        /// Whether `transfer` moves this amount of this currency from this payer to this recipient.
+        func financiallyMatches(_ transfer: TIP20Transfer) -> Bool {
+            transfer.currency == currency && transfer.from == from
+                && transfer.recipient == recipient && transfer.amount == amount
+        }
+    }
+
+    /// Whether `memo` is acceptable for this charge: it must equal the server-pinned
+    /// `methodDetails.memo` exactly, or -- when the charge auto-generated one -- be bound to this
+    /// realm and challenge (``Attribution/matches``). A pinned memo that is not valid `0x`-hex
+    /// (a server misconfiguration) accepts nothing.
+    private func memoAccepted(
+        _ memo: Data,
+        request: TempoChargeRequest,
+        challenge: Challenge
+    ) -> Bool {
         if let pinnedHex = request.memo {
-            guard let pinned = Data(hexPrefixed: pinnedHex), memo == pinned else {
-                throw .memoMismatch
-            }
-            return
+            guard let pinned = Data(hexPrefixed: pinnedHex) else { return false }
+            return memo == pinned
         }
-        guard Attribution.matches(
-            memo: memo, serverId: challenge.realm, challengeId: challenge.id
-        ) else {
-            throw .memoMismatch
-        }
+        return Attribution.matches(memo: memo, serverId: challenge.realm, challengeId: challenge.id)
     }
 
     /// A reason ``TempoSettledChargeVerifier`` rejected a credential.
@@ -210,6 +229,9 @@ public struct TempoSettledChargeVerifier: PaymentMethodServer {
         case chainIdMismatch
         /// The credential payload was missing a required field (named).
         case missingField(String)
+        /// A `transaction` credential carried a `signature` that was not valid `0x`-hex (present
+        /// but malformed, as distinct from absent).
+        case malformedSignature
         /// The credential `type` was neither `hash` nor `transaction`.
         case unsupportedCredentialType
         /// The chain could not be read for a `hash` credential (carries the cause).

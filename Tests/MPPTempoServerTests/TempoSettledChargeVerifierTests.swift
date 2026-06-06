@@ -95,6 +95,26 @@ struct TempoSettledChargeVerifierTests {
         )
     }
 
+    /// A receipt carrying several `TransferWithMemo` logs with identical financials but the given
+    /// memos, in order (a batched / multi-call transaction).
+    private func receipt(memos: [Data], amount: String = "1000000") throws -> TransactionReceipt {
+        let logs = try memos.map { memo in
+            try EVMLog(
+                address: Self.currency,
+                topics: [
+                    TIP20TransferEvent.transferWithMemoTopic.hexPrefixed,
+                    addressTopic(Self.payer),
+                    addressTopic(Self.recipient),
+                    memo.hexPrefixed,
+                ],
+                data: #require(EIP712.uint256(decimal: amount)).hexPrefixed
+            )
+        }
+        return TransactionReceipt(
+            transactionHash: Self.txHash, succeeded: true, blockNumber: 1, logs: logs
+        )
+    }
+
     // MARK: supports
 
     @Test("supports a non-zero tempo/charge; not a zero-amount one")
@@ -143,6 +163,30 @@ struct TempoSettledChargeVerifierTests {
         let subject = try verifier(settlement: StubSettlement(receipt: receipt(memo: foreignMemo)))
         let cred = try credential(chargeChallenge(), type: "hash", field: ("hash", Self.txHash))
         await #expect(throws: TempoSettledChargeVerifier.VerifyError.self) {
+            _ = try await subject.verify(cred, now: now)
+        }
+    }
+
+    @Test("among transfers with identical financials, the one bearing the right memo settles")
+    func multipleTransfersOneMatchingMemoSettles() async throws {
+        // The first log carries a foreign memo, a later one the challenge-bound memo. Scanning all
+        // logs (not just the first financial match) still settles -- the 0001 robustness fix.
+        let foreign = Attribution.encode(serverId: realm, challengeId: "other-challenge")
+        let subject = try verifier(
+            settlement: StubSettlement(receipt: receipt(memos: [foreign, memo()]))
+        )
+        let cred = try credential(chargeChallenge(), type: "hash", field: ("hash", Self.txHash))
+        let receipt = try await subject.verify(cred, now: now)
+        #expect(receipt.reference == Self.txHash)
+    }
+
+    @Test("a transaction credential whose signature is not hex is rejected as malformed")
+    func malformedSignatureRejected() async throws {
+        let subject = try verifier(settlement: StubSettlement(receipt: nil, broadcast: receipt()))
+        let cred = try credential(
+            chargeChallenge(), type: "transaction", field: ("signature", "0xZZ")
+        )
+        await #expect(throws: TempoSettledChargeVerifier.VerifyError.malformedSignature) {
             _ = try await subject.verify(cred, now: now)
         }
     }
