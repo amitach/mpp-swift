@@ -3,17 +3,22 @@ import MPPClient
 import MPPCore
 import MPPEVM
 
-/// The Tempo charge payment method, client side, for a **non-zero settled transfer** in **pull
-/// mode** (the `transaction` credential).
+/// The Tempo charge payment method, client side, for a **non-zero settled transfer**, in both
+/// submission modes (`draft-tempo-charge-00`).
 ///
-/// It pays a `tempo` / `charge` challenge whose `amount` is non-zero by building a single
-/// `currency.transferWithMemo(recipient, amount, memo)` `0x76` transaction, **payer-signed** as an
-/// *expiring-nonce* transaction with `validBefore = min(now + window, challenge expiry)`, and
-/// presenting it as the `{type: "transaction", signature: <raw tx hex>}` credential the `402`
-/// server
-/// broadcasts within the window (`draft-tempo-charge-00`). The zero-amount proof path is
-/// ``TempoProofMethod``; push mode (the `hash` credential, where the client broadcasts) is a
-/// separate method.
+/// It pays a `tempo` / `charge` challenge whose `amount` is non-zero by building a payer-signed
+/// `currency.transferWithMemo(recipient, amount, memo)` `0x76` transaction and presenting one of
+/// two
+/// credentials, by mode:
+/// - **pull** (`transaction`): an *expiring-nonce* tx (`validBefore = min(now + window, expiry)`)
+/// the
+///   `402` server broadcasts within the window. Preferred whenever the server allows it; no
+///   broadcaster needed.
+/// - **push** (`hash`): a sequential-nonce tx this client broadcasts itself (via an injected
+///   ``TempoTransferBroadcaster``), presenting the mined hash. Used when the server offers only
+/// push.
+///
+/// The zero-amount proof path is ``TempoProofMethod``.
 ///
 /// The transaction is built over an injected ``TempoTransferTxBuilder`` (the concrete FFI builder
 /// holds the fee parameters), so this type only routes, gates, derives the attribution memo, and
@@ -24,9 +29,13 @@ public struct TempoSettledChargeMethod: PaymentMethodClient {
     /// seconds.
     public static let defaultWindowSeconds: UInt64 = 25
 
+    /// The submission mode for one charge (`draft-tempo-charge-00`).
+    private enum Mode { case pull, push }
+
     private let payerPrivateKey: Data
     private let payer: EthereumAddress
     private let transferBuilder: any TempoTransferTxBuilder
+    private let broadcaster: (any TempoTransferBroadcaster)?
     private let clientId: String?
     private let defaultChainId: UInt64
     private let approval: TempoApprovalPolicy
@@ -40,6 +49,9 @@ public struct TempoSettledChargeMethod: PaymentMethodClient {
     ///     source; its public key fixes the payer address.
     ///   - transferBuilder: builds the signed `0x76` transfer (the FFI builder holds the fee/nonce
     ///     infrastructure).
+    ///   - broadcaster: submits the transaction for **push** mode (the `hash` credential). When
+    ///     `nil` (the default), only **pull** mode (the `transaction` credential) is offered, so a
+    ///     push-only challenge is unsupported. Pull is preferred whenever the server allows it.
     ///   - clientId: an optional client identity folded into the attribution memo; `nil` is
     ///     anonymous.
     ///   - defaultChainId: the chain to use when the challenge's `methodDetails.chainId` is absent.
@@ -51,6 +63,7 @@ public struct TempoSettledChargeMethod: PaymentMethodClient {
     public init?(
         payerPrivateKey: Data,
         transferBuilder: any TempoTransferTxBuilder,
+        broadcaster: (any TempoTransferBroadcaster)? = nil,
         clientId: String? = nil,
         defaultChainId: UInt64 = TempoChain.mainnet,
         approval: TempoApprovalPolicy = .allowAll,
@@ -63,6 +76,7 @@ public struct TempoSettledChargeMethod: PaymentMethodClient {
         self.payerPrivateKey = payerPrivateKey
         self.payer = payer
         self.transferBuilder = transferBuilder
+        self.broadcaster = broadcaster
         self.clientId = clientId
         self.defaultChainId = defaultChainId
         self.approval = approval
@@ -81,8 +95,8 @@ public struct TempoSettledChargeMethod: PaymentMethodClient {
     }
 
     /// Whether this is a `tempo` / `charge` challenge with a decodable **non-zero** request that
-    /// carries a valid-address `recipient` and `currency` and is not constrained to push-only
-    /// modes.
+    /// carries a valid-address `recipient` and `currency` and offers a mode this method can submit
+    /// (pull always; push only when a broadcaster is configured).
     ///
     /// The addresses are parsed here (not merely checked for presence), so `supports` agrees with
     /// ``buildCredential(for:)`` -- which also requires them to parse -- and the flow never selects
@@ -91,10 +105,11 @@ public struct TempoSettledChargeMethod: PaymentMethodClient {
         guard challenge.method == TempoMethod.name, challenge.intent == .charge,
               let request = try? TempoChargeRequest(challenge: challenge),
               !request.isZeroAmount,
+              selectMode(request.supportedModes) != nil,
               let currency = request.currency, EthereumAddress(hex: currency) != nil,
               let recipient = request.recipient, EthereumAddress(hex: recipient) != nil
         else { return false }
-        return Self.allowsPull(request.supportedModes)
+        return true
     }
 
     /// The approval facts for `challenge`, filled from the decoded charge request.
@@ -110,16 +125,18 @@ public struct TempoSettledChargeMethod: PaymentMethodClient {
         )
     }
 
-    /// Builds the pull-mode `transaction` credential for `challenge`.
+    /// Builds the settled-charge credential for `challenge`, in pull or push mode.
     ///
-    /// Decodes the charge, requires a non-zero amount with a `recipient` and `currency`, checks
-    /// pull
-    /// mode is acceptable, runs the approval gate (no signature is produced if it rejects), derives
-    /// the attribution memo, builds the expiring-nonce transfer, and assembles the credential with
-    /// the `did:pkh` source and the `{type: "transaction", signature}` payload.
+    /// Decodes the charge, requires a non-zero amount with a `recipient` and `currency`, selects a
+    /// submission mode the server allows (pull preferred; push when only push is offered and a
+    /// broadcaster is configured), runs the approval gate (no signature is produced if it rejects),
+    /// derives the attribution memo, and builds the transfer. In **pull** mode it returns the
+    /// expiring-nonce transaction as the `{type: "transaction", signature}` credential the server
+    /// broadcasts; in **push** mode it broadcasts a sequential-nonce transaction itself and returns
+    /// the mined hash as the `{type: "hash", hash}` credential. Both carry the `did:pkh` source.
     ///
-    /// - Throws: ``TempoSettledChargeError`` for a malformed/zero/under-specified request, an
-    ///   unsupported mode, a rejected approval, or a build failure.
+    /// - Throws: ``TempoSettledChargeError`` for a malformed/zero/under-specified request, no
+    ///   acceptable mode, a rejected approval, a build failure, or a push-broadcast failure.
     public func buildCredential(for challenge: Challenge) async throws -> Credential {
         guard challenge.method == TempoMethod.name, challenge.intent == .charge else {
             throw TempoSettledChargeError.wrongMethodOrIntent
@@ -137,8 +154,8 @@ public struct TempoSettledChargeMethod: PaymentMethodClient {
         guard let recipientHex = request.recipient,
               let recipient = EthereumAddress(hex: recipientHex)
         else { throw TempoSettledChargeError.missingOrInvalidRecipient }
-        guard Self.allowsPull(request.supportedModes) else {
-            throw TempoSettledChargeError.pullModeUnsupported(request.supportedModes ?? [])
+        guard let mode = selectMode(request.supportedModes) else {
+            throw TempoSettledChargeError.unsupportedMode(request.supportedModes ?? [])
         }
 
         let chainId = request.chainId ?? defaultChainId
@@ -149,10 +166,12 @@ public struct TempoSettledChargeMethod: PaymentMethodClient {
         guard await approval.approves(facts) else { throw TempoSettledChargeError.approvalDenied }
 
         let memo = try resolveMemo(request, challenge: challenge)
+        // Pull signs an expiring-nonce tx the server broadcasts; push signs a sequential-nonce tx
+        // this client broadcasts (validBefore nil) and reports the mined hash.
         let parameters = TempoTransferParameters(
             payerPrivateKey: payerPrivateKey, payer: payer, currency: currency,
             recipient: recipient, amount: request.amount.rawValue, memo: memo,
-            validBefore: validBefore(for: challenge.expires)
+            validBefore: mode == .pull ? validBefore(for: challenge.expires) : nil
         )
         let transaction: Data
         do {
@@ -163,10 +182,7 @@ public struct TempoSettledChargeMethod: PaymentMethodClient {
             throw TempoSettledChargeError.buildFailed(String(describing: error))
         }
 
-        let payload: [String: JSONValue] = [
-            "type": .string("transaction"),
-            "signature": .string(transaction.hexPrefixed),
-        ]
+        let payload = try await payload(for: mode, transaction: transaction)
         return Credential(
             challenge: challenge,
             source: ProofSource.did(address: payer, chainId: chainId),
@@ -202,10 +218,38 @@ public struct TempoSettledChargeMethod: PaymentMethodClient {
         return min(windowDeadline, challengeExpiry)
     }
 
-    /// Whether the server's `supportedModes` allow pull (absent means unconstrained, both allowed).
-    private static func allowsPull(_ supportedModes: [String]?) -> Bool {
-        guard let supportedModes else { return true }
-        return supportedModes.contains("pull")
+    /// Assembles the credential payload for the selected mode. Pull carries the signed transaction
+    /// for the server to broadcast; push broadcasts it here and carries the mined hash.
+    private func payload(
+        for mode: Mode,
+        transaction: Data
+    ) async throws -> [String: JSONValue] {
+        switch mode {
+        case .pull:
+            return ["type": .string("transaction"), "signature": .string(transaction.hexPrefixed)]
+        case .push:
+            // selectMode only returns .push when a broadcaster is present.
+            guard let broadcaster else { throw TempoSettledChargeError.unsupportedMode(["push"]) }
+            let hash: String
+            do {
+                hash = try await broadcaster.broadcast(transaction)
+            } catch {
+                throw TempoSettledChargeError.broadcastFailed(String(describing: error))
+            }
+            return ["type": .string("hash"), "hash": .string(hash)]
+        }
+    }
+
+    /// Selects a submission mode the server allows: pull whenever it is acceptable (`nil`
+    /// `supportedModes` means unconstrained), else push when push is offered and a broadcaster is
+    /// configured. `nil` when neither can be satisfied (push-only without a broadcaster, or an
+    /// empty
+    /// `supportedModes`).
+    private func selectMode(_ supportedModes: [String]?) -> Mode? {
+        guard let supportedModes else { return .pull } // unconstrained -> prefer pull
+        if supportedModes.contains("pull") { return .pull }
+        if supportedModes.contains("push"), broadcaster != nil { return .push }
+        return nil
     }
 
     /// The `tempo` / `charge` advertisement range, built once.
@@ -231,8 +275,9 @@ public enum TempoSettledChargeError: Error, Sendable, Hashable {
     case missingOrInvalidCurrency
     /// The settled transfer requires a `recipient`, which was absent or not an address.
     case missingOrInvalidRecipient
-    /// The server's `supportedModes` exclude pull, which is the only mode this method submits.
-    case pullModeUnsupported([String])
+    /// The server's `supportedModes` offer no mode this method can submit (push-only without a
+    /// configured broadcaster, or an empty list). Carries the offered modes.
+    case unsupportedMode([String])
     /// The server pinned a `memo` that is not a 32-byte `0x`-hex value.
     case invalidMemo
     /// The pre-sign approval policy rejected the charge.
@@ -240,4 +285,7 @@ public enum TempoSettledChargeError: Error, Sendable, Hashable {
     /// The transfer transaction could not be built; carries the underlying builder error's
     /// description (a `String`, so the type stays `Hashable` like its peers).
     case buildFailed(String)
+    /// Push mode could not broadcast the transaction (or it reverted); carries the underlying
+    /// broadcaster error's description.
+    case broadcastFailed(String)
 }

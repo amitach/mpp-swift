@@ -21,6 +21,7 @@ struct TempoSettledChargeMethodTests {
 
     private func method(
         builder: any TempoTransferTxBuilder,
+        broadcaster: (any TempoTransferBroadcaster)? = nil,
         clientId: String? = nil,
         approval: TempoApprovalPolicy = .allowAll,
         now: @escaping @Sendable () -> Date = { clock }
@@ -28,6 +29,7 @@ struct TempoSettledChargeMethodTests {
         try #require(TempoSettledChargeMethod(
             payerPrivateKey: payerKey(),
             transferBuilder: builder,
+            broadcaster: broadcaster,
             clientId: clientId,
             defaultChainId: Self.chainId,
             approval: approval,
@@ -189,6 +191,50 @@ struct TempoSettledChargeMethodTests {
         #expect(ranges.first?.method == .value(TempoMethod.name))
         #expect(ranges.first?.intent == .value(.charge))
     }
+
+    // MARK: push mode
+
+    @Test("push mode broadcasts a sequential-nonce tx and emits the hash credential")
+    func pushModeEmitsHashCredential() async throws {
+        let builder = StubTransferBuilder()
+        let broadcaster = StubBroadcaster(hash: "0xabc123")
+        let subject = try method(builder: builder, broadcaster: broadcaster)
+        let credential = try await subject
+            .buildCredential(for: chargeChallenge(supportedModes: ["push"]))
+        #expect(credential.payload["type"] == .string("hash"))
+        #expect(credential.payload["hash"] == .string("0xabc123"))
+        // Push is a sequential-nonce tx (validBefore nil), and the broadcaster got the built tx.
+        #expect(try #require(builder.captured).validBefore == nil)
+        #expect(broadcaster.broadcasted == builtTx)
+    }
+
+    @Test("with a broadcaster, pull is still preferred when the server allows both")
+    func prefersPullWhenBothOffered() async throws {
+        let builder = StubTransferBuilder()
+        let subject = try method(builder: builder, broadcaster: StubBroadcaster(hash: "0xabc"))
+        let credential = try await subject.buildCredential(
+            for: chargeChallenge(supportedModes: ["pull", "push"])
+        )
+        #expect(credential.payload["type"] == .string("transaction"))
+        #expect(try #require(builder.captured).validBefore != nil) // pull -> expiring nonce
+    }
+
+    @Test("push-only is supported once a broadcaster is configured")
+    func pushOnlySupportedWithBroadcaster() throws {
+        let subject = try method(
+            builder: StubTransferBuilder(),
+            broadcaster: StubBroadcaster(hash: "0x1")
+        )
+        #expect(try subject.supports(chargeChallenge(supportedModes: ["push"])))
+    }
+
+    @Test("a reverted/failed broadcast surfaces as broadcastFailed, not a hash credential")
+    func broadcastFailureThrows() async throws {
+        let subject = try method(builder: StubTransferBuilder(), broadcaster: FailingBroadcaster())
+        await #expect(throws: TempoSettledChargeError.self) {
+            _ = try await subject.buildCredential(for: chargeChallenge(supportedModes: ["push"]))
+        }
+    }
 }
 
 /// The fixed "signed tx" the stub builder returns; the credential carries its 0x-hex.
@@ -209,5 +255,32 @@ private final class StubTransferBuilder: TempoTransferTxBuilder, @unchecked Send
     ) async throws -> Data {
         lock.withLock { stored = parameters }
         return builtTx
+    }
+}
+
+/// A stub ``TempoTransferBroadcaster`` that records the raw tx it was handed and returns a fixed
+/// hash, so push-mode credential assembly can be asserted without a chain.
+private final class StubBroadcaster: TempoTransferBroadcaster, @unchecked Sendable {
+    private let hash: String
+    private let lock = NSLock()
+    private var raw: Data?
+    var broadcasted: Data? {
+        lock.withLock { raw }
+    }
+
+    init(hash: String) {
+        self.hash = hash
+    }
+
+    func broadcast(_ rawTransaction: Data) async throws -> String {
+        lock.withLock { raw = rawTransaction }
+        return hash
+    }
+}
+
+/// A stub broadcaster that always fails, to exercise the push-mode error path.
+private struct FailingBroadcaster: TempoTransferBroadcaster {
+    func broadcast(_: Data) async throws -> String {
+        throw TempoBroadcastError.reverted("0xreverted")
     }
 }
