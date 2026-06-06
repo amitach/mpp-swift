@@ -21,6 +21,7 @@ public struct PaymentClient: Sendable {
     private let advertise: String?
     private let allowInsecureLocal: Bool
     private let authorizer: any PaymentAuthorizer
+    private let receiptStore: (any ReceiptStore)?
     private let onEvent: @Sendable (ClientEvent) -> Void
 
     /// Creates a payment client over a transport and a set of payment methods.
@@ -38,6 +39,9 @@ public struct PaymentClient: Sendable {
     ///   - authorizer: Consulted once after a challenge is selected and before its
     ///     credential is built; throwing denies the payment. Defaults to
     ///     ``AllowAllAuthorizer`` (the prior, ungated behavior).
+    ///   - receiptStore: An optional rail-agnostic ``ReceiptStore``; when set, the
+    ///     ``Receipt`` parsed from a paid response is recorded (best-effort) for a
+    ///     ledger / reconciliation trail. Defaults to `nil` (no persistence).
     ///   - onEvent: A synchronous diagnostics sink; defaults to a no-op.
     public init(
         transport: any MPPHTTPTransport,
@@ -46,6 +50,7 @@ public struct PaymentClient: Sendable {
         advertise: String? = nil,
         allowInsecureLocal: Bool = false,
         authorizer: any PaymentAuthorizer = AllowAllAuthorizer(),
+        receiptStore: (any ReceiptStore)? = nil,
         onEvent: @escaping @Sendable (ClientEvent) -> Void = { _ in }
     ) {
         self.transport = transport
@@ -54,6 +59,7 @@ public struct PaymentClient: Sendable {
         self.advertise = advertise
         self.allowInsecureLocal = allowInsecureLocal
         self.authorizer = authorizer
+        self.receiptStore = receiptStore
         self.onEvent = onEvent
     }
 
@@ -112,6 +118,7 @@ public struct PaymentClient: Sendable {
 
         let receipt = paidResponse.headerFields[Self.paymentReceipt]
             .flatMap { try? Receipt(headerValue: $0) }
+        if let receipt { await receiptStore?.record(receipt) }
         onEvent(.paymentResponse(receipt: receipt))
         return (paidResponse, paidBody)
     }
