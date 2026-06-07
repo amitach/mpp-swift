@@ -59,7 +59,9 @@ public struct X402PaymentRequirements: Sendable, Hashable {
             "network": .string(network.wireValue(for: version)),
             "asset": .string(asset),
             "payTo": .string(payTo),
-            "maxTimeoutSeconds": .integer(Int64(maxTimeoutSeconds)),
+            // `JSONValue.integer` is Int64; clamp (never trap) a UInt64 beyond Int64.max. Such a
+            // timeout is nonsensical anyway, and the decode side already rejects a negative value.
+            "maxTimeoutSeconds": .integer(Int64(clamping: maxTimeoutSeconds)),
         ]
         object[version == .v1 ? "maxAmountRequired" : "amount"] = .string(amount.rawValue)
         if !extra.isEmpty {

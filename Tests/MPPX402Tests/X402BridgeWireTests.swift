@@ -84,14 +84,28 @@ struct X402BridgeWireTests {
         #expect(requirements.assetVersion == "2")
     }
 
-    @Test("decoding fails closed on a missing field or the wrong version's amount key")
+    @Test("decoding fails closed on a missing field, wrong amount key, or negative timeout")
     func failClosed() throws {
         let v2json = try requirements().json(for: .v2)
         // Decoding v2 bytes as v1 misses `maxAmountRequired` -> nil.
         #expect(X402PaymentRequirements(json: v2json, version: .v1) == nil)
-        // A missing payTo -> nil.
         var object = try #require(v2json.objectValue)
-        object["payTo"] = nil
+        // A missing payTo -> nil.
+        var missingPayTo = object
+        missingPayTo["payTo"] = nil
+        #expect(X402PaymentRequirements(json: .object(missingPayTo), version: .v2) == nil)
+        // A negative maxTimeoutSeconds -> nil.
+        object["maxTimeoutSeconds"] = .integer(-1)
         #expect(X402PaymentRequirements(json: .object(object), version: .v2) == nil)
+    }
+
+    @Test("a UInt64 timeout beyond Int64.max clamps on encode instead of trapping")
+    func largeTimeoutClamps() throws {
+        let requirements = try X402PaymentRequirements(
+            network: .baseSepolia, amount: Amount("1"), asset: Self.usdc, payTo: Self.payTo,
+            maxTimeoutSeconds: .max
+        )
+        let object = try #require(requirements.json(for: .v2).objectValue)
+        #expect(object["maxTimeoutSeconds"]?.integerValue == Int64.max) // clamped, no trap
     }
 }
