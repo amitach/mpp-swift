@@ -423,16 +423,22 @@ let package = Package(
         ),
         // MPPX402Server: the x402 charge method, SERVER side (X402ChargeVerifier) -- recovers the
         // EIP-3009 signer, validates the authorization against the challenge, settles it on-chain
-        // through an injected X402Settlement seam, and single-uses the authorization. Reuses
-        // MPPX402's shared types and MPPServer's PaymentMethodServer seam.
+        // through an injected X402Settlement seam, and single-uses the authorization. The concrete
+        // settler (X402Facilitator + FacilitatorSettlement) POSTs to an x402 facilitator over
+        // MPPHTTPTransport, so it also links MPPClient + HTTPTypes. Reuses MPPX402's shared types
+        // and MPPServer's PaymentMethodServer seam.
         .target(
             name: "MPPX402Server",
-            dependencies: ["MPPX402", "MPPCore", "MPPServer", "MPPEVM"]
+            dependencies: [
+                "MPPX402", "MPPCore", "MPPServer", "MPPEVM", "MPPClient",
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+            ]
         ),
         .testTarget(
             name: "MPPX402ServerTests",
             dependencies: [
                 "MPPX402Server", "MPPX402", "MPPCore", "MPPServer", "MPPEVM", "MPPClient",
+                .product(name: "HTTPTypes", package: "swift-http-types"),
             ]
         ),
         // MPPStripeServer: the Stripe charge method, SERVER side (StripeChargeVerifier + the

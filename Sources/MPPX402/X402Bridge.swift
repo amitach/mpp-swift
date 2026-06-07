@@ -28,12 +28,7 @@ public enum X402Bridge {
             asset: asset,
             payTo: payTo,
             maxTimeoutSeconds: request.maxTimeoutSeconds ?? X402ChargeMethod.defaultTimeoutSeconds,
-            extra: [
-                // The token's EIP-712 domain (NOT the x402 protocol version).
-                "name": .string(name),
-                "version": .string(tokenVersion),
-                "assetTransferMethod": .string("eip3009"),
-            ]
+            extra: X402PaymentRequirements.exactExtra(name: name, version: tokenVersion)
         )
     }
 
