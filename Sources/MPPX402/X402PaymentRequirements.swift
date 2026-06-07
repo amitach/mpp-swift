@@ -83,9 +83,19 @@ public struct X402PaymentRequirements: Sendable, Hashable {
               let amountWire = object[version == .v1 ? "maxAmountRequired" : "amount"]?.stringValue,
               let amount = try? Amount(amountWire)
         else { return nil }
+        // `extra` is optional, but per the x402 schema it is an object when present: absent -> [:],
+        // present-but-not-an-object -> fail closed (a malformed message), rather than silently
+        // drop.
+        let extra: [String: JSONValue]
+        if let extraValue = object["extra"] {
+            guard let extraObject = extraValue.objectValue else { return nil }
+            extra = extraObject
+        } else {
+            extra = [:]
+        }
         self.init(
             scheme: scheme, network: network, amount: amount, asset: asset, payTo: payTo,
-            maxTimeoutSeconds: UInt64(timeoutValue), extra: object["extra"]?.objectValue ?? [:]
+            maxTimeoutSeconds: UInt64(timeoutValue), extra: extra
         )
     }
 }

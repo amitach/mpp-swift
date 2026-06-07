@@ -99,6 +99,17 @@ struct X402BridgeWireTests {
         #expect(X402PaymentRequirements(json: .object(object), version: .v2) == nil)
     }
 
+    @Test("a present-but-non-object extra fails closed; an absent extra defaults to empty")
+    func malformedExtraRejected() throws {
+        var object = try #require(requirements().json(for: .v2).objectValue)
+        // Absent extra -> empty (still decodes).
+        object["extra"] = nil
+        #expect(X402PaymentRequirements(json: .object(object), version: .v2)?.extra.isEmpty == true)
+        // Present but an array, not an object -> nil.
+        object["extra"] = .array([.string("nope")])
+        #expect(X402PaymentRequirements(json: .object(object), version: .v2) == nil)
+    }
+
     @Test("a UInt64 timeout beyond Int64.max clamps on encode instead of trapping")
     func largeTimeoutClamps() throws {
         let requirements = try X402PaymentRequirements(
