@@ -19,18 +19,22 @@ struct X402BridgeTests {
 
     private func chargeChallenge(
         method: MethodName? = nil,
-        name: String? = "USD Coin"
+        name: String? = "USD Coin",
+        chainId: UInt64? = 84532,
+        recipient: String? = recipientHex,
+        currency: String? = usdcBaseHex
     ) throws -> Challenge {
         var details: [String: JSONValue] = [
-            "chainId": .integer(84532), "version": .string("2"), "maxTimeoutSeconds": .integer(120),
+            "version": .string("2"), "maxTimeoutSeconds": .integer(120),
         ]
         if let name { details["name"] = .string(name) }
-        let object: [String: JSONValue] = [
+        if let chainId { details["chainId"] = .integer(Int64(chainId)) }
+        var object: [String: JSONValue] = [
             "amount": .string("1000000"),
-            "recipient": .string(Self.recipientHex),
-            "currency": .string(Self.usdcBaseHex),
             "methodDetails": .object(details),
         ]
+        if let recipient { object["recipient"] = .string(recipient) }
+        if let currency { object["currency"] = .string(currency) }
         return try Challenge(
             id: "x402-charge-1", realm: "shop.example",
             method: method ?? X402Method.name, intent: IntentName("charge"),
@@ -38,11 +42,14 @@ struct X402BridgeTests {
         )
     }
 
-    private func credential(for challenge: Challenge) async throws -> Credential {
+    private func credential(
+        for challenge: Challenge, defaultChainId: UInt64 = X402Chain.baseMainnet
+    ) async throws -> Credential {
         let clock: @Sendable () -> Date = { Self.now }
         let nonceSource: @Sendable () -> Data = { Self.nonce }
         let client = try #require(X402ChargeMethod(
-            payerPrivateKey: Self.payerKey, now: clock, nonceSource: nonceSource
+            payerPrivateKey: Self.payerKey, defaultChainId: defaultChainId,
+            now: clock, nonceSource: nonceSource
         ))
         return try await client.buildCredential(for: challenge)
     }
@@ -70,6 +77,25 @@ struct X402BridgeTests {
         #expect(throws: X402BridgeError.missingTokenDomain) {
             _ = try X402Bridge.paymentRequirements(for: chargeChallenge(name: nil))
         }
+        #expect(throws: X402BridgeError.missingRecipient) {
+            _ = try X402Bridge.paymentRequirements(for: chargeChallenge(recipient: nil))
+        }
+        #expect(throws: X402BridgeError.missingCurrency) {
+            _ = try X402Bridge.paymentRequirements(for: chargeChallenge(currency: nil))
+        }
+    }
+
+    @Test(
+        "the bridged payload's network is the chain the credential was signed for, not the default"
+    )
+    func payloadUsesChainFromSource() async throws {
+        // The challenge omits chainId; the client signs for its configured default (Base Sepolia).
+        // The bridge must report that chain (from the credential's did:pkh source), not
+        // baseMainnet.
+        let challenge = try chargeChallenge(chainId: nil)
+        let credential = try await credential(for: challenge, defaultChainId: X402Chain.baseSepolia)
+        let payload = try X402Bridge.paymentPayload(version: .v1, from: credential)
+        #expect(payload.network == .baseSepolia)
     }
 
     @Test("the credential bridges to an x402 PaymentPayload carrying the same authorization")

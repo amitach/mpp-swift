@@ -18,7 +18,7 @@ public enum X402Bridge {
         let request = try chargeRequest(challenge)
         guard let payTo = request.recipient else { throw .missingRecipient }
         guard let asset = request.currency else { throw .missingCurrency }
-        guard let name = request.tokenName, let version = request.tokenVersion else {
+        guard let name = request.tokenName, let tokenVersion = request.tokenVersion else {
             throw .missingTokenDomain
         }
         return X402PaymentRequirements(
@@ -29,8 +29,9 @@ public enum X402Bridge {
             payTo: payTo,
             maxTimeoutSeconds: request.maxTimeoutSeconds ?? X402ChargeMethod.defaultTimeoutSeconds,
             extra: [
+                // The token's EIP-712 domain (NOT the x402 protocol version).
                 "name": .string(name),
-                "version": .string(version),
+                "version": .string(tokenVersion),
                 "assetTransferMethod": .string("eip3009"),
             ]
         )
@@ -49,10 +50,14 @@ public enum X402Bridge {
         guard let exact = X402ExactPayload(credentialPayload: credential.payload) else {
             throw .malformedCredentialPayload
         }
+        // The credential's `did:pkh:eip155:<chainId>` source is the authoritative chain the
+        // authorization was signed for -- the client may have used a configured default the
+        // challenge did not name, so prefer the source over the challenge's chainId / the default.
+        let chainId = credential.source.flatMap(ProofSource.parse)?.chainId
+            ?? request.chainId ?? X402Chain.baseMainnet
         return X402PaymentPayload(
             version: version, scheme: "exact",
-            network: X402Network(chainId: request.chainId ?? X402Chain.baseMainnet),
-            payload: exact
+            network: X402Network(chainId: chainId), payload: exact
         )
     }
 
