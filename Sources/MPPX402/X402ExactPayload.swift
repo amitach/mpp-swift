@@ -109,3 +109,46 @@ public struct X402ExactPayload: Codable, Sendable, Hashable {
         return raw
     }
 }
+
+public extension X402ExactPayload {
+    /// This payload as an MPP ``Credential`` payload object: the exact `payload`
+    /// (`{signature, authorization}`) flattened with a `type: "exact"` discriminator. The client
+    /// method puts this in the credential; the server verifier reverses it with
+    /// ``init(credentialPayload:)``. The single shared mapping keeps the two sides from drifting.
+    func credentialPayload() -> [String: JSONValue] {
+        [
+            "type": .string("exact"),
+            "signature": .string(signature),
+            "authorization": .object([
+                "from": .string(authorization.from),
+                "to": .string(authorization.recipient),
+                "value": .string(authorization.value),
+                "validAfter": .string(authorization.validAfter),
+                "validBefore": .string(authorization.validBefore),
+                "nonce": .string(authorization.nonce),
+            ]),
+        ]
+    }
+
+    /// Parses an MPP ``Credential`` payload object produced by ``credentialPayload()``, or `nil` if
+    /// the `type` is not `"exact"` or any field is missing. Fail-closed.
+    init?(credentialPayload object: [String: JSONValue]) {
+        guard object["type"]?.stringValue == "exact",
+              let signature = object["signature"]?.stringValue,
+              let auth = object["authorization"]?.objectValue,
+              let from = auth["from"]?.stringValue,
+              let recipient = auth["to"]?.stringValue,
+              let value = auth["value"]?.stringValue,
+              let validAfter = auth["validAfter"]?.stringValue,
+              let validBefore = auth["validBefore"]?.stringValue,
+              let nonce = auth["nonce"]?.stringValue
+        else { return nil }
+        self.init(
+            signature: signature,
+            authorization: X402AuthorizationWire(
+                from: from, recipient: recipient, value: value,
+                validAfter: validAfter, validBefore: validBefore, nonce: nonce
+            )
+        )
+    }
+}
