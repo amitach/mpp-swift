@@ -414,11 +414,11 @@ let package = Package(
         // MPP <-> x402 bridge land on top in later targets.
         .target(
             name: "MPPX402",
-            dependencies: ["MPPCore", "MPPEVM"]
+            dependencies: ["MPPCore", "MPPEVM", "MPPClient"]
         ),
         .testTarget(
             name: "MPPX402Tests",
-            dependencies: ["MPPX402", "MPPCore", "MPPEVM"]
+            dependencies: ["MPPX402", "MPPCore", "MPPEVM", "MPPClient"]
         ),
         // MPPStripeServer: the Stripe charge method, SERVER side (StripeChargeVerifier + the
         // concrete StripePaymentIntentClient over MPPHTTPTransport). Reuses MPPStripe's shared
