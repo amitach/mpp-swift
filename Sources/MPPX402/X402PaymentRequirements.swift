@@ -51,6 +51,18 @@ public struct X402PaymentRequirements: Sendable, Hashable {
         extra["version"]?.stringValue
     }
 
+    /// The canonical `extra` for the `exact` (EIP-3009) scheme: the token's EIP-712 domain
+    /// `name` / `version` plus the `assetTransferMethod` that names the transfer mechanism. Shared
+    /// by the bridge's advertisement and the facilitator settlement so the two never drift.
+    public static func exactExtra(name: String, version: String) -> [String: JSONValue] {
+        [
+            // The token's EIP-712 domain (NOT the x402 protocol version).
+            "name": .string(name),
+            "version": .string(version),
+            "assetTransferMethod": .string("eip3009"),
+        ]
+    }
+
     /// Encodes to the x402 wire JSON for `version`: v1 writes `maxAmountRequired` + a short
     /// `network` name; v2 writes `amount` + CAIP-2.
     public func json(for version: X402Version) -> JSONValue {

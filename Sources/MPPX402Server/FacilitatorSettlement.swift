@@ -52,7 +52,7 @@ public struct FacilitatorSettlement: X402Settlement {
             asset: domain.asset.checksummed,
             payTo: authorization.recipient.checksummed,
             maxTimeoutSeconds: maxTimeoutSeconds,
-            extra: ["name": .string(domain.name), "version": .string(domain.version)]
+            extra: X402PaymentRequirements.exactExtra(name: domain.name, version: domain.version)
         )
         let response = try await facilitator.settle(payment: payment, requirements: requirements)
         guard response.success else {

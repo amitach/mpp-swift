@@ -155,6 +155,12 @@ struct X402FacilitatorTests {
         // The timeout hint is the default duration (~300s), not the ~1.7-billion-second value that
         // validBefore - validAfter yields when validAfter is 0 (the common case).
         #expect(req["maxTimeoutSeconds"]?.integerValue == 300)
+        // The reconstructed extra is the canonical exact-scheme set the bridge advertises: the
+        // token's EIP-712 domain plus the assetTransferMethod (one shared source of truth).
+        let extra = try #require(req["extra"]?.objectValue)
+        #expect(extra["name"]?.stringValue == "USD Coin")
+        #expect(extra["version"]?.stringValue == "2")
+        #expect(extra["assetTransferMethod"]?.stringValue == "eip3009")
 
         let failing = StubTransport(json: .object([
             "success": .bool(false), "transaction": .string(""),
