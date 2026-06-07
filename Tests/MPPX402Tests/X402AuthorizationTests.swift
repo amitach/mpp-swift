@@ -91,6 +91,21 @@ struct X402AuthorizationTests {
         #expect(!auth.isSignedByFrom(domain: otherChain, signature: signature))
     }
 
+    @Test("EIP-2 strictness threads through: a canonical low-s signature is accepted")
+    func malleabilityPolicyThreads() throws {
+        let domain = try domain()
+        let auth = try authorization()
+        // Secp256k1Signer emits low-s, so the signature is valid under both policies; this proves
+        // the parameter is wired (the verifier opts into rejectHighS to match the settling token).
+        let signature = try auth.sign(domain: domain, with: signer())
+        #expect(auth.isSignedByFrom(domain: domain, signature: signature, malleability: .accepted))
+        #expect(auth.isSignedByFrom(
+            domain: domain,
+            signature: signature,
+            malleability: .rejectHighS
+        ))
+    }
+
     @Test("the nonce must be exactly 32 bytes")
     func nonceWidth() throws {
         let payer = try payer()

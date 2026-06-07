@@ -120,25 +120,44 @@ public struct X402Authorization: Sendable, Hashable {
     /// Signs this authorization under `domain`, returning the 65-byte Ethereum-wire signature
     /// (`r ‖ s ‖ v`, v in 27...28) the x402 `payload.signature` carries.
     ///
-    /// - Throws: ``SigningError/unencodableValue`` if ``value`` is not a valid uint256, or the
-    ///   underlying ``Secp256k1Signer`` signing error.
-    public func sign(domain: X402Domain, with signer: Secp256k1Signer) throws -> Data {
-        guard let hash = signingHash(domain: domain) else { throw SigningError.unencodableValue }
-        return try signer.sign(hash: hash).ethereumWire
+    /// - Throws: ``SigningError/unencodableValue`` if ``value`` is not a valid uint256, or
+    ///   ``SigningError/signerFailure(_:)`` wrapping the underlying ``Secp256k1Signer`` error.
+    public func sign(
+        domain: X402Domain,
+        with signer: Secp256k1Signer
+    ) throws(SigningError) -> Data {
+        guard let hash = signingHash(domain: domain) else { throw .unencodableValue }
+        do {
+            return try signer.sign(hash: hash).ethereumWire
+        } catch {
+            throw .signerFailure(error)
+        }
     }
 
     /// Recovers the signer of `signature` (65-byte Ethereum wire) over this authorization under
     /// `domain`, or `nil` if the digest is unencodable or the signature does not recover.
-    public func recoverSigner(domain: X402Domain, signature: Data) -> EthereumAddress? {
+    ///
+    /// `malleability` gates non-canonical high-`s` signatures: the default
+    /// ``SignatureMalleabilityPolicy/accepted`` recovers any signature; ``/rejectHighS`` returns
+    /// `nil` for a high-`s` one (EIP-2), letting a verifier be as strict as the settling contract.
+    public func recoverSigner(
+        domain: X402Domain, signature: Data,
+        malleability: SignatureMalleabilityPolicy = .accepted
+    ) -> EthereumAddress? {
         guard let hash = signingHash(domain: domain) else { return nil }
-        return EthereumAddress.recover(hash: hash, signature: signature)
+        return EthereumAddress.recover(hash: hash, signature: signature, malleability: malleability)
     }
 
     /// Whether `signature` (65-byte Ethereum wire) is a valid signature over this authorization
-    /// under `domain` by ``from`` -- the check a verifier runs before settling.
-    public func isSignedByFrom(domain: X402Domain, signature: Data) -> Bool {
-        guard let recovered = recoverSigner(domain: domain, signature: signature)
-        else { return false }
+    /// under `domain` by ``from`` -- the check a verifier runs before settling. `malleability` is
+    /// forwarded to ``recoverSigner(domain:signature:malleability:)``.
+    public func isSignedByFrom(
+        domain: X402Domain, signature: Data,
+        malleability: SignatureMalleabilityPolicy = .accepted
+    ) -> Bool {
+        guard let recovered = recoverSigner(
+            domain: domain, signature: signature, malleability: malleability
+        ) else { return false }
         return recovered == from
     }
 
@@ -146,5 +165,7 @@ public struct X402Authorization: Sendable, Hashable {
     public enum SigningError: Error, Sendable, Hashable {
         /// ``value`` was not a base-units integer encodable as a uint256 (exceeds `2^256 - 1`).
         case unencodableValue
+        /// The underlying ``Secp256k1Signer`` failed to sign the digest.
+        case signerFailure(Secp256k1Signer.SigningError)
     }
 }
