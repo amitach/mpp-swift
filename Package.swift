@@ -432,12 +432,7 @@ let package = Package(
         .testTarget(
             name: "MPPX402ServerTests",
             dependencies: [
-                "MPPX402Server",
-                "MPPX402",
-                "MPPCore",
-                "MPPServer",
-                "MPPEVM",
-                "MPPClient"
+                "MPPX402Server", "MPPX402", "MPPCore", "MPPServer", "MPPEVM", "MPPClient",
             ]
         ),
         // MPPStripeServer: the Stripe charge method, SERVER side (StripeChargeVerifier + the
