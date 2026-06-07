@@ -58,4 +58,27 @@ struct AttributionTests {
         #expect(memoA.prefix(25) == memoB.prefix(25))
         #expect(memoA.suffix(7) != memoB.suffix(7))
     }
+
+    @Test("matches() binds to realm + challenge but ignores the (unpinned) clientId")
+    func matchesIgnoresClientId() {
+        let memoA = Attribution.encode(
+            serverId: "api.example.com", challengeId: "c1", clientId: "app-a"
+        )
+        let memoB = Attribution.encode(
+            serverId: "api.example.com", challengeId: "c1", clientId: "app-b"
+        )
+        // Both clients match -- the verifier does not pin clientId.
+        #expect(Attribution.matches(memo: memoA, serverId: "api.example.com", challengeId: "c1"))
+        #expect(Attribution.matches(memo: memoB, serverId: "api.example.com", challengeId: "c1"))
+        // A wrong challenge or realm does not match (anti hash-reuse across challenges).
+        #expect(!Attribution.matches(memo: memoA, serverId: "api.example.com", challengeId: "c2"))
+        #expect(!Attribution.matches(memo: memoA, serverId: "other.example.com", challengeId: "c1"))
+        // A non-MPP or wrong-size memo is not a match.
+        #expect(!Attribution.matches(
+            memo: Data(repeating: 0, count: 32), serverId: "api.example.com", challengeId: "c1"
+        ))
+        #expect(!Attribution.matches(
+            memo: Data(repeating: 0xAB, count: 16), serverId: "api.example.com", challengeId: "c1"
+        ))
+    }
 }
