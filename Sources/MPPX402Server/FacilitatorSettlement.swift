@@ -13,14 +13,24 @@ import MPPX402
 public struct FacilitatorSettlement: X402Settlement {
     private let facilitator: X402Facilitator
     private let version: X402Version
+    private let maxTimeoutSeconds: UInt64
 
     /// Creates the settler.
     /// - Parameters:
     ///   - facilitator: the facilitator client.
     ///   - version: the negotiated x402 version the payload/requirements are encoded for.
-    public init(facilitator: X402Facilitator, version: X402Version = .v1) {
+    ///   - maxTimeoutSeconds: the resource server's settlement-timeout hint, carried into the
+    ///     reconstructed requirements. It is not signature-bound and cannot be recovered from the
+    ///     authorization, so the verifier supplies it from the original challenge. Defaults to
+    ///     ``X402ChargeMethod/defaultTimeoutSeconds``.
+    public init(
+        facilitator: X402Facilitator,
+        version: X402Version = .v1,
+        maxTimeoutSeconds: UInt64 = X402ChargeMethod.defaultTimeoutSeconds
+    ) {
         self.facilitator = facilitator
         self.version = version
+        self.maxTimeoutSeconds = maxTimeoutSeconds
     }
 
     public func settle(
@@ -31,18 +41,17 @@ public struct FacilitatorSettlement: X402Settlement {
         let payment = X402PaymentPayload(
             version: version, scheme: "exact", network: network, payload: exact
         )
-        // Reconstruct the requirements the payer signed against (the maxTimeoutSeconds is a server
-        // hint not bound by the signature; derive it from the authorization's own window).
-        let window = authorization.validBefore > authorization.validAfter
-            ? authorization.validBefore - authorization.validAfter
-            : X402ChargeMethod.defaultTimeoutSeconds
+        // Reconstruct the requirements the payer signed against. maxTimeoutSeconds is a server
+        // policy hint, not signature-bound and not recoverable from the authorization (validAfter
+        // is 0 in the common case, so validBefore - validAfter is an absolute timestamp, not a
+        // duration), so it is carried from the configured value rather than re-derived.
         let requirements = X402PaymentRequirements(
             scheme: "exact",
             network: network,
             amount: authorization.value,
             asset: domain.asset.checksummed,
             payTo: authorization.recipient.checksummed,
-            maxTimeoutSeconds: window,
+            maxTimeoutSeconds: maxTimeoutSeconds,
             extra: ["name": .string(domain.name), "version": .string(domain.version)]
         )
         let response = try await facilitator.settle(payment: payment, requirements: requirements)

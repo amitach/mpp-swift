@@ -89,6 +89,39 @@ struct X402FacilitatorTests {
         #expect(stub.path == "/settle")
     }
 
+    @Test("plain-http facilitator URL rejected; loopback allowed only under opt-in")
+    func transportSecurity() throws {
+        let insecure = try #require(URL(string: "http://facilitator.example"))
+        #expect(throws: X402FacilitatorError.self) {
+            try X402Facilitator(baseURL: insecure, transport: StubTransport(json: .object([:])))
+        }
+        // A loopback host over plain http is still rejected without the explicit opt-in.
+        let loopback = try #require(URL(string: "http://127.0.0.1:8080"))
+        #expect(throws: X402FacilitatorError.self) {
+            try X402Facilitator(baseURL: loopback, transport: StubTransport(json: .object([:])))
+        }
+        // The opt-in permits a loopback facilitator mock over plain http.
+        _ = try X402Facilitator(
+            baseURL: loopback, transport: StubTransport(json: .object([:])),
+            allowInsecureLocal: true
+        )
+    }
+
+    @Test("settle rejects a reported success that omits the transaction hash")
+    func settleRejectsSuccessWithoutTransaction() async throws {
+        let stub = StubTransport(json: .object(["success": .bool(true)]))
+        let facilitator = try X402Facilitator(baseURL: baseURL(), transport: stub)
+        await #expect(
+            throws: X402FacilitatorError.malformedResponse(
+                "settle reported success without a transaction hash"
+            )
+        ) {
+            _ = try await facilitator.settle(
+                payment: paymentPayload(), requirements: requirements()
+            )
+        }
+    }
+
     @Test("a non-2xx facilitator response surfaces as httpStatus")
     func httpStatusError() async throws {
         let stub = StubTransport(status: 502, json: .object([:]))
@@ -119,6 +152,9 @@ struct X402FacilitatorTests {
         let req = try #require(body["paymentRequirements"]?.objectValue)
         #expect(req["payTo"]?.stringValue?.lowercased() == Self.payToHex)
         #expect(req["asset"]?.stringValue?.lowercased() == Self.usdcHex.lowercased())
+        // The timeout hint is the default duration (~300s), not the ~1.7-billion-second value that
+        // validBefore - validAfter yields when validAfter is 0 (the common case).
+        #expect(req["maxTimeoutSeconds"]?.integerValue == 300)
 
         let failing = StubTransport(json: .object([
             "success": .bool(false), "transaction": .string(""),

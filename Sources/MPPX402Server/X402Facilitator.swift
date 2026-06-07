@@ -58,11 +58,25 @@ public struct X402Facilitator: Sendable {
     private let transport: any MPPHTTPTransport
 
     /// Creates a facilitator client.
+    ///
+    /// Enforces the shared transport-security policy (`https`-only unless `allowInsecureLocal`
+    /// permits a loopback host, for a local mock): a signed EIP-3009 authorization -- a gasless
+    /// instruction to move real money -- must never be posted over plain `http`.
     /// - Parameters:
     ///   - baseURL: the facilitator's base URL (its `/verify` and `/settle` are resolved against
-    /// it).
+    ///     it).
     ///   - transport: the HTTP transport to post over.
-    public init(baseURL: URL, transport: any MPPHTTPTransport) {
+    ///   - allowInsecureLocal: permit plain `http` to a loopback host (a local facilitator mock);
+    ///     defaults to `false`.
+    public init(
+        baseURL: URL, transport: any MPPHTTPTransport, allowInsecureLocal: Bool = false
+    ) throws(X402FacilitatorError) {
+        guard TransportSecurity.isAllowed(
+            scheme: baseURL.scheme, host: baseURL.host(percentEncoded: false),
+            allowInsecureLocal: allowInsecureLocal
+        ) else {
+            throw .insecureTransport(MPPHTTPEndpoint(baseURL).redactedEndpoint)
+        }
         self.baseURL = baseURL
         self.transport = transport
     }
@@ -90,9 +104,15 @@ public struct X402Facilitator: Sendable {
         guard case let .bool(success)? = object["success"] else {
             throw .malformedResponse("settle response has no success")
         }
+        let transaction = object["transaction"]?.stringValue ?? ""
+        // Fail closed: a reported success without a transaction hash is malformed -- never let an
+        // empty reference propagate into a receipt as if money moved.
+        guard !success || !transaction.isEmpty else {
+            throw .malformedResponse("settle reported success without a transaction hash")
+        }
         return X402SettlementResponse(
             success: success,
-            transaction: object["transaction"]?.stringValue ?? "",
+            transaction: transaction,
             network: object["network"]?.stringValue,
             payer: object["payer"]?.stringValue,
             errorReason: object["errorReason"]?.stringValue
@@ -147,6 +167,9 @@ public struct X402Facilitator: Sendable {
 public enum X402FacilitatorError: Error, Sendable, Hashable {
     /// The HTTP transport threw (connection, TLS, timeout).
     case transport(String)
+    /// The base URL is not a secure transport (`https`, or a loopback host under
+    /// `allowInsecureLocal`).
+    case insecureTransport(String)
     /// The facilitator answered with a non-2xx status.
     case httpStatus(Int)
     /// The facilitator's response was not the expected JSON.
