@@ -584,7 +584,8 @@ func mppTempoFFITargets(binaryName: String) -> [Target] {
             // MPPClient (URLSessionTransport) + MPPCore (JSONValue) for the gated live
             // Moderato e2e, which drives EVMRPC over a real transport. MPPTempoServer for the
             // subscription-renewer live e2e (TempoSubscriptionRenewer + AccessKeyStore) and the
-            // settled-charge e2e (TempoSettledChargeVerifier); MPPServer for its InMemoryReplayStore.
+            // settled-charge e2e (TempoSettledChargeVerifier); MPPServer for its
+            // InMemoryReplayStore.
             dependencies: [
                 "MPPTempoFFI",
                 "MPPTempo",
