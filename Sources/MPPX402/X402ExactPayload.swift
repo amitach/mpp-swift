@@ -111,13 +111,11 @@ public struct X402ExactPayload: Codable, Sendable, Hashable {
 }
 
 public extension X402ExactPayload {
-    /// This payload as an MPP ``Credential`` payload object: the exact `payload`
-    /// (`{signature, authorization}`) flattened with a `type: "exact"` discriminator. The client
-    /// method puts this in the credential; the server verifier reverses it with
-    /// ``init(credentialPayload:)``. The single shared mapping keeps the two sides from drifting.
-    func credentialPayload() -> [String: JSONValue] {
+    /// The x402 wire `payload` object: `{signature, authorization}` (the authorization with the
+    /// payee under its `to` key). This is what the x402 PaymentPayload carries on the network; the
+    /// MPP credential is the same object plus a `type` discriminator.
+    func jsonObject() -> [String: JSONValue] {
         [
-            "type": .string("exact"),
             "signature": .string(signature),
             "authorization": .object([
                 "from": .string(authorization.from),
@@ -130,11 +128,10 @@ public extension X402ExactPayload {
         ]
     }
 
-    /// Parses an MPP ``Credential`` payload object produced by ``credentialPayload()``, or `nil` if
-    /// the `type` is not `"exact"` or any field is missing. Fail-closed.
-    init?(credentialPayload object: [String: JSONValue]) {
-        guard object["type"]?.stringValue == "exact",
-              let signature = object["signature"]?.stringValue,
+    /// Parses the x402 wire `payload` object (`{signature, authorization}`), or `nil` if a field is
+    /// missing. Fail-closed.
+    init?(jsonObject object: [String: JSONValue]) {
+        guard let signature = object["signature"]?.stringValue,
               let auth = object["authorization"]?.objectValue,
               let from = auth["from"]?.stringValue,
               let recipient = auth["to"]?.stringValue,
@@ -150,5 +147,21 @@ public extension X402ExactPayload {
                 validAfter: validAfter, validBefore: validBefore, nonce: nonce
             )
         )
+    }
+
+    /// This payload as an MPP ``Credential`` payload object: the x402 ``jsonObject()`` plus a
+    /// `type: "exact"` discriminator. The client method puts this in the credential; the server
+    /// verifier reverses it with ``init(credentialPayload:)``. One shared mapping, no drift.
+    func credentialPayload() -> [String: JSONValue] {
+        var object = jsonObject()
+        object["type"] = .string("exact")
+        return object
+    }
+
+    /// Parses an MPP ``Credential`` payload object produced by ``credentialPayload()``, or `nil` if
+    /// the `type` is not `"exact"` or any field is missing. Fail-closed.
+    init?(credentialPayload object: [String: JSONValue]) {
+        guard object["type"]?.stringValue == "exact" else { return nil }
+        self.init(jsonObject: object)
     }
 }
