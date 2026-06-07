@@ -62,7 +62,7 @@ struct ModeratoSettledChargeE2ETests {
         // buildCredential (so the transfer is already on-chain before verify), while in pull mode
         // the server broadcasts during verify -- reading before either path moves money is correct
         // for both.
-        let before = try await balanceOf(token, recipient, rpc: rpc)
+        let before = try await ModeratoKit.balanceOf(token, recipient, rpc: rpc)
 
         // Client: build the credential over the live FFI transfer builder. Push injects a
         // broadcaster (the client submits); pull needs none (the server broadcasts).
@@ -94,7 +94,7 @@ struct ModeratoSettledChargeE2ETests {
         let onChain = try #require(await rpc.transactionReceipt(receipt.reference))
         #expect(onChain.succeeded)
         // (2) the recipient's balance grew by exactly the charge amount.
-        let after = try await balanceOf(token, recipient, rpc: rpc)
+        let after = try await ModeratoKit.balanceOf(token, recipient, rpc: rpc)
         #expect(after == before + Self.amount)
         // (3) the settled hash is single-use: re-verifying the same credential is rejected (the
         // replay store has consumed the hash; in pull mode the re-broadcast also fails).
@@ -125,16 +125,5 @@ struct ModeratoSettledChargeE2ETests {
             intent: IntentName("charge"),
             request: request
         )
-    }
-
-    /// TIP-20 `balanceOf(owner)` via `eth_call`; the e2e amounts are small, so the low 8 bytes of
-    /// the uint256 result suffice.
-    private func balanceOf(
-        _ token: EthereumAddress, _ owner: EthereumAddress, rpc: EVMRPC
-    ) async throws -> UInt64 {
-        let selector = Data([0x70, 0xA0, 0x82, 0x31]) // balanceOf(address)
-        let data = selector + Data(repeating: 0, count: 12) + owner.bytes
-        let result = try await rpc.call(to: token, data: data)
-        return result.suffix(8).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
     }
 }

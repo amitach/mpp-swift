@@ -112,6 +112,17 @@ enum ModeratoKit {
         }
         throw ModeratoError.unexpected("tx \(hash) not mined within 60s")
     }
+
+    /// TIP-20 `balanceOf(owner)` via `eth_call`; the live e2e amounts are small, so the low 8 bytes
+    /// of the uint256 result suffice. Shared by the settled-charge and subscription e2es.
+    static func balanceOf(
+        _ token: EthereumAddress, _ owner: EthereumAddress, rpc: EVMRPC
+    ) async throws -> UInt64 {
+        let selector = Data([0x70, 0xA0, 0x82, 0x31]) // balanceOf(address)
+        let data = selector + Data(repeating: 0, count: 12) + owner.bytes
+        let result = try await rpc.call(to: token, data: data)
+        return result.suffix(8).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+    }
 }
 
 /// A failure in a live-Moderato test helper.
