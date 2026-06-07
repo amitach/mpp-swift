@@ -75,9 +75,17 @@ public enum ZeroAmountProof: Sendable, Hashable {
     /// Recovers the Ethereum address that produced `signature` over this proof at
     /// `chainId`, or `nil` if `signature` is not a well-formed 65-byte `r ‖ s ‖ v`
     /// (with `v` in `27...30`) or recovery fails. This is the cryptographic half of
-    /// verification: compare the recovered address against the expected wallet. It
-    /// does not apply any acceptance policy.
-    public func recoverSigner(chainId: UInt64, signature: Data) -> EthereumAddress? {
-        EthereumAddress.recover(hash: signingHash(chainId: chainId), signature: signature)
+    /// verification: compare the recovered address against the expected wallet.
+    ///
+    /// `malleability` gates non-canonical high-`s` signatures: the default
+    /// ``SignatureMalleabilityPolicy/accepted`` recovers any signature (peer behavior);
+    /// ``SignatureMalleabilityPolicy/rejectHighS`` returns `nil` for a high-`s` one (EIP-2).
+    public func recoverSigner(
+        chainId: UInt64, signature: Data,
+        malleability: SignatureMalleabilityPolicy = .accepted
+    ) -> EthereumAddress? {
+        EthereumAddress.recover(
+            hash: signingHash(chainId: chainId), signature: signature, malleability: malleability
+        )
     }
 }

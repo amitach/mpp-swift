@@ -30,6 +30,15 @@ public protocol ReplayStore: Sendable {
 /// It retains every consumed id for the process lifetime; a store that bounds
 /// memory by expiring ids (SQLite/Redis with a TTL) is a separate implementation
 /// of ``ReplayStore``.
+///
+/// > Important: the single-use guarantee this store provides is **per process and
+/// > volatile**. Consumed ids live only in this process's memory, so a credential
+/// > consumed before a restart can be replayed after one, and two instances behind
+/// > a load balancer each accept the same credential once. For any deployment that
+/// > spans process restarts or more than one instance, use a **durable, shared**
+/// > ``ReplayStore`` instead: ``FileReplayStore`` persists across restarts on a
+/// > single host, and a SQLite/Redis-backed store covers the multi-instance case.
+/// > This type is for a single long-lived process and for tests.
 public actor InMemoryReplayStore: ReplayStore {
     private var consumed: Set<String> = []
 

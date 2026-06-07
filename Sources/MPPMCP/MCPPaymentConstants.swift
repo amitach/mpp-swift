@@ -31,7 +31,7 @@ public enum MCPPayment {
 /// reference client recognizes only -32042 (it treats -32043 as a non-payment error and does not
 /// retry), so the default matches the peer. Select ``specCorrect`` to emit the spec codes (for a
 /// peer that adopts them).
-public enum MCPErrorCodeMode: Sendable {
+public enum MCPErrorCodeMode: Sendable, Hashable {
     /// Emit ``MCPPayment/paymentRequiredCode`` (-32042) for BOTH an absent and a
     /// failed-verification credential, matching the mppx peer. The default.
     case peerCompatible

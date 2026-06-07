@@ -263,6 +263,11 @@ RustBuffer uniffi_tempo_tx_ffi_fn_func_build_subscription_charge_transaction(uin
 RustBuffer uniffi_tempo_tx_ffi_fn_func_build_top_up_transaction(uint64_t chain_id, uint64_t nonce, RustBuffer max_fee_per_gas, RustBuffer max_priority_fee_per_gas, uint64_t gas_limit, RustBuffer fee_token, RustBuffer private_key, RustBuffer escrow, RustBuffer token, RustBuffer channel_id, RustBuffer additional_deposit, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_FN_FUNC_BUILD_TRANSFER_TRANSACTION
+#define UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_FN_FUNC_BUILD_TRANSFER_TRANSACTION
+RustBuffer uniffi_tempo_tx_ffi_fn_func_build_transfer_transaction(uint64_t chain_id, uint64_t nonce, RustBuffer max_fee_per_gas, RustBuffer max_priority_fee_per_gas, uint64_t gas_limit, RustBuffer fee_token, RustBuffer private_key, RustBuffer currency, RustBuffer recipient, RustBuffer amount, RustBuffer memo, RustBuffer valid_before, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_FFI_TEMPO_TX_FFI_RUSTBUFFER_ALLOC
 #define UNIFFI_FFIDEF_FFI_TEMPO_TX_FFI_RUSTBUFFER_ALLOC
 RustBuffer ffi_tempo_tx_ffi_rustbuffer_alloc(uint64_t size, RustCallStatus *_Nonnull out_status
@@ -544,6 +549,12 @@ uint16_t uniffi_tempo_tx_ffi_checksum_func_build_subscription_charge_transaction
 #ifndef UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_CHECKSUM_FUNC_BUILD_TOP_UP_TRANSACTION
 #define UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_CHECKSUM_FUNC_BUILD_TOP_UP_TRANSACTION
 uint16_t uniffi_tempo_tx_ffi_checksum_func_build_top_up_transaction(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_CHECKSUM_FUNC_BUILD_TRANSFER_TRANSACTION
+#define UNIFFI_FFIDEF_UNIFFI_TEMPO_TX_FFI_CHECKSUM_FUNC_BUILD_TRANSFER_TRANSACTION
+uint16_t uniffi_tempo_tx_ffi_checksum_func_build_transfer_transaction(void
     
 );
 #endif

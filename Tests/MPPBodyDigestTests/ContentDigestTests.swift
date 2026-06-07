@@ -77,4 +77,21 @@ struct ContentDigestTests {
             try ContentDigest.parse(header)
         }
     }
+
+    @Test("the peer's bare, unframed digest form is rejected, not silently accepted (DIGEST-XSDK)")
+    func rejectsBareUnframedDigest() throws {
+        // Audit D2: the mppx peer emits a bare `sha-256=<base64>` (no RFC 9530 colon framing). We
+        // keep the framed form; a bare value -- even one carrying the body's CORRECT digest -- must
+        // fail closed, since our parser requires the framing. This is safe because the digest is
+        // server-internal (only our verifier consumes it), so we never receive the peer's form.
+        let body = Data("hello".utf8)
+        let framed = ContentDigest.compute(body) // sha-256=:<b64>:
+        // Strip the leading and trailing colons to get the peer's bare `sha-256=<base64>` form.
+        let bare = framed.replacingOccurrences(of: "=:", with: "=")
+        try #require(bare.hasPrefix("sha-256=") && !bare.contains(":")) // precondition: bare form
+        #expect(!ContentDigest.verify(body, matches: bare)) // fail closed despite the right digest
+        // The peer's form is also unpadded; strip the trailing base64 `=` to pin that exact shape.
+        let bareUnpadded = bare.hasSuffix("=") ? String(bare.dropLast()) : bare
+        #expect(!ContentDigest.verify(body, matches: bareUnpadded))
+    }
 }

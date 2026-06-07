@@ -5,8 +5,11 @@
 //! version bump rather than a hand-maintained Swift port. No hand-rolled encoding.
 //!
 //! Builds the escrow `open`, `topUp`, and `close` transactions (open/topUp are two-call
-//! txs: an ERC-20 `approve` then the escrow call). Two surfaces each: the typed Rust
-//! builders (`build_open_tx` / `build_top_up_tx` / `build_close_tx`, used by the in-crate
+//! txs: an ERC-20 `approve` then the escrow call), plus the two `transferWithMemo` builders:
+//! the recurring subscription charge (signed by an access key as a V2 keychain signature,
+//! optional fee-payer sponsor) and the one-time settled charge (signed directly by the payer).
+//! Two surfaces each: the typed Rust builders (`build_open_tx` / `build_top_up_tx` /
+//! `build_close_tx` / `build_subscription_charge_tx` / `build_transfer_tx`, used by the in-crate
 //! tests) and the UniFFI exports (FFI-friendly types: scalars, `Vec<u8>`, and decimal
 //! `String`s for `u128` / `u256`) that the Swift wrapper calls. It is
 //! packaged into the `TempoTxFFI` xcframework (`build-xcframework.sh`, macOS + iOS
@@ -15,9 +18,12 @@
 
 use alloy_primitives::{Address, Bytes, FixedBytes, Signature, TxKind, U256};
 use alloy_sol_types::{sol, SolCall};
+use core::num::NonZeroU64;
 use k256::ecdsa::SigningKey;
 use tempo_primitives::transaction::key_authorization::{KeyAuthorization, SignedKeyAuthorization};
-use tempo_primitives::transaction::tempo_transaction::FEE_PAYER_SIGNATURE_MARKER;
+use tempo_primitives::transaction::tempo_transaction::{
+    FEE_PAYER_SIGNATURE_MARKER, TEMPO_EXPIRING_NONCE_KEY,
+};
 use tempo_primitives::transaction::tt_signature::KeychainSignature;
 use tempo_primitives::transaction::{Call, PrimitiveSignature};
 use tempo_primitives::{TempoSignature, TempoTransaction};
@@ -43,6 +49,9 @@ pub enum BuildError {
     InvalidKey,
     /// Signing the transaction hash failed.
     SigningFailed,
+    /// An expiring-nonce transfer was requested with a `valid_before` of 0, which is not a usable
+    /// deadline (it would build a tx with the expiring nonce key but no `valid_before`).
+    InvalidValidBefore,
 }
 
 /// A single escrow/token call to a contract: ABI-encoded `calldata` sent `to` an
@@ -72,6 +81,12 @@ fn build_signed_tx(
     key_authorization: Option<SignedKeyAuthorization>,
     keychain_user_address: Option<Address>,
     mut fee_payer_key: Option<[u8; 32]>,
+    // `nonce_key` selects the nonce space: `U256::ZERO` is the protocol's sequential nonce; any
+    // other value is a 2D user nonce. `TEMPO_EXPIRING_NONCE_KEY` (`U256::MAX`) marks an expiring
+    // nonce tx, where `valid_before` (a unix-seconds deadline, <= 30s out) bounds validity and the
+    // tx hash provides replay protection -- the form the settled charge's pull mode signs.
+    nonce_key: U256,
+    valid_before: Option<NonZeroU64>,
 ) -> Result<Vec<u8>, BuildError> {
     // A sponsored tx carries a fee-payer signature: the fee payer (not the sender) pays gas, so
     // gas is NOT drawn from the access key's spending limit. While the sender signs, the field
@@ -85,8 +100,9 @@ fn build_signed_tx(
         max_fee_per_gas,
         gas_limit,
         calls,
-        nonce_key: U256::ZERO, // 0 = the protocol (sequential) nonce
+        nonce_key,
         nonce,
+        valid_before,
         // Present only for the provisioning charge: adds the access key to the
         // AccountKeychain precompile before the tx signature is verified.
         key_authorization,
@@ -196,6 +212,8 @@ pub fn build_close_tx(
         None,
         None,
         None,
+        U256::ZERO, // sequential protocol nonce
+        None,       // not an expiring-nonce tx
     );
     private_key.zeroize();
     result
@@ -246,6 +264,8 @@ pub fn build_open_tx(
         None,
         None,
         None,
+        U256::ZERO, // sequential protocol nonce
+        None,       // not an expiring-nonce tx
     );
     private_key.zeroize();
     result
@@ -290,6 +310,8 @@ pub fn build_top_up_tx(
         None,
         None,
         None,
+        U256::ZERO, // sequential protocol nonce
+        None,       // not an expiring-nonce tx
     );
     private_key.zeroize();
     result
@@ -338,11 +360,85 @@ pub fn build_subscription_charge_tx(
         key_authorization,
         Some(root_address),
         fee_payer_key,
+        U256::ZERO, // sequential protocol nonce (the access key's, on the payer/root account)
+        None,       // a subscription charge is not an expiring-nonce tx
     );
     // `[u8; 32]` is Copy, so `build_signed_tx` zeroized its own copy but this caller frame keeps
     // one; wipe it too (parity with `private_key`).
     private_key.zeroize();
     fee_payer_key.zeroize();
+    result
+}
+
+/// Builds the signed `0x76` transaction for a one-time **settled charge**
+/// (`draft-tempo-charge-00`): a single call to `currency.transferWithMemo(recipient, amount, memo)`,
+/// signed **directly by the payer** as a plain signature. It is the same `transferWithMemo` call as
+/// a subscription charge, but the payer signs it itself: there is no access key, so no keychain
+/// signature and no `key_authorization` to provision (`build_signed_tx` is invoked with no keychain
+/// context, which yields a plain payer signature over the tx hash). `amount` is a `uint256`. The
+/// payer pays gas in `fee_token`; fee-payer (sponsor) gas is a separate, later slice.
+///
+/// `valid_before` selects the charge's two submission modes (`draft-tempo-charge-00`):
+/// - `None` -- **push**: a normal sequential-nonce tx, broadcast by the payer, used for the `hash`
+///   credential. The `nonce` argument is the payer's next sequential nonce.
+/// - `Some(deadline)` -- **pull**: an *expiring-nonce* tx (nonce key `U256::MAX`, replay-guarded by
+///   the tx hash, so `nonce` is 0) with `valid_before = deadline` (unix seconds, <= 30s out), so
+///   the 402 server can broadcast it within the window for the `transaction` credential. The
+///   `nonce` argument is ignored in this mode.
+#[allow(clippy::too_many_arguments)]
+pub fn build_transfer_tx(
+    chain_id: u64,
+    nonce: u64,
+    max_fee_per_gas: u128,
+    max_priority_fee_per_gas: u128,
+    gas_limit: u64,
+    fee_token: Option<Address>,
+    mut private_key: [u8; 32],
+    currency: Address,
+    recipient: Address,
+    amount: U256,
+    memo: [u8; 32],
+    valid_before: Option<u64>,
+) -> Result<Vec<u8>, BuildError> {
+    // `valid_before == Some(0)` is not a usable deadline: `NonZeroU64::new(0)` is `None`, so the tx
+    // would carry the expiring nonce key with no `valid_before` (a malformed tx the chain rejects).
+    // Reject it here -- wiping the key first, to honour the crate's zeroization discipline on every
+    // return path -- rather than emit the inconsistent transaction.
+    if valid_before == Some(0) {
+        private_key.zeroize();
+        return Err(BuildError::InvalidValidBefore);
+    }
+    let transfer = transferWithMemoCall {
+        recipient,
+        amount,
+        memo: FixedBytes::<32>::from(memo),
+    }
+    .abi_encode();
+    // Pull mode (`valid_before` set): an expiring-nonce tx the server broadcasts within the window;
+    // the tx hash is the replay guard, so the nonce field is 0 and the nonce key is the expiring
+    // sentinel. Push mode (`None`): a normal sequential-nonce tx the payer broadcasts itself.
+    // `valid_before` is now nonzero where present, so `NonZeroU64::new` is always `Some`.
+    let (nonce_key, nonce, valid_before) = match valid_before {
+        Some(deadline) => (TEMPO_EXPIRING_NONCE_KEY, 0, NonZeroU64::new(deadline)),
+        None => (U256::ZERO, nonce, None),
+    };
+    let result = build_signed_tx(
+        chain_id,
+        nonce,
+        max_fee_per_gas,
+        max_priority_fee_per_gas,
+        gas_limit,
+        fee_token,
+        private_key,
+        vec![call(currency, transfer)],
+        None, // no access key to provision
+        None, // no keychain context -> a plain payer signature over the tx hash
+        None, // payer pays gas; sponsored (fee-payer) charge is a later slice
+        nonce_key,
+        valid_before,
+    );
+    // `[u8; 32]` is Copy, so `build_signed_tx` zeroized its own copy but this frame keeps one.
+    private_key.zeroize();
     result
 }
 
@@ -416,6 +512,9 @@ fn map_build_error(error: BuildError) -> FfiError {
     match error {
         BuildError::InvalidKey => FfiError::InvalidKey,
         BuildError::SigningFailed => FfiError::SigningFailed,
+        BuildError::InvalidValidBefore => {
+            FfiError::InvalidInput("valid_before: must be a nonzero unix-seconds deadline".into())
+        }
     }
 }
 
@@ -629,6 +728,47 @@ pub fn build_subscription_charge_transaction(
         parse_bytes32("memo", memo)?,
         authorization,
         fee_payer.as_deref().copied(),
+    )
+    .map_err(map_build_error)
+}
+
+/// UniFFI entry point: build + sign + RLP-encode a one-time settled-charge `0x76` tx (one
+/// `transferWithMemo` call, signed directly by the payer). `amount` is a decimal `u256` string;
+/// `currency` / `recipient` are 20-byte addresses; `private_key` (the payer) and `memo` are 32
+/// bytes; `fee_token` is the optional 20-byte gas token. `valid_before` selects the mode: `None`
+/// builds a sequential-nonce tx for the payer to broadcast (push / `hash` credential); `Some(unix
+/// seconds)` builds an expiring-nonce tx the 402 server broadcasts within the window (pull /
+/// `transaction` credential).
+#[uniffi::export]
+#[allow(clippy::too_many_arguments)]
+pub fn build_transfer_transaction(
+    chain_id: u64,
+    nonce: u64,
+    max_fee_per_gas: String,
+    max_priority_fee_per_gas: String,
+    gas_limit: u64,
+    fee_token: Option<Vec<u8>>,
+    private_key: Vec<u8>,
+    currency: Vec<u8>,
+    recipient: Vec<u8>,
+    amount: String,
+    memo: Vec<u8>,
+    valid_before: Option<u64>,
+) -> Result<Vec<u8>, FfiError> {
+    let key = take_key(private_key)?;
+    build_transfer_tx(
+        chain_id,
+        nonce,
+        parse_u128("max_fee_per_gas", &max_fee_per_gas)?,
+        parse_u128("max_priority_fee_per_gas", &max_priority_fee_per_gas)?,
+        gas_limit,
+        parse_optional_address("fee_token", fee_token)?,
+        *key,
+        parse_address("currency", &currency)?,
+        parse_address("recipient", &recipient)?,
+        parse_u256("amount", &amount)?,
+        parse_bytes32("memo", memo)?,
+        valid_before,
     )
     .map_err(map_build_error)
 }
@@ -993,6 +1133,190 @@ mod tests {
     }
 
     const GOLDEN_SUBSCRIPTION_CHARGE_TX: &str = "76f8f082a5bf830f4240843b9aca00830186a0f87ef87c9420c000000000000000000000000000000000000180b86495777d59000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000f4240ababababababababababababababababababababababababababababababababc0800780808080c0b856047e5f4552091a69125d5dfcb7b8c2659029395bdf34b62d4b8e525ea50f6941cd3e0b13750c90eb7098290614fe734921ead18c4c471151d237efd57add8ead8e52534aa2f968307173523013f281b0236d3056e81b";
+
+    /// The one-time settled charge (`draft-tempo-charge-00`): a payer-signed `transferWithMemo`.
+    /// Same call and inputs as the subscription charge, but signed DIRECTLY by the payer (no
+    /// keychain), so the bytes differ from the access-key-signed subscription charge, and the tx is
+    /// shorter (a plain signature, not a V2 keychain signature carrying the root address). Byte-
+    /// golden as the regression net (k256 RFC-6979 is deterministic); the live-Moderato e2e is the
+    /// authoritative on-chain check.
+    #[test]
+    fn settled_charge_is_a_plain_payer_signed_transfer() {
+        use alloy_primitives::{address, U256};
+        let payer = [0x01u8; 32]; // account #0 -> 0x7e5f...5bdf
+        let currency = address!("20c0000000000000000000000000000000000001");
+        let recipient = address!("1111111111111111111111111111111111111111");
+        let memo = [0xabu8; 32];
+        let transfer = build_transfer_tx(
+            42431,
+            7,
+            1_000_000_000,
+            1_000_000,
+            100_000,
+            None,
+            payer,
+            currency,
+            recipient,
+            U256::from(1_000_000u64),
+            memo,
+            None, // push mode: a sequential-nonce tx the payer broadcasts
+        )
+        .expect("builds");
+        assert_eq!(transfer[0], 0x76, "a Tempo 0x76 typed transaction");
+
+        // The same call signed by an access key (keychain V2) for the payer-as-root is a different,
+        // longer transaction: the plain payer signature here carries no root address.
+        let subscription = build_subscription_charge_tx(
+            42431,
+            7,
+            1_000_000_000,
+            1_000_000,
+            100_000,
+            None,
+            [0x02u8; 32],
+            address!("7e5f4552091a69125d5dfcb7b8c2659029395bdf"),
+            currency,
+            recipient,
+            U256::from(1_000_000u64),
+            memo,
+            None,
+            None,
+        )
+        .expect("builds");
+        assert_ne!(transfer, subscription);
+        assert!(transfer.len() < subscription.len());
+
+        let hex: String = transfer.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, GOLDEN_SETTLED_CHARGE_TX);
+    }
+
+    const GOLDEN_SETTLED_CHARGE_TX: &str = "76f8db82a5bf830f4240843b9aca00830186a0f87ef87c9420c000000000000000000000000000000000000180b86495777d59000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000f4240ababababababababababababababababababababababababababababababababc0800780808080c0b841d7b99f66aef71299b88eafbde28f651fff83f108f2991e33f7b0df70d4e6b70840330de8ed936d7def1a41d93e67da4a194b0d59170ed49763c6a91e2c7501971c";
+
+    /// The UniFFI wrapper for the settled charge parses the FFI-friendly types (scalars,
+    /// `Vec<u8>`, decimal `String`s) to the same inputs and produces the identical golden bytes,
+    /// so the boundary marshalling is faithful (parity with the close/open/topUp wrapper tests).
+    #[test]
+    fn ffi_transfer_wrapper_matches_golden() {
+        use alloy_primitives::address;
+        let bytes = build_transfer_transaction(
+            42431,
+            7,
+            "1000000000".into(),
+            "1000000".into(),
+            100_000,
+            None,
+            vec![0x01; 32],
+            address!("20c0000000000000000000000000000000000001").to_vec(),
+            address!("1111111111111111111111111111111111111111").to_vec(),
+            "1000000".into(),
+            vec![0xAB; 32],
+            None, // push mode
+        )
+        .expect("build");
+        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, GOLDEN_SETTLED_CHARGE_TX);
+    }
+
+    #[test]
+    fn ffi_transfer_wrapper_rejects_bad_lengths() {
+        // A 31-byte key -> InvalidInput, not a panic.
+        let result = build_transfer_transaction(
+            42431,
+            7,
+            "1".into(),
+            "1".into(),
+            1,
+            None,
+            vec![0x01; 31],
+            vec![0x20; 20],
+            vec![0x11; 20],
+            "1".into(),
+            vec![0xAB; 32],
+            None,
+        );
+        assert!(matches!(result, Err(FfiError::InvalidInput(_))));
+    }
+
+    /// Pull mode (`valid_before` set) builds an expiring-nonce tx: still a `0x76` `transferWithMemo`
+    /// signed by the payer, but with the expiring nonce key (`U256::MAX`) + a `valid_before`, so it
+    /// differs from the sequential-nonce push tx and is longer (it carries the extra valid_before
+    /// field). Byte-golden as the regression net; the live-Moderato e2e is the authoritative check.
+    #[test]
+    fn settled_charge_pull_mode_is_an_expiring_nonce_tx() {
+        use alloy_primitives::{address, U256};
+        let payer = [0x01u8; 32];
+        let currency = address!("20c0000000000000000000000000000000000001");
+        let recipient = address!("1111111111111111111111111111111111111111");
+        let memo = [0xabu8; 32];
+        let build = |valid_before: Option<u64>| {
+            build_transfer_tx(
+                42431,
+                7,
+                1_000_000_000,
+                1_000_000,
+                100_000,
+                None,
+                payer,
+                currency,
+                recipient,
+                U256::from(1_000_000u64),
+                memo,
+                valid_before,
+            )
+            .expect("builds")
+        };
+        let pull = build(Some(1_767_312_025)); // a unix-seconds deadline
+        let push = build(None);
+        assert_eq!(pull[0], 0x76, "a Tempo 0x76 typed transaction");
+        assert_ne!(
+            pull, push,
+            "the expiring-nonce tx differs from the sequential one"
+        );
+        assert_eq!(
+            pull.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+            GOLDEN_SETTLED_CHARGE_PULL_TX
+        );
+    }
+
+    /// `valid_before == Some(0)` is not a usable expiring deadline: rejected with a typed error
+    /// (mapped to `FfiError::InvalidInput` across the FFI), never a malformed expiring-nonce tx.
+    #[test]
+    fn settled_charge_rejects_zero_valid_before() {
+        use alloy_primitives::{address, U256};
+        let typed = build_transfer_tx(
+            42431,
+            7,
+            1_000_000_000,
+            1_000_000,
+            100_000,
+            None,
+            [0x01u8; 32],
+            address!("20c0000000000000000000000000000000000001"),
+            address!("1111111111111111111111111111111111111111"),
+            U256::from(1_000_000u64),
+            [0xabu8; 32],
+            Some(0),
+        );
+        assert!(matches!(typed, Err(BuildError::InvalidValidBefore)));
+
+        let wrapped = build_transfer_transaction(
+            42431,
+            7,
+            "1".into(),
+            "1".into(),
+            1,
+            None,
+            vec![0x01; 32],
+            address!("20c0000000000000000000000000000000000001").to_vec(),
+            address!("1111111111111111111111111111111111111111").to_vec(),
+            "1000000".into(),
+            vec![0xAB; 32],
+            Some(0),
+        );
+        assert!(matches!(wrapped, Err(FfiError::InvalidInput(_))));
+    }
+
+    const GOLDEN_SETTLED_CHARGE_PULL_TX: &str = "76f8ff82a5bf830f4240843b9aca00830186a0f87ef87c9420c000000000000000000000000000000000000180b86495777d59000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000f4240ababababababababababababababababababababababababababababababababc0a0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff808469570a99808080c0b84172b990027d92453d0f99f7cf41614e7de6edc371469dcb71a423692b5c65f1cc5c9c403cf1af0ec14b82ec9887277e9c40eeac489089ed6131715ba2cef0e9211b";
 
     /// The sponsored provisioning charge: a gas sponsor (`fee_payer`) signs the fee-payer
     /// signature so the access key's per-period spending limit only has to cover the transfer

@@ -222,20 +222,6 @@ public struct TempoKeyAuthorization: Sendable, Hashable {
         return (authorization, signature)
     }
 
-    /// Recovers the signing (payer) address from a signed serialized authorization.
-    public static func recover(serialized: Data) throws(AuthorizationError) -> EthereumAddress {
-        guard let outer = try? RLP.decode(serialized),
-              case let .list(elements) = outer, elements.count == 2,
-              case let .bytes(signature) = elements[1], signature.count == 65
-        else { throw .invalidSignature }
-        // Hash the re-encoded inner tuple: RLP is canonical, so this reproduces the signed payload.
-        let payload = Keccak256.hash(RLP.encode(elements[0]))
-        guard let signer = EthereumAddress.recover(hash: payload, signature: signature) else {
-            throw .invalidSignature
-        }
-        return signer
-    }
-
     private static func parseTuple(
         _ tuple: [RLP.Item]
     ) throws(AuthorizationError) -> TempoKeyAuthorization {
@@ -278,7 +264,7 @@ public struct TempoKeyAuthorization: Sendable, Hashable {
             guard case let .bytes(periodBytes) = fields[2] else { throw .malformedSerialization }
             period = try uint64(periodBytes)
         }
-        return Limit(token: address, limit: decimalString(fromBigEndian: amount), period: period)
+        return Limit(token: address, limit: EIP712.uint256Decimal(amount), period: period)
     }
 
     private static func parseScopeGroup(_ item: RLP.Item) throws(AuthorizationError) -> [Scope] {
@@ -334,23 +320,28 @@ public struct TempoKeyAuthorization: Sendable, Hashable {
     private static func requireMinimalInteger(_ bytes: Data) throws(AuthorizationError) {
         if bytes.first == 0 { throw .malformedSerialization }
     }
+}
 
-    /// A big-endian byte string as a base-10 integer string (the inverse of
-    /// ``EIP712/uint256(decimal:)``).
-    private static func decimalString(fromBigEndian bytes: Data) -> String {
-        var digits: [UInt8] = [0]
-        for byte in bytes {
-            var carry = Int(byte)
-            for index in digits.indices {
-                let value = Int(digits[index]) * 256 + carry
-                digits[index] = UInt8(value % 10)
-                carry = value / 10
-            }
-            while carry > 0 {
-                digits.append(UInt8(carry % 10))
-                carry /= 10
-            }
+public extension TempoKeyAuthorization {
+    /// Recovers the signing (payer) address from a signed serialized authorization.
+    ///
+    /// `malleability` gates non-canonical high-`s` signatures: the default
+    /// ``SignatureMalleabilityPolicy/accepted`` recovers any signature (peer behavior);
+    /// ``SignatureMalleabilityPolicy/rejectHighS`` rejects a high-`s` one (EIP-2).
+    static func recover(
+        serialized: Data, malleability: SignatureMalleabilityPolicy = .accepted
+    ) throws(AuthorizationError) -> EthereumAddress {
+        guard let outer = try? RLP.decode(serialized),
+              case let .list(elements) = outer, elements.count == 2,
+              case let .bytes(signature) = elements[1], signature.count == 65
+        else { throw .invalidSignature }
+        // Hash the re-encoded inner tuple: RLP is canonical, so this reproduces the signed payload.
+        let payload = Keccak256.hash(RLP.encode(elements[0]))
+        guard let signer = EthereumAddress.recover(
+            hash: payload, signature: signature, malleability: malleability
+        ) else {
+            throw .invalidSignature
         }
-        return String(digits.reversed().map { Character(UnicodeScalar(0x30 + $0)) })
+        return signer
     }
 }

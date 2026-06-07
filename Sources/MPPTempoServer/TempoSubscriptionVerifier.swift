@@ -30,14 +30,21 @@ import MPPTempo
 ///   per-period `limit` the authorization fixes.
 public struct TempoSubscriptionVerifier: PaymentMethodServer {
     private let defaultChainID: UInt64
+    private let malleability: SignatureMalleabilityPolicy
 
     /// Creates the verifier.
     ///
-    /// - Parameter defaultChainID: the chain to verify against when the challenge
-    ///   omits `methodDetails.chainId` (defaults to ``TempoChain/mainnet``, matching
-    ///   the client).
-    public init(defaultChainID: UInt64 = TempoChain.mainnet) {
+    /// - Parameters:
+    ///   - defaultChainID: the chain to verify against when the challenge omits
+    ///     `methodDetails.chainId` (defaults to ``TempoChain/mainnet``, matching the client).
+    ///   - malleability: whether to reject a non-canonical high-`s` authorization signature
+    ///     (defaults to ``SignatureMalleabilityPolicy/accepted``, the peer behavior).
+    public init(
+        defaultChainID: UInt64 = TempoChain.mainnet,
+        malleability: SignatureMalleabilityPolicy = .accepted
+    ) {
         self.defaultChainID = defaultChainID
+        self.malleability = malleability
     }
 
     /// Whether this is a `tempo` / `subscription` challenge with a decodable request.
@@ -99,7 +106,9 @@ public struct TempoSubscriptionVerifier: PaymentMethodServer {
         let payer: EthereumAddress
         do {
             decoded = try TempoKeyAuthorization.deserialize(serialized).authorization
-            payer = try TempoKeyAuthorization.recover(serialized: serialized)
+            payer = try TempoKeyAuthorization.recover(
+                serialized: serialized, malleability: malleability
+            )
         } catch {
             // A malformed, non-canonical, or unsigned serialization.
             throw .malformedSerialization

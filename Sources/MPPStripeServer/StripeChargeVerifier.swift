@@ -49,6 +49,13 @@ public struct StripeChargeVerifier: PaymentMethodServer {
     private let client: any StripePaymentIntentCreating
     private let connect: StripeConnect?
 
+    /// The largest charge amount this verifier accepts, in minor units: `2^53 - 1`, the peer's JS
+    /// `Number.MAX_SAFE_INTEGER`. A larger value `Int` could hold is rejected for cross-SDK parity
+    /// (the JS reference SDK cannot represent it exactly, so an amount we accept must be one it
+    /// accepts too). Stripe's own per-currency maximum is far below this, so the bound never binds
+    /// in practice; it exists only to keep the two SDKs' accepted ranges identical.
+    static let maxSafeAmount = 9_007_199_254_740_991
+
     /// Creates the verifier.
     /// - Parameters:
     ///   - client: creates the PaymentIntent (the concrete client posts to Stripe; tests stub it).
@@ -77,7 +84,11 @@ public struct StripeChargeVerifier: PaymentMethodServer {
             throw .malformedRequest(error)
         }
         // The only crossing out of the canonical-string amount domain; fail closed on overflow.
-        guard let amount = Int(request.amount.rawValue) else { throw .amountOverflow }
+        // The ceiling is the peer's JS `Number.MAX_SAFE_INTEGER` (not `Int.max`), so any amount
+        // this SDK accepts is one the reference SDK can represent exactly too (cross-SDK parity).
+        guard let amount = Int(request.amount.rawValue), amount <= Self.maxSafeAmount else {
+            throw .amountOverflow
+        }
 
         guard let spt = credential.payload["spt"]?.stringValue, !spt.isEmpty else {
             throw .missingSPT
@@ -158,7 +169,8 @@ public struct StripeChargeVerifier: PaymentMethodServer {
     public enum VerifyError: Error, Sendable {
         /// The challenge `request` could not be decoded.
         case malformedRequest(StripeChargeRequest.DecodingFailure)
-        /// The charge `amount` did not fit a 64-bit integer.
+        /// The charge `amount` exceeded the safe-integer ceiling (`2^53 - 1`, the peer's JS
+        /// `Number.MAX_SAFE_INTEGER`) enforced for cross-SDK parity.
         case amountOverflow
         /// The credential payload had no non-empty `spt`.
         case missingSPT

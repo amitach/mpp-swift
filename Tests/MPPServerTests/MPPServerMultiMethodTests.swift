@@ -91,6 +91,103 @@ struct MPPServerMultiMethodTests {
         #expect(challenges.count == 2)
     }
 
+    // §7.4 Accept-Payment negotiation: a credential-less request's advertised offers reflect the
+    // client's Accept-Payment header (filter to q>0, order by descending q; absent = accept-any).
+
+    /// The methods advertised in the 402's WWW-Authenticate headers (in order) for a
+    /// credential-less request whose Accept-Payment header is `accept` (nil = no header).
+    private func advertisedMethods(accept: String?) async throws -> [String] {
+        let middleware = try multiMethodMiddleware()
+        var fields = HTTPFields()
+        if let accept { try fields[#require(HTTPField.Name("Accept-Payment"))] = accept }
+        let request = HTTPRequest(
+            method: .post, scheme: "https", authority: "api.example.com", path: "/r",
+            headerFields: fields
+        )
+        let (response, _) = await middleware.handle(request, body: Data(), now: now) { _, _ in
+            (HTTPResponse(status: .ok), Data())
+        }
+        return response.headerFields[values: .wwwAuthenticate]
+            .flatMap { Challenge.challenges(inHeaderValue: $0) }
+            .map(\.method.rawValue)
+    }
+
+    @Test("no Accept-Payment advertises every offer in order")
+    func noAcceptAdvertisesAll() async throws {
+        #expect(try await advertisedMethods(accept: nil) == ["tempo", "stripe"])
+    }
+
+    @Test("Accept-Payment filters to the methods the client accepts")
+    func filtersToAccepted() async throws {
+        #expect(try await advertisedMethods(accept: "stripe/charge") == ["stripe"])
+    }
+
+    @Test("q=0 opts a method out of the 402")
+    func qZeroOptsOut() async throws {
+        let methods = try await advertisedMethods(accept: "tempo/charge;q=0, stripe/charge")
+        #expect(methods == ["stripe"])
+    }
+
+    @Test("offers are ordered by descending q (most-preferred first), reordering the defaults")
+    func ordersByQuality() async throws {
+        let methods = try await advertisedMethods(accept: "stripe/charge;q=1, tempo/charge;q=0.5")
+        #expect(methods == ["stripe", "tempo"])
+    }
+
+    @Test("a preference matching no offer falls back to advertising all of them")
+    func fallbackWhenNoneMatch() async throws {
+        #expect(try await advertisedMethods(accept: "paypal/charge") == ["tempo", "stripe"])
+    }
+
+    @Test("a wildcard preference accepts every offer")
+    func wildcardAcceptsAll() async throws {
+        #expect(try await advertisedMethods(accept: "*/charge") == ["tempo", "stripe"])
+    }
+
+    @Test("a malformed Accept-Payment is treated as absent (all offers)")
+    func malformedTreatedAsAbsent() async throws {
+        #expect(try await advertisedMethods(accept: "not-a-valid-header") == ["tempo", "stripe"])
+    }
+
+    @Test("among equally-specific ranges the higher q wins, regardless of order")
+    func sameSpecificityHigherQWins() async throws {
+        // tempo appears twice (same specificity); q=1 must win over q=0, so tempo is kept (and
+        // stripe, with no matching range, is dropped) -- not picked positionally as q=0.
+        let lowThenHigh = try await advertisedMethods(accept: "tempo/charge;q=0, tempo/charge;q=1")
+        let highThenLow = try await advertisedMethods(accept: "tempo/charge;q=1, tempo/charge;q=0")
+        #expect(lowThenHigh == ["tempo"])
+        #expect(highThenLow == ["tempo"])
+    }
+
+    @Test("a specific q=0 opt-out overrides a wildcard accept (most-specific wins)")
+    func specificOptOutBeatsWildcard() async throws {
+        // "accept everything, but not tempo": tempo matches both the wildcard (q=1) and the
+        // specific tempo/charge (q=0); the more-specific q=0 wins, so tempo is dropped, stripe
+        // kept.
+        #expect(try await advertisedMethods(accept: "*/charge;q=1, tempo/charge;q=0") == ["stripe"])
+    }
+
+    @Test("multiple Accept-Payment header lines are combined (RFC 9110 §5.2)")
+    func multipleHeaderLinesCombined() async throws {
+        let middleware = try multiMethodMiddleware()
+        var fields = HTTPFields()
+        let name = try #require(HTTPField.Name("Accept-Payment"))
+        fields.append(HTTPField(name: name, value: "tempo/charge;q=0.5"))
+        fields.append(HTTPField(name: name, value: "stripe/charge;q=1"))
+        let request = HTTPRequest(
+            method: .post, scheme: "https", authority: "api.example.com", path: "/r",
+            headerFields: fields
+        )
+        let (response, _) = await middleware.handle(request, body: Data(), now: now) { _, _ in
+            (HTTPResponse(status: .ok), Data())
+        }
+        let methods = response.headerFields[values: .wwwAuthenticate]
+            .flatMap { Challenge.challenges(inHeaderValue: $0) }
+            .map(\.method.rawValue)
+        // Both lines are honored: stripe (q=1) ahead of tempo (q=0.5).
+        #expect(methods == ["stripe", "tempo"])
+    }
+
     private func isProceed(_ decision: MPPServerMiddleware.Decision) -> Bool {
         if case .proceed = decision { return true }
         return false

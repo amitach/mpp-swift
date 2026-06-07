@@ -44,9 +44,10 @@ extension MPPServerMiddleware {
     static let problemContentType = "application/problem+json"
 
     /// The `Payment-Receipt` response header name (non-standard, so built from a
-    /// compile-time-known-valid token).
+    /// compile-time-known-valid token). The name is the canonical
+    /// ``MPPSensitiveSurfaces/receiptHeader`` so the redaction registry cannot drift from it.
     static let paymentReceiptField: HTTPField.Name = {
-        guard let name = HTTPField.Name("Payment-Receipt") else {
+        guard let name = HTTPField.Name(MPPSensitiveSurfaces.receiptHeader) else {
             preconditionFailure("Payment-Receipt is a valid HTTP field name")
         }
         return name
@@ -141,6 +142,15 @@ extension MPPServerMiddleware {
     static let idempotencyKeyField: HTTPField.Name = {
         guard let name = HTTPField.Name("Idempotency-Key") else {
             preconditionFailure("Idempotency-Key is a valid HTTP field name")
+        }
+        return name
+    }()
+
+    /// The `Accept-Payment` request header name (§6, non-standard, so built from a
+    /// compile-time-known-valid token).
+    static let acceptPaymentField: HTTPField.Name = {
+        guard let name = HTTPField.Name("Accept-Payment") else {
+            preconditionFailure("Accept-Payment is a valid HTTP field name")
         }
         return name
     }()

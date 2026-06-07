@@ -21,6 +21,12 @@ public struct TempoChargeRequest: Sendable, Hashable {
     /// The payee address for a settled transfer, surfaced for approval display.
     public let recipient: String?
     /// The token/currency address for a settled transfer, surfaced for approval.
+    ///
+    /// Optional by deliberate scoping (audit §5.1.1): the spec and the mppx peer mark `currency`
+    /// REQUIRED, but that applies to the *settled-transfer* rail, which is out of scope here. The
+    /// implemented zero-amount EIP-712 proof path settles no transfer and carries no currency, so
+    /// requiring it would reject a valid proof charge. It would become required alongside the
+    /// settled-transfer rail.
     public let currency: String?
     /// The escrow contract holding the channel, from `methodDetails.escrowContract`
     /// (present for a session challenge; absent for a plain charge).
@@ -33,6 +39,19 @@ public struct TempoChargeRequest: Sendable, Hashable {
     /// `0x`-hex id), if present and well-formed. A client may attach to it on-chain rather
     /// than opening a fresh channel.
     public let suggestedChannelID: Data?
+    /// The minimum increment between successive vouchers the server requires for this
+    /// challenge, from `methodDetails.minVoucherDelta` (a decimal base-units string), if set.
+    /// Overrides the channel session verifier's static default; a voucher whose delta over the
+    /// highest accepted falls below it is rejected (the spec's anti-griefing minimum).
+    public let minVoucherDelta: String?
+    /// The submission modes the server accepts for a settled charge, from
+    /// `methodDetails.supportedModes` (`"pull"` / `"push"`), if set. `nil` means the server did not
+    /// constrain it (both are acceptable, per the reference SDK). A settled-charge client selects a
+    /// mode from this set.
+    public let supportedModes: [String]?
+    /// A `bytes32` attribution memo the server pins for the transfer, from `methodDetails.memo`
+    /// (a `0x`-hex string), if set. When absent, the client derives an ``Attribution`` memo.
+    public let memo: String?
 
     /// Whether this is a zero-amount charge (the EIP-712 proof path).
     ///
@@ -66,6 +85,9 @@ public struct TempoChargeRequest: Sendable, Hashable {
         escrowContract = wire.methodDetails?.escrowContract
         suggestedDeposit = wire.suggestedDeposit
         suggestedChannelID = wire.methodDetails?.channelId.flatMap(Data.init(hexPrefixed:))
+        minVoucherDelta = wire.methodDetails?.minVoucherDelta
+        supportedModes = wire.methodDetails?.supportedModes
+        memo = wire.methodDetails?.memo
     }
 
     /// Whether `challenge` is a `tempo`/`charge` challenge carrying a decodable zero-amount
@@ -107,9 +129,14 @@ private struct ChargeRequestWire: Decodable {
 }
 
 /// The `methodDetails` sub-object: `chainId` (proof + session), the session's
-/// `escrowContract`, and an optional `channelId` the server suggests reusing.
+/// `escrowContract`, an optional `channelId` the server suggests reusing, the optional
+/// per-challenge `minVoucherDelta` (a decimal base-units string), and the settled charge's
+/// `supportedModes` + pinned `memo`.
 private struct MethodDetails: Decodable {
     let chainId: UInt64?
     let escrowContract: String?
     let channelId: String?
+    let minVoucherDelta: String?
+    let supportedModes: [String]?
+    let memo: String?
 }

@@ -76,11 +76,13 @@ public struct Voucher: Sendable, Hashable {
         escrowContract: EthereumAddress,
         chainId: UInt64,
         signature: Data,
-        expectedSigner: EthereumAddress
+        expectedSigner: EthereumAddress,
+        malleability: SignatureMalleabilityPolicy = .accepted
     ) -> Bool {
         guard let recovered = EthereumAddress.recover(
             hash: signingHash(escrowContract: escrowContract, chainId: chainId),
-            signature: signature
+            signature: signature,
+            malleability: malleability
         ) else { return false }
         return recovered == expectedSigner
     }

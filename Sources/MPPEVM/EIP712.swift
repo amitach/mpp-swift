@@ -57,6 +57,26 @@ public enum EIP712 {
         return Data(word)
     }
 
+    /// Decodes a big-endian `uint256` byte string (any length; a 32-byte word is the usual case)
+    /// to its base-10 integer string -- the inverse of ``uint256(decimal:)``. No leading zeros
+    /// (`"0"` for an all-zero word), so the result is a canonical ``Amount`` value.
+    public static func uint256Decimal(_ bytes: Data) -> String {
+        var digits: [UInt8] = [0]
+        for byte in bytes {
+            var carry = Int(byte)
+            for index in digits.indices {
+                let value = Int(digits[index]) * 256 + carry
+                digits[index] = UInt8(value % 10)
+                carry = value / 10
+            }
+            while carry > 0 {
+                digits.append(UInt8(carry % 10))
+                carry /= 10
+            }
+        }
+        return String(digits.reversed().map { Character(UnicodeScalar(0x30 + $0)) })
+    }
+
     /// `hashStruct(s) = keccak256(typeHash ‖ encodeData(s))`, where `encodeData` is
     /// the concatenation of the already-encoded 32-byte field words in declaration
     /// order.

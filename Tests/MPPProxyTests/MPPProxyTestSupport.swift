@@ -71,6 +71,7 @@ func bodyString(_ data: Data) -> String? {
 func standardProxy(
     transport: any MPPHTTPTransport,
     basePath: String? = nil,
+    cors: CORSPolicy? = nil,
     onEvent: @escaping @Sendable (ServerEvent) -> Void = { _ in }
 ) throws -> MPPProxy {
     let gate = try makeProxyMiddleware(onEvent: onEvent)
@@ -88,7 +89,7 @@ func standardProxy(
     )
     return try MPPProxy(
         services: [service], info: .init(title: "Proxy", version: "1"),
-        basePath: basePath, transport: transport
+        basePath: basePath, transport: transport, cors: cors
     )
 }
 

@@ -13,7 +13,7 @@ struct PaymentPagePresenterTests {
     @Test("with Accept: text/html it renders the HTML page (amount, bootstrap, method content)")
     func rendersHTML() async throws {
         let presented = try #require(await makePresenter().present(
-            makeRequest(accept: "text/html"), challenge: makeChallenge(), problem: problem
+            makeRequest(accept: "text/html"), challenges: [makeChallenge()], problem: problem
         ))
         #expect(presented.contentType == "text/html; charset=utf-8")
         let html = try #require(String(data: presented.body, encoding: .utf8))
@@ -26,7 +26,7 @@ struct PaymentPagePresenterTests {
     @Test("the bootstrap is injected ahead of the method content")
     func bootstrapBeforeContent() async throws {
         let presented = try #require(await makePresenter().present(
-            makeRequest(accept: "text/html"), challenge: makeChallenge(), problem: problem
+            makeRequest(accept: "text/html"), challenges: [makeChallenge()], problem: problem
         ))
         let html = try #require(String(data: presented.body, encoding: .utf8))
         let bootstrap = try #require(html.range(of: "window.__mppx.submit"))
@@ -38,7 +38,7 @@ struct PaymentPagePresenterTests {
     func acceptList() async throws {
         let presented = try await makePresenter().present(
             makeRequest(accept: "text/html,application/xhtml+xml,*/*;q=0.8"),
-            challenge: makeChallenge(),
+            challenges: [makeChallenge()],
             problem: problem
         )
         #expect(presented != nil)
@@ -48,18 +48,39 @@ struct PaymentPagePresenterTests {
     func declinesNonHTML() async throws {
         let challenge = try makeChallenge()
         #expect(await makePresenter().present(
-            makeRequest(accept: "application/json"), challenge: challenge, problem: problem
+            makeRequest(accept: "application/json"), challenges: [challenge], problem: problem
         ) == nil)
         #expect(await makePresenter().present(
-            makeRequest(accept: nil), challenge: challenge, problem: problem
+            makeRequest(accept: nil), challenges: [challenge], problem: problem
         ) == nil)
+    }
+
+    @Test("two challenges render a tabbed page (a tab and panel per method)")
+    func multiMethodTabs() async throws {
+        let presented = try #require(await makePresenter().present(
+            makeRequest(accept: "text/html"),
+            challenges: [makeChallenge(method: "tempo"), makeChallenge(method: "stripe")],
+            problem: problem
+        ))
+        let html = try #require(String(data: presented.body, encoding: .utf8))
+        #expect(html.contains("role=\"tablist\""))
+        #expect(html.contains("id=\"mppx-tab-0\""))
+        #expect(html.contains("id=\"mppx-tab-1\""))
+        #expect(html.contains("id=\"mppx-panel-1\""))
+        #expect(html.contains("id=\"root-0\""))
+        #expect(html.contains("id=\"root-1\""))
+        #expect(html.contains("data-remaining=\"2\""))
+        // The tab labels are the method names; the bootstrap is emitted exactly once.
+        #expect(html.contains(">tempo</button>"))
+        #expect(html.contains(">stripe</button>"))
+        #expect(html.components(separatedBy: "window.__mppx.submit").count - 1 == 1)
     }
 
     @Test("injectsClientBootstrap: false omits the bootstrap")
     func bootstrapDisabled() async throws {
         let presenter = makePresenter(injectsClientBootstrap: false)
         let presented = try #require(await presenter.present(
-            makeRequest(accept: "text/html"), challenge: makeChallenge(), problem: problem
+            makeRequest(accept: "text/html"), challenges: [makeChallenge()], problem: problem
         ))
         let html = try #require(String(data: presented.body, encoding: .utf8))
         #expect(!html.contains("window.__mppx"))

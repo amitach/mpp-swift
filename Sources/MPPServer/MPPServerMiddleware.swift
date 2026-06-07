@@ -187,17 +187,28 @@ public struct MPPServerMiddleware: Sendable {
     ///   - authorization: The `Authorization` header value, or `nil` if absent.
     ///   - body: The full request body (its size is checked against `maxBodyBytes`).
     ///   - now: The instant to evaluate expiry against.
+    ///   - accept: The client's parsed `Accept-Payment` preferences (§7.4). An empty array (the
+    ///     default) means "accept any", advertising every offer; otherwise only the accepted
+    ///     methods are advertised, most-preferred first. HTTP-path only; non-HTTP callers omit it.
     /// - Returns: the ``Decision`` for the request. Emits a ``ServerEvent`` for the
     ///   minted-challenge, verified, and rejected branches.
-    public func evaluate(authorization: String?, body: Data, now: Date) async -> Decision {
+    public func evaluate(
+        authorization: String?,
+        body: Data,
+        now: Date,
+        accept: [PaymentRange] = []
+    ) async -> Decision {
         // Bound the body before any payment work, so an oversized request never
         // reaches credential parsing or digest hashing.
         if body.count > maxBodyBytes {
             return .payloadTooLarge
         }
 
+        // §7.4: advertise only the methods the client accepts (Accept-Payment), most-preferred
+        // first. An empty `accept` (absent header) leaves the offers unchanged.
+        let active = negotiatedOffers(offers, for: accept)
         guard let authorization else {
-            let challenges = mintChallenges(now: now)
+            let challenges = mintChallenges(active, now: now)
             let problem = Self.problem(for: .freshChallenge, challengeID: challenges[0].id)
             return .challenge(challenges, problem)
         }
@@ -220,7 +231,7 @@ public struct MPPServerMiddleware: Sendable {
             // 410/400 settlement problem (§10.5) offers none: it mints no challenge, fires no
             // `challengeIssued`, and embeds no `challengeId` (no challenge to retry on).
             if Self.problemStatus(for: rejection) == 402 {
-                let challenges = mintChallenges(now: now)
+                let challenges = mintChallenges(active, now: now)
                 let problem = Self.problem(
                     for: .rejection(rejection),
                     challengeID: challenges[0].id
@@ -313,14 +324,20 @@ public struct MPPServerMiddleware: Sendable {
                 break // fall through to mint a 402
             }
         }
-        switch await evaluate(authorization: authorization, body: body, now: now) {
+        // §7.4: honor the client's Accept-Payment preference when advertising offers. Multiple
+        // header lines are combined (RFC 9110 §5.2: a list-based field); a malformed value is
+        // treated as absent (accept-any), not a request error.
+        let accept = (try? AcceptPayment.parse(
+            request.headerFields[values: Self.acceptPaymentField].joined(separator: ", ")
+        )) ?? []
+        switch await evaluate(authorization: authorization, body: body, now: now, accept: accept) {
         case .payloadTooLarge:
             return guarded(Self.payloadTooLargeResponse(maxBodyBytes: maxBodyBytes))
         case let .challenge(challenges, problem):
-            // The 402 advertises every offer (one WWW-Authenticate per challenge). A presenter
-            // renders the primary for now; the multi-method page is layered on separately.
+            // The 402 advertises every offer (one WWW-Authenticate per challenge), and a presenter
+            // receives them all so it can render one method or a chooser across several.
             if let presenter, let presented = await presenter.present(
-                request, challenge: challenges[0], problem: problem
+                request, challenges: challenges, problem: problem
             ) {
                 return guarded(
                     Self.paymentRequiredResponse(challenges: challenges, presented: presented)
@@ -337,7 +354,7 @@ public struct MPPServerMiddleware: Sendable {
     /// Mints one challenge per offer and emits a `challengeIssued` event for each, returning them
     /// in offer order (the first is the primary). Never empty: a route always has at least one
     /// offer.
-    private func mintChallenges(now: Date) -> [Challenge] {
+    private func mintChallenges(_ offers: [MethodOffer], now: Date) -> [Challenge] {
         let expires = expiresIn.map { Expires(date: now.addingTimeInterval($0)) }
         return offers.map { offer in
             let challenge = minter.mint(
