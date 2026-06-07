@@ -48,6 +48,7 @@ let package = Package(
         .library(name: "MPPTempo", targets: ["MPPTempo"]),
         .library(name: "MPPTempoServer", targets: ["MPPTempoServer"]),
         .library(name: "MPPStripe", targets: ["MPPStripe"]),
+        .library(name: "MPPX402", targets: ["MPPX402"]),
         .library(name: "MPPStripeServer", targets: ["MPPStripeServer"]),
         .library(name: "MPPHTML", targets: ["MPPHTML"]),
         .library(name: "MPPHTMLServer", targets: ["MPPHTMLServer"]),
@@ -406,6 +407,18 @@ let package = Package(
         .testTarget(
             name: "MPPStripeTests",
             dependencies: ["MPPStripe", "MPPCore", "MPPClient"]
+        ),
+        // MPPX402: the x402-on-Base rail (USDC via EIP-3009 transferWithAuthorization). The core
+        // here is the EIP-3009 typed-data instrument (X402Authorization + X402Domain), built on
+        // MPPEVM's EIP-712 / secp256k1 primitives. The client method, server verifier, and the
+        // MPP <-> x402 bridge land on top in later targets.
+        .target(
+            name: "MPPX402",
+            dependencies: ["MPPCore", "MPPEVM"]
+        ),
+        .testTarget(
+            name: "MPPX402Tests",
+            dependencies: ["MPPX402", "MPPCore", "MPPEVM"]
         ),
         // MPPStripeServer: the Stripe charge method, SERVER side (StripeChargeVerifier + the
         // concrete StripePaymentIntentClient over MPPHTTPTransport). Reuses MPPStripe's shared
