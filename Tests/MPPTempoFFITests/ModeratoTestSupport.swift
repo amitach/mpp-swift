@@ -1,4 +1,5 @@
 import Foundation
+import HTTPTypes
 import MPPClient
 import MPPCore
 import MPPEVM
@@ -21,9 +22,11 @@ enum ModeratoKit {
     /// The Moderato JSON-RPC endpoint.
     static let rpcURLString = "https://rpc.moderato.tempo.xyz"
 
-    /// A live-chain RPC client over `URLSessionTransport`.
+    /// A live-chain RPC client over `URLSessionTransport`, wrapped to retry the public Moderato
+    /// RPC's transient throttling (see ``RetryingTransport``).
     static func makeRPC() throws -> EVMRPC {
-        try EVMRPC(transport: URLSessionTransport(), url: #require(URL(string: rpcURLString)))
+        let transport = RetryingTransport(base: URLSessionTransport())
+        return try EVMRPC(transport: transport, url: #require(URL(string: rpcURLString)))
     }
 
     /// A funded throwaway account: a fresh key, its faucet grant mined.
@@ -127,3 +130,37 @@ enum ModeratoKit {
 
 /// A failure in a live-Moderato test helper.
 enum ModeratoError: Error { case unexpected(String) }
+
+/// An ``MPPHTTPTransport`` that retries the public Moderato RPC on transient throttling /
+/// availability responses (HTTP 429 Too Many Requests, 502, 503), which the shared testnet returns
+/// under load. ``EVMRPC`` turns a non-2xx status into ``EVMRPC/EVMRPCError/httpStatus(_:)``, so
+/// without this the live e2es flake on infrastructure rather than logic. 429 is explicitly a
+/// "retry later" signal, so retrying with bounded exponential backoff (capped ~4s, ~16s total) is
+/// the correct client behavior and weakens no on-chain assertion. Test-only.
+struct RetryingTransport: MPPHTTPTransport {
+    let base: any MPPHTTPTransport
+    let maxAttempts: Int
+
+    /// - Parameter maxAttempts: total tries including the first (8 -> up to 7 backoff waits).
+    init(base: any MPPHTTPTransport, maxAttempts: Int = 8) {
+        self.base = base
+        self.maxAttempts = maxAttempts
+    }
+
+    private static let retryableStatuses: Set<Int> = [429, 502, 503]
+
+    func send(_ request: HTTPRequest, body: Data) async throws -> (HTTPResponse, Data) {
+        var attempt = 0
+        while true {
+            let (response, data) = try await base.send(request, body: body)
+            attempt += 1
+            guard Self.retryableStatuses.contains(response.status.code),
+                  attempt < maxAttempts else {
+                return (response, data)
+            }
+            // Exponential backoff capped at 4s, plus jitter to desynchronize concurrent retries.
+            let backoffMs = min(UInt64(250) << UInt64(attempt - 1), 4000)
+            try await Task.sleep(for: .milliseconds(backoffMs + UInt64.random(in: 0 ... 250)))
+        }
+    }
+}
