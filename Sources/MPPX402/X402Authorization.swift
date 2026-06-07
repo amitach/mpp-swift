@@ -8,9 +8,9 @@ import MPPEVM
 /// the server advertised; `chainId` comes from the `network` and `asset` is the token's
 /// `verifyingContract`. A wrong field yields a signature the token contract will not accept.
 public struct X402Domain: Sendable, Hashable {
-    /// The token's EIP-712 domain `name` -- the contract's actual `name()`, which is NOT always the
-    /// ticker (USDC on Base is `"USD Coin"`). Read it from the resource server's advertised `extra`,
-    /// never assumed, or the domain separator (and every signature) is wrong.
+    /// The token's EIP-712 domain `name` -- the contract's actual `name()`, not always the ticker
+    /// (USDC on Base is `"USD Coin"`). Read it from the server's advertised `extra`; a wrong name
+    /// breaks the domain separator and every signature.
     public let name: String
     /// The token's EIP-712 domain `version` (e.g. `"2"`).
     public let version: String
