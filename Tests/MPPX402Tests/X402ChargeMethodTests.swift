@@ -148,6 +148,24 @@ struct X402ChargeMethodTests {
         }
     }
 
+    @Test("advertises the exact/charge payment range")
+    func paymentRanges() throws {
+        let ranges = try method().paymentRanges
+        #expect(ranges.count == 1)
+        #expect(ranges.first?.method == .value(X402Method.name))
+        #expect(ranges.first?.intent == .value(.charge))
+    }
+
+    @Test("the approval policy gates signing before a credential is built")
+    func approvalGate() async throws {
+        let denied = try #require(X402ChargeMethod(payerPrivateKey: Self.payerKey, approval: .deny))
+        await #expect(throws: X402ChargeError.approvalDenied) {
+            _ = try await denied.buildCredential(for: chargeChallenge())
+        }
+        // allowAll (the default) signs through.
+        _ = try await method().buildCredential(for: chargeChallenge())
+    }
+
     @Test("two charges use distinct random nonces by default")
     func defaultNonceIsRandom() async throws {
         let subject = try #require(X402ChargeMethod(payerPrivateKey: Self.payerKey))

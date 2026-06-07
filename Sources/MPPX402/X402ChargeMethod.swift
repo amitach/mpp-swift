@@ -19,6 +19,7 @@ public struct X402ChargeMethod: PaymentMethodClient {
     private let signer: Secp256k1Signer
     private let payer: EthereumAddress
     private let defaultChainId: UInt64
+    private let approval: X402ApprovalPolicy
     private let now: @Sendable () -> Date
     private let nonceSource: @Sendable () -> Data
 
@@ -29,6 +30,8 @@ public struct X402ChargeMethod: PaymentMethodClient {
     ///     `did:pkh` source; its public key fixes the payer address (the EIP-3009 `from`).
     ///   - defaultChainId: the chain to use when the challenge omits `methodDetails.chainId`
     ///     (defaults to Base mainnet).
+    ///   - approval: the pre-sign spending gate (defaults to ``X402ApprovalPolicy/allowAll``,
+    ///     deferring to the flow's ``PaymentAuthorizer``).
     ///   - now: the clock used to compute `validBefore` (defaults to `Date.init`).
     ///   - nonceSource: the 32-byte `bytes32` nonce source (defaults to a system CSPRNG); injected
     ///     for deterministic tests.
@@ -36,6 +39,7 @@ public struct X402ChargeMethod: PaymentMethodClient {
     public init?(
         payerPrivateKey: Data,
         defaultChainId: UInt64 = X402Chain.baseMainnet,
+        approval: X402ApprovalPolicy = .allowAll,
         now: @escaping @Sendable () -> Date = Date.init,
         nonceSource: @escaping @Sendable () -> Data = X402ChargeMethod.secureNonce
     ) {
@@ -45,6 +49,7 @@ public struct X402ChargeMethod: PaymentMethodClient {
         self.signer = signer
         self.payer = payer
         self.defaultChainId = defaultChainId
+        self.approval = approval
         self.now = now
         self.nonceSource = nonceSource
     }
@@ -53,6 +58,12 @@ public struct X402ChargeMethod: PaymentMethodClient {
     /// source.
     public var address: EthereumAddress {
         payer
+    }
+
+    /// The `Accept-Payment` ranges this method satisfies: the x402 (`exact`) charge method/intent.
+    /// Derived (not hardcoded), so advertising stays tied to the registered method.
+    public var paymentRanges: [PaymentRange] {
+        [Self.chargeRange]
     }
 
     /// Whether this is an `x402` / `charge` challenge with a decodable **non-zero** request that
@@ -105,6 +116,10 @@ public struct X402ChargeMethod: PaymentMethodClient {
         guard let name = request.tokenName, let version = request.tokenVersion else {
             throw X402ChargeError.missingTokenDomain
         }
+        // Pre-sign gate: refuse before producing a real-money authorization signature.
+        guard await approval.approves(approvalFacts(for: challenge)) else {
+            throw X402ChargeError.approvalDenied
+        }
 
         let chainId = request.chainId ?? defaultChainId
         let timeout = request.maxTimeoutSeconds ?? Self.defaultTimeoutSeconds
@@ -142,6 +157,16 @@ public struct X402ChargeMethod: PaymentMethodClient {
         var generator = SystemRandomNumberGenerator()
         return Data((0 ..< 32).map { _ in UInt8.random(in: 0 ... 255, using: &generator) })
     }
+
+    /// The `exact` / `charge` advertisement range, built once.
+    private static let chargeRange: PaymentRange = {
+        guard let range = try? PaymentRange(
+            method: .value(X402Method.name), intent: .value(.charge)
+        ) else {
+            preconditionFailure("exact/charge with default quality is a valid range")
+        }
+        return range
+    }()
 }
 
 /// A reason ``X402ChargeMethod`` could not build a credential.
@@ -158,6 +183,8 @@ public enum X402ChargeError: Error, Sendable, Hashable {
     case missingOrInvalidCurrency
     /// The request did not carry the token's EIP-712 domain (`name` + `version`).
     case missingTokenDomain
+    /// The pre-sign approval policy refused the charge.
+    case approvalDenied
     /// The authorization could not be formed (e.g. the nonce was not 32 bytes).
     case invalidAuthorization
     /// Signing the authorization failed; carries the underlying error's description.
