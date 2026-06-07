@@ -49,6 +49,7 @@ let package = Package(
         .library(name: "MPPTempoServer", targets: ["MPPTempoServer"]),
         .library(name: "MPPStripe", targets: ["MPPStripe"]),
         .library(name: "MPPX402", targets: ["MPPX402"]),
+        .library(name: "MPPX402Server", targets: ["MPPX402Server"]),
         .library(name: "MPPStripeServer", targets: ["MPPStripeServer"]),
         .library(name: "MPPHTML", targets: ["MPPHTML"]),
         .library(name: "MPPHTMLServer", targets: ["MPPHTMLServer"]),
@@ -419,6 +420,25 @@ let package = Package(
         .testTarget(
             name: "MPPX402Tests",
             dependencies: ["MPPX402", "MPPCore", "MPPEVM", "MPPClient"]
+        ),
+        // MPPX402Server: the x402 charge method, SERVER side (X402ChargeVerifier) -- recovers the
+        // EIP-3009 signer, validates the authorization against the challenge, settles it on-chain
+        // through an injected X402Settlement seam, and single-uses the authorization. Reuses
+        // MPPX402's shared types and MPPServer's PaymentMethodServer seam.
+        .target(
+            name: "MPPX402Server",
+            dependencies: ["MPPX402", "MPPCore", "MPPServer", "MPPEVM"]
+        ),
+        .testTarget(
+            name: "MPPX402ServerTests",
+            dependencies: [
+                "MPPX402Server",
+                "MPPX402",
+                "MPPCore",
+                "MPPServer",
+                "MPPEVM",
+                "MPPClient"
+            ]
         ),
         // MPPStripeServer: the Stripe charge method, SERVER side (StripeChargeVerifier + the
         // concrete StripePaymentIntentClient over MPPHTTPTransport). Reuses MPPStripe's shared
