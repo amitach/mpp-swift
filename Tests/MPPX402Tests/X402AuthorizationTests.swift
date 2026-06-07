@@ -24,11 +24,13 @@ struct X402AuthorizationTests {
         try #require(EthereumAddress(uncompressedPublicKey: signer().publicKey))
     }
 
-    /// The real USDC-on-Base domain (name/version/chainId/asset) -- the values a Base resource
-    /// server advertises in its x402 PaymentRequirements `extra`.
+    /// The real USDC-on-Base domain (name/version/chainId/asset) -- the exact values the contract's
+    /// EIP-712 domain uses (`name()` returns "USD Coin", `version()` returns "2"), the values a
+    /// Base
+    /// resource server advertises in its x402 PaymentRequirements `extra`.
     private func domain(chainId: UInt64 = 8453) throws -> X402Domain {
         let asset = try #require(EthereumAddress(hex: Self.usdcBaseHex))
-        return X402Domain(name: "USDC", version: "2", chainId: chainId, asset: asset)
+        return X402Domain(name: "USD Coin", version: "2", chainId: chainId, asset: asset)
     }
 
     private func authorization(
@@ -56,6 +58,18 @@ struct X402AuthorizationTests {
         #expect(
             X402Authorization.transferWithAuthorizationTypeHash.hexPrefixed
                 == "0x7c7c6cdb67a18743f49ec6fa9b35f50d52ed05cbed4cc592e13b44501c1a2267"
+        )
+    }
+
+    @Test("the domain separator matches the on-chain USDC-on-Base DOMAIN_SEPARATOR")
+    func domainSeparatorMatchesOnChain() throws {
+        // An independent anchor for the domain encoding: the value the real USDC contract on Base
+        // (0x8335...02913) returns from DOMAIN_SEPARATOR(). Matching it proves the EIP-712 domain
+        // field order, types, and verifyingContract binding are correct -- closing the gap that the
+        // self-pinned signing hash alone would leave.
+        #expect(
+            try domain().separator.hexPrefixed
+                == "0x02fa7265e7c5d81118673727957699e4d68f74cd74b7db77da710fe8a2c7834f"
         )
     }
 
@@ -122,36 +136,38 @@ struct X402AuthorizationTests {
         #expect(try authorization(nonce: Data(repeating: 0, count: 32)).nonce.count == 32)
     }
 
-    @Test("a value beyond uint256 is unencodable")
+    @Test("a value beyond uint256 is rejected at construction")
     func valueOverflow() throws {
-        // 2^256 -- one past the uint256 max.
+        // 2^256 -- one past the uint256 max -- is rejected eagerly (like Voucher), so no instance
+        // can hold an unencodable value.
         let overflow =
             "115792089237316195423570985008687907853269984665640564039457584007913129639936"
-        let domain = try domain()
-        let auth = try authorization(value: overflow)
-        #expect(auth.signingHash(domain: domain) == nil)
-        #expect(throws: X402Authorization.SigningError.unencodableValue) {
-            _ = try auth.sign(domain: domain, with: signer())
-        }
+        let payee = try #require(EthereumAddress(hex: Self.recipientHex))
+        #expect(try X402Authorization(
+            from: payer(), recipient: payee, value: Amount(overflow),
+            validAfter: 0, validBefore: 1, nonce: Data(repeating: 0, count: 32)
+        ) == nil)
     }
 
     @Test("the signing hash is stable (regression) and nonce-sensitive")
     func signingHashStable() throws {
         let domain = try domain()
-        let hash = try #require(authorization().signingHash(domain: domain))
+        let hash = try authorization().signingHash(domain: domain)
         #expect(hash.count == 32)
         #expect(hash.hexPrefixed == Self.pinnedSigningHash)
         // A different nonce yields a different digest.
-        let other = try #require(
-            authorization(nonce: Data(repeating: 0xCD, count: 32)).signingHash(domain: domain)
+        let other = try authorization(nonce: Data(repeating: 0xCD, count: 32)).signingHash(
+            domain: domain
         )
         #expect(other != hash)
     }
 
-    // Pinned from this implementation for the example USDC/v2/chain-8453 domain above; the type
-    // hash is independently anchored to the canonical EIP-3009 constant (see `canonicalTypeHash`),
-    // and the live Base settlement e2e (later PR) is the on-chain authority. Changing this without
-    // a matching reason is a red flag.
+    // Pinned from this implementation for the real USDC-on-Base domain above. The domain separator
+    // is independently anchored to the on-chain DOMAIN_SEPARATOR (see
+    // `domainSeparatorMatchesOnChain`)
+    // and the type hash to the canonical EIP-3009 constant (see `canonicalTypeHash`), so a wrong
+    // domain or struct encoding would trip those before this. Changing this without a matching
+    // reason is a red flag.
     private static let pinnedSigningHash =
-        "0xcdde7f61b76db7e989312e181dd5e8463e7c760c1e34f62155be559790455863"
+        "0xf91b9c6e07292dd93cb9e4eb53eb9b1ece9efe665a4d22f6bb437458ebe5945c"
 }
