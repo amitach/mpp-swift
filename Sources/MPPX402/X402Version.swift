@@ -27,12 +27,15 @@ public struct X402Network: Sendable, Hashable {
     }
 
     /// Base mainnet.
-    public static let base = X402Network(chainId: 8453)
+    public static let base = X402Network(chainId: X402Chain.baseMainnet)
     /// Base Sepolia testnet.
-    public static let baseSepolia = X402Network(chainId: 84532)
+    public static let baseSepolia = X402Network(chainId: X402Chain.baseSepolia)
 
-    /// The x402 v1 short names, the one place the name <-> chain-id mapping lives.
-    private static let shortNames: [String: UInt64] = ["base": 8453, "base-sepolia": 84532]
+    /// The x402 v1 short names, the one place the name <-> chain-id mapping lives. The chain ids
+    /// come from ``X402Chain`` so the two surfaces cannot drift.
+    private static let shortNames: [String: UInt64] = [
+        "base": X402Chain.baseMainnet, "base-sepolia": X402Chain.baseSepolia,
+    ]
 
     /// The CAIP-2 identifier (`eip155:<chainId>`) -- the x402 v2 wire form.
     public var caip2: String {

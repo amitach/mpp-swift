@@ -116,7 +116,13 @@ struct X402BridgeWireTests {
             network: .baseSepolia, amount: Amount("1"), asset: Self.usdc, payTo: Self.payTo,
             maxTimeoutSeconds: .max
         )
-        let object = try #require(requirements.json(for: .v2).objectValue)
+        let json = requirements.json(for: .v2)
+        let object = try #require(json.objectValue)
         #expect(object["maxTimeoutSeconds"]?.integerValue == Int64.max) // clamped, no trap
+        // ...and decoding the clamped value round-trips to UInt64(Int64.max), not UInt64.max.
+        #expect(
+            X402PaymentRequirements(json: json, version: .v2)?
+                .maxTimeoutSeconds == UInt64(Int64.max)
+        )
     }
 }
