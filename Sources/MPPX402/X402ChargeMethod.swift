@@ -16,7 +16,7 @@ public struct X402ChargeMethod: PaymentMethodClient {
     /// The default authorization window when the challenge omits `maxTimeoutSeconds`.
     public static let defaultTimeoutSeconds: UInt64 = 300
 
-    private let payerPrivateKey: Data
+    private let signer: Secp256k1Signer
     private let payer: EthereumAddress
     private let defaultChainId: UInt64
     private let now: @Sendable () -> Date
@@ -42,7 +42,7 @@ public struct X402ChargeMethod: PaymentMethodClient {
         guard let signer = try? Secp256k1Signer(privateKey: payerPrivateKey),
               let payer = EthereumAddress(uncompressedPublicKey: signer.publicKey)
         else { return nil }
-        self.payerPrivateKey = payerPrivateKey
+        self.signer = signer
         self.payer = payer
         self.defaultChainId = defaultChainId
         self.now = now
@@ -108,8 +108,12 @@ public struct X402ChargeMethod: PaymentMethodClient {
 
         let chainId = request.chainId ?? defaultChainId
         let timeout = request.maxTimeoutSeconds ?? Self.defaultTimeoutSeconds
-        // max(0, ...) so a clock returning a pre-epoch date cannot trap the UInt64 conversion.
-        let validBefore = UInt64(max(0, now().timeIntervalSince1970)) + timeout
+        // A saturating add: `max(0, ...)` keeps a pre-epoch clock from trapping the UInt64
+        // conversion, and reporting-overflow keeps a hostile near-UInt64.max `maxTimeoutSeconds`
+        // from overflowing and trapping -- fail safe, not crash. The token enforces the deadline.
+        let nowSeconds = UInt64(max(0, now().timeIntervalSince1970))
+        let (sum, overflowed) = nowSeconds.addingReportingOverflow(timeout)
+        let validBefore = overflowed ? UInt64.max : sum
 
         guard let authorization = X402Authorization(
             from: payer, recipient: recipient, value: request.amount,
@@ -120,9 +124,7 @@ public struct X402ChargeMethod: PaymentMethodClient {
         let domain = X402Domain(name: name, version: version, chainId: chainId, asset: asset)
         let signature: Data
         do {
-            signature = try authorization.sign(
-                domain: domain, with: Secp256k1Signer(privateKey: payerPrivateKey)
-            )
+            signature = try authorization.sign(domain: domain, with: signer)
         } catch {
             throw X402ChargeError.signingFailed(String(describing: error))
         }

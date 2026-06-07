@@ -104,6 +104,28 @@ struct X402ChargeMethodTests {
         #expect(auth.validBefore == 1_700_000_000 + X402ChargeMethod.defaultTimeoutSeconds)
     }
 
+    @Test("a hostile near-UInt64.max maxTimeoutSeconds saturates validBefore, never traps")
+    func timeoutOverflowSaturates() async throws {
+        // UInt64.max is beyond Int64.max, so it cannot be built via JSONValue.integer -- craft the
+        // raw wire JSON directly. now + timeout would overflow; the client must saturate, not
+        // crash.
+        let raw = #"""
+        {"amount":"1000000","recipient":"\#(Self.recipientHex)","currency":"\#(Self.usdcBaseHex)",\#
+        "methodDetails":{"chainId":8453,"name":"USD Coin","version":"2",\#
+        "maxTimeoutSeconds":18446744073709551615}}
+        """#
+        let challenge = try Challenge(
+            id: "x402-overflow", realm: "shop.example",
+            method: X402Method.name, intent: IntentName("charge"),
+            request: EncodedJSON(Base64URL.encode(Data(raw.utf8)))
+        )
+        let credential = try await method().buildCredential(for: challenge)
+        let auth = try #require(
+            X402ExactPayload(credentialPayload: credential.payload)?.authorization.decoded()
+        )
+        #expect(auth.validBefore == UInt64.max) // saturated
+    }
+
     @Test("approval facts carry the decoded amount, currency, and recipient")
     func approvalFacts() throws {
         let facts = try method().approvalFacts(for: chargeChallenge())
