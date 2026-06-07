@@ -131,12 +131,13 @@ enum ModeratoKit {
 /// A failure in a live-Moderato test helper.
 enum ModeratoError: Error { case unexpected(String) }
 
-/// An ``MPPHTTPTransport`` that retries the public Moderato RPC on transient throttling /
-/// availability responses (HTTP 429 Too Many Requests, 502, 503), which the shared testnet returns
-/// under load. ``EVMRPC`` turns a non-2xx status into ``EVMRPC/EVMRPCError/httpStatus(_:)``, so
-/// without this the live e2es flake on infrastructure rather than logic. 429 is explicitly a
-/// "retry later" signal, so retrying with bounded exponential backoff (capped ~4s, ~16s total) is
-/// the correct client behavior and weakens no on-chain assertion. Test-only.
+/// An ``MPPHTTPTransport`` that retries the public Moderato RPC on transient failures the shared
+/// testnet exhibits under load: throttling / availability *responses* (HTTP 429 Too Many Requests,
+/// 502, 503 -- which ``EVMRPC`` turns into ``EVMRPC/EVMRPCError/httpStatus(_:)``), and transport
+/// *throws* (connection reset, TLS, timeout). Without this the live e2es flake on infrastructure
+/// rather than logic. Both are "try again" conditions, so retrying with bounded exponential backoff
+/// (capped ~4s, ~16s total) is the correct client behavior and weakens no on-chain assertion.
+/// Test-only.
 struct RetryingTransport: MPPHTTPTransport {
     let base: any MPPHTTPTransport
     let maxAttempts: Int
@@ -152,11 +153,18 @@ struct RetryingTransport: MPPHTTPTransport {
     func send(_ request: HTTPRequest, body: Data) async throws -> (HTTPResponse, Data) {
         var attempt = 0
         while true {
-            let (response, data) = try await base.send(request, body: body)
             attempt += 1
-            guard Self.retryableStatuses.contains(response.status.code),
-                  attempt < maxAttempts else {
-                return (response, data)
+            let isFinalAttempt = attempt >= maxAttempts
+            do {
+                let (response, data) = try await base.send(request, body: body)
+                if isFinalAttempt || !Self.retryableStatuses.contains(response.status.code) {
+                    return (response, data)
+                }
+                // A retryable status with attempts left: fall through to back off and retry.
+            } catch {
+                // A transport-level failure (connection reset, TLS, timeout) under load: retry it
+                // too, unless this was the last attempt.
+                if isFinalAttempt { throw error }
             }
             // Exponential backoff capped at 4s, plus jitter to desynchronize concurrent retries.
             let backoffMs = min(UInt64(250) << UInt64(attempt - 1), 4000)
