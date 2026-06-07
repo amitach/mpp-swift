@@ -242,7 +242,7 @@ struct TempoSettledChargeVerifierTests {
         // The RPC returns a (valid, matching-transfer) receipt, but for a DIFFERENT tx hash than
         // the credential named: it must not settle the named charge.
         let other = try receipt(hash: "0xC0FFEE")
-        let subject = try verifier(settlement: StubSettlement(receipt: other))
+        let subject = verifier(settlement: StubSettlement(receipt: other))
         let cred = try credential(chargeChallenge(), type: "hash", field: ("hash", Self.txHash))
         await #expect(throws: TempoSettledChargeVerifier.VerifyError.receiptHashMismatch) {
             _ = try await subject.verify(cred, now: now)

@@ -30,13 +30,21 @@ struct ModeratoSubscriptionE2ETests {
         let fixture = try await arrange()
         var record = fixture.record
 
-        let before = try await balanceOf(fixture.token, fixture.recipient, rpc: fixture.rpc)
+        let before = try await ModeratoKit.balanceOf(
+            fixture.token,
+            fixture.recipient,
+            rpc: fixture.rpc
+        )
 
         // Provisioning charge (period 0): attaches the authorization to register the access key.
         let hash0 = try await fixture.renewer.charge(
             record, period: 0, idempotencyReference: "renewal:sub:0"
         )
-        let afterProvision = try await balanceOf(fixture.token, fixture.recipient, rpc: fixture.rpc)
+        let afterProvision = try await ModeratoKit.balanceOf(
+            fixture.token,
+            fixture.recipient,
+            rpc: fixture.rpc
+        )
         #expect(afterProvision == before + amount)
 
         // Plain charge (period 1): the key is provisioned, so no authorization is attached.
@@ -44,7 +52,11 @@ struct ModeratoSubscriptionE2ETests {
         let hash1 = try await fixture.renewer.charge(
             record, period: 1, idempotencyReference: "renewal:sub:1"
         )
-        let afterPlain = try await balanceOf(fixture.token, fixture.recipient, rpc: fixture.rpc)
+        let afterPlain = try await ModeratoKit.balanceOf(
+            fixture.token,
+            fixture.recipient,
+            rpc: fixture.rpc
+        )
         #expect(afterPlain == afterProvision + amount)
         #expect(hash0 != hash1)
     }
@@ -129,15 +141,4 @@ struct ModeratoSubscriptionE2ETests {
     }
 
     // swiftlint:enable function_body_length
-
-    /// TIP-20 `balanceOf(owner)` via `eth_call`; the e2e amounts are small, so the low 8 bytes of
-    /// the uint256 result suffice.
-    private func balanceOf(
-        _ token: EthereumAddress, _ owner: EthereumAddress, rpc: EVMRPC
-    ) async throws -> UInt64 {
-        let selector = Data([0x70, 0xA0, 0x82, 0x31]) // balanceOf(address)
-        let data = selector + Data(repeating: 0, count: 12) + owner.bytes
-        let result = try await rpc.call(to: token, data: data)
-        return result.suffix(8).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
-    }
 }

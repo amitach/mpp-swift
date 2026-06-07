@@ -1,4 +1,5 @@
 import Foundation
+import HTTPTypes
 import MPPClient
 import MPPCore
 import MPPEVM
@@ -21,9 +22,11 @@ enum ModeratoKit {
     /// The Moderato JSON-RPC endpoint.
     static let rpcURLString = "https://rpc.moderato.tempo.xyz"
 
-    /// A live-chain RPC client over `URLSessionTransport`.
+    /// A live-chain RPC client over `URLSessionTransport`, wrapped to retry the public Moderato
+    /// RPC's transient throttling (see ``RetryingTransport``).
     static func makeRPC() throws -> EVMRPC {
-        try EVMRPC(transport: URLSessionTransport(), url: #require(URL(string: rpcURLString)))
+        let transport = RetryingTransport(base: URLSessionTransport())
+        return try EVMRPC(transport: transport, url: #require(URL(string: rpcURLString)))
     }
 
     /// A funded throwaway account: a fresh key, its faucet grant mined.
@@ -112,7 +115,60 @@ enum ModeratoKit {
         }
         throw ModeratoError.unexpected("tx \(hash) not mined within 60s")
     }
+
+    /// TIP-20 `balanceOf(owner)` via `eth_call`; the live e2e amounts are small, so the low 8 bytes
+    /// of the uint256 result suffice. Shared by the settled-charge and subscription e2es.
+    static func balanceOf(
+        _ token: EthereumAddress, _ owner: EthereumAddress, rpc: EVMRPC
+    ) async throws -> UInt64 {
+        let selector = Data([0x70, 0xA0, 0x82, 0x31]) // balanceOf(address)
+        let data = selector + Data(repeating: 0, count: 12) + owner.bytes
+        let result = try await rpc.call(to: token, data: data)
+        return result.suffix(8).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+    }
 }
 
 /// A failure in a live-Moderato test helper.
 enum ModeratoError: Error { case unexpected(String) }
+
+/// An ``MPPHTTPTransport`` that retries the public Moderato RPC on transient failures the shared
+/// testnet exhibits under load: throttling / availability *responses* (HTTP 429 Too Many Requests,
+/// 502, 503 -- which ``EVMRPC`` turns into ``EVMRPC/EVMRPCError/httpStatus(_:)``), and transport
+/// *throws* (connection reset, TLS, timeout). Without this the live e2es flake on infrastructure
+/// rather than logic. Both are "try again" conditions, so retrying with bounded exponential backoff
+/// (capped ~4s, ~16s total) is the correct client behavior and weakens no on-chain assertion.
+/// Test-only.
+struct RetryingTransport: MPPHTTPTransport {
+    let base: any MPPHTTPTransport
+    let maxAttempts: Int
+
+    /// - Parameter maxAttempts: total tries including the first (8 -> up to 7 backoff waits).
+    init(base: any MPPHTTPTransport, maxAttempts: Int = 8) {
+        self.base = base
+        self.maxAttempts = maxAttempts
+    }
+
+    private static let retryableStatuses: Set<Int> = [429, 502, 503]
+
+    func send(_ request: HTTPRequest, body: Data) async throws -> (HTTPResponse, Data) {
+        var attempt = 0
+        while true {
+            attempt += 1
+            let isFinalAttempt = attempt >= maxAttempts
+            do {
+                let (response, data) = try await base.send(request, body: body)
+                if isFinalAttempt || !Self.retryableStatuses.contains(response.status.code) {
+                    return (response, data)
+                }
+                // A retryable status with attempts left: fall through to back off and retry.
+            } catch {
+                // A transport-level failure (connection reset, TLS, timeout) under load: retry it
+                // too, unless this was the last attempt.
+                if isFinalAttempt { throw error }
+            }
+            // Exponential backoff capped at 4s, plus jitter to desynchronize concurrent retries.
+            let backoffMs = min(UInt64(250) << UInt64(attempt - 1), 4000)
+            try await Task.sleep(for: .milliseconds(backoffMs + UInt64.random(in: 0 ... 250)))
+        }
+    }
+}
