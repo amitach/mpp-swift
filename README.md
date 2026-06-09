@@ -48,7 +48,7 @@ MPP composes along three axes: the **transport** the 402 flow rides, the **rail*
 Swift Package Manager:
 
 ```swift
-.package(url: "https://github.com/amitach/mpp-swift", from: "0.0.1")
+.package(url: "https://github.com/amitach/mpp-swift", from: "1.0.0")
 ```
 
 Then depend on the products you need (you pull only those):
