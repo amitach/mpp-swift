@@ -35,7 +35,7 @@ jobs:
       # dependency change invalidates it; restore-keys lets a stale key still seed the
       # clones. Speeds `swift build`/`resolve` across runs.
       - name: Cache SwiftPM dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
@@ -74,7 +74,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Cache SwiftPM dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
@@ -111,7 +111,7 @@ jobs:
         with:
           node-version: "20"
       - name: Cache SwiftPM dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
@@ -256,7 +256,7 @@ jobs:
       # (per OS leg). The dominant cost here is compiling the large revm/tempo tree; this
       # turns a clean ~4-5 min compile into an incremental one on a cache hit.
       - name: Cache Cargo + crate target
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: |
             ~/.cargo/registry
@@ -356,7 +356,7 @@ jobs:
         # but a DISTINCT key prefix: this job builds in the swift container while
         # rust-ffi's Linux leg builds on the bare VM, so their compiled target/ differs
         # and must not share a (write-once) key. See the note in the rust-ffi job.
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: |
             ~/.cargo/registry
@@ -400,7 +400,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Cache pinned lint tools
         id: lint-tools
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: ~/.lint-tools
           key: lint-tools-sf${{ env.SWIFTFORMAT_VERSION }}-sl${{ env.SWIFTLINT_VERSION }}
