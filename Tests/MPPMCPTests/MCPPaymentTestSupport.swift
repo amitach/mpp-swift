@@ -89,12 +89,57 @@ func makeMCPPair(
     return MCPPaymentClient(client: client, methods: clientMethods, authorizer: authorizer)
 }
 
+/// A connected pair whose first challenge is a payment code the official SDK decoder keeps,
+/// and whose paid retry is the real ``MCPPaymentServer`` gate (verify + receipt).
+///
+/// `code` defaults to ``MCPPayment/verificationFailedCode``. The absent-credential code the
+/// gate itself emits is `-32042`, which that decoder rewrites to URL elicitation and drops
+/// `data.challenges`, so the client never sees it. The offered challenge is minted with the
+/// gate's secret, binding, and request, and the retry calls the gate, so a credential the
+/// client builds is actually verified.
+func makePreservedPaymentPair(
+    clientMethods: [any PaymentMethodClient],
+    authorizer: any PaymentAuthorizer = AllowAllAuthorizer(),
+    code: Int = MCPPayment.verificationFailedCode
+) async throws -> (client: MCPPaymentClient, challengeID: String) {
+    let gate = try mcpGate { _ in
+        CallTool.Result(content: [.text(text: "premium content", annotations: nil, _meta: nil)])
+    }
+    let challenge = try ChallengeMinter(signer: ChallengeSigner(secret: mcpSecret)).mint(
+        binding: RouteBinding(realm: mcpRealm, method: MethodName("tempo"), intent: .charge),
+        request: mcpChargeRequest(),
+        expires: Expires(date: mcpNow.addingTimeInterval(3600))
+    )
+    let data = try MCPPaymentCodec.errorData(challenges: [challenge], problem: nil)
+    let client = try await makeMCPPair(
+        clientMethods: clientMethods,
+        authorizer: authorizer
+    ) { params in
+        if params._meta?[MCPPayment.credentialMetaKey] != nil {
+            return try await gate(params)
+        }
+        throw MCPError.serverErrorWithData(
+            code: code,
+            message: "Payment Required",
+            data: .object(data)
+        )
+    }
+    return (client, challenge.id)
+}
+
 /// The common case: a server gating a single `premium` tool behind payment.
+///
+/// The gate emits `-32042` for an absent credential. After the official SDK decodes that
+/// code, `data.challenges` is gone, so ``MCPPaymentClient`` cannot complete the pay. Use
+/// ``makePreservedPaymentPair`` to exercise the client against a payment frame the SDK keeps.
 func makeMCPPaymentPair(
     clientMethods: [any PaymentMethodClient],
-    authorizer: any PaymentAuthorizer = AllowAllAuthorizer()
+    authorizer: any PaymentAuthorizer = AllowAllAuthorizer(),
+    codeMode: MCPErrorCodeMode = .peerCompatible
 ) async throws -> MCPPaymentClient {
-    let gate = try MCPPaymentServer(middleware: mcpMiddleware(), now: { mcpNow })
+    let gate = try MCPPaymentServer(
+        middleware: mcpMiddleware(), codeMode: codeMode, now: { mcpNow }
+    )
     return try await makeMCPPair(
         clientMethods: clientMethods,
         authorizer: authorizer,

@@ -5,11 +5,24 @@ import MPPCore
 /// Pays a payment-gated MCP `tools/call` transparently, on the client side of the JSON-RPC / MCP
 /// transport binding.
 ///
-/// It wraps an MCP `Client`: a first call is made without a credential; if the server answers with
-/// `MCPError.paymentRequired` (`-32042`), the offered challenges are read from `error.data`, the
-/// first one a registered `PaymentMethodClient` supports is selected (the same selection rule the
-/// HTTP flow uses), a credential is built and placed in `params._meta`, and the call is retried
-/// once. The minted receipt is read back from `result._meta`.
+/// It wraps an MCP `Client`: a first call is made without a credential. If the server answers with
+/// a payment JSON-RPC error whose structured `error.data` the official SDK preserved
+/// (`MCPError.serverErrorWithData` whose code is ``MCPPayment/paymentRequiredCode`` or
+/// ``MCPPayment/verificationFailedCode``), the offered challenges are read from `data.challenges`,
+/// the first one a registered `PaymentMethodClient` supports is selected (the same selection rule
+/// the HTTP flow uses), a credential is built and placed in `params._meta`, and the call is
+/// retried once. The minted receipt is read back from `result._meta`.
+///
+/// Decode gap (`modelcontextprotocol/swift-sdk` #291): every `-32042` decodes as
+/// `MCPError.urlElicitationRequired`, and only `data.elicitations` is kept. `data.challenges` is
+/// dropped before this client sees the error. The peer-compatible default, and every absent
+/// credential (including ``MCPErrorCodeMode/specCorrect``), uses `-32042`. This client therefore
+/// cannot complete a payment against any current MPP MCP server, including ``MCPPaymentServer``,
+/// because that first challenge is `-32042`. It does not reinterpret `-32042` and does not add an
+/// `MCPError` case. The server still emits the challenge frame on the wire; a peer that reads the
+/// raw JSON-RPC object (mppx) sees it. `-32043` decodes as `serverErrorWithData` and is payable
+/// here when `data.challenges` parses. A payment code whose challenges are missing or malformed
+/// rethrows the original `MCPError`, not the codec error.
 public struct MCPPaymentClient: Sendable {
     private let client: Client
     private let methods: [any PaymentMethodClient]
@@ -39,11 +52,14 @@ public struct MCPPaymentClient: Sendable {
         public let receipt: Receipt?
     }
 
-    /// Calls `name`, paying a `-32042` challenge transparently if one is raised.
+    /// Calls `name`, paying a preserved payment-challenge `error.data` transparently if one is
+    /// raised. A `-32042` that the SDK decoded as URL elicitation is rethrown (see the type
+    /// discussion of the decode gap).
     ///
     /// - Throws: the underlying `MCPError` if no registered method supports the offered challenges,
-    ///   or if the retried call is itself rejected (a single retry; no payment loop); an authorizer
-    ///   denial propagates unwrapped.
+    ///   if `data.challenges` is missing or malformed, or if the retried call is itself rejected
+    ///   (a single retry; no payment loop). An authorizer denial propagates unwrapped. A payment
+    ///   code whose `error.data` is not an object is rethrown as the original `MCPError`.
     public func callTool(
         name: String,
         arguments: [String: Value]? = nil
@@ -51,11 +67,20 @@ public struct MCPPaymentClient: Sendable {
         do {
             let result = try await send(name: name, arguments: arguments, meta: nil)
             return try PaidResult(result: result, receipt: Self.receipt(from: result._meta))
-        } catch let error as MCPError {
-            guard case let .paymentRequired(_, _, data) = error else { throw error }
-            let challenges = try MCPPaymentCodec.challenges(fromErrorData: data)
+        } catch let paymentError as MCPError {
+            guard let data = Self.preservedPaymentData(from: paymentError) else {
+                throw paymentError
+            }
+            let challenges: [Challenge]
+            do {
+                challenges = try MCPPaymentCodec.challenges(fromErrorData: data)
+            } catch {
+                // Missing or malformed challenges stay the server's MCPError. Callers do not
+                // see MCPPaymentCodec.CodecError.
+                throw paymentError
+            }
             guard let selection = selectPaymentMethod(for: challenges, from: methods) else {
-                throw error
+                throw paymentError
             }
             // Consult the authorizer before the method signs anything; a denial throws unwrapped.
             try await authorizeSelection(
@@ -68,6 +93,18 @@ public struct MCPPaymentClient: Sendable {
             let result = try await send(name: name, arguments: arguments, meta: meta)
             return try PaidResult(result: result, receipt: Self.receipt(from: result._meta))
         }
+    }
+
+    /// `error.data` when `error` is a payment code the official SDK kept as structured data.
+    ///
+    /// Returns nil for `.urlElicitationRequired` (the decoded form of `-32042`) and for any
+    /// non-payment code, including a payment code whose `data` is not a JSON object.
+    private static func preservedPaymentData(from error: MCPError) -> [String: Value]? {
+        guard case let .serverErrorWithData(code, _, data) = error,
+              code == MCPPayment.paymentRequiredCode || code == MCPPayment.verificationFailedCode,
+              let object = data.objectValue
+        else { return nil }
+        return object
     }
 
     /// Sends one `tools/call` and awaits the full `CallTool.Result` (the `RequestContext` overload,

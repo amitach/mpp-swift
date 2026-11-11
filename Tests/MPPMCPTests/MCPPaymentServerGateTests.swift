@@ -16,11 +16,14 @@ struct MCPPaymentServerGateTests {
         ) }
     }
 
-    private func paymentRequired(_ error: Error) -> (code: Int, data: [String: Value])? {
-        guard let mcp = error as? MCPError, case let .paymentRequired(code, _, data) = mcp else {
-            return nil
-        }
-        return (code, data)
+    /// The payment frame on a thrown `serverErrorWithData` (the handler is invoked directly,
+    /// so this is the value before `MCPError`'s decoder remaps `-32042`).
+    private func paymentChallenge(_ error: Error) -> (code: Int, data: [String: Value])? {
+        guard let mcp = error as? MCPError,
+              case let .serverErrorWithData(code, _, data) = mcp,
+              let object = data.objectValue
+        else { return nil }
+        return (code, object)
     }
 
     @Test("no credential in _meta answers -32042 with the challenge in error.data")
@@ -28,10 +31,10 @@ struct MCPPaymentServerGateTests {
         let handler = try mcpGate(okHandler())
         do {
             _ = try await handler(CallTool.Parameters(name: "premium"))
-            Issue.record("expected paymentRequired")
+            Issue.record("expected a payment challenge")
         } catch {
-            guard let (code, data) = paymentRequired(error) else {
-                Issue.record("expected .paymentRequired, got \(error)"); return
+            guard let (code, data) = paymentChallenge(error) else {
+                Issue.record("expected .serverErrorWithData, got \(error)"); return
             }
             #expect(code == MCPPayment.paymentRequiredCode)
             let challenges = try MCPPaymentCodec.challenges(fromErrorData: data)
@@ -47,9 +50,9 @@ struct MCPPaymentServerGateTests {
         let meta = Metadata(additionalFields: ["unrelated": .string("x")])
         do {
             _ = try await handler(CallTool.Parameters(name: "premium", meta: meta))
-            Issue.record("expected paymentRequired")
+            Issue.record("expected a payment challenge")
         } catch {
-            #expect(paymentRequired(error)?.code == MCPPayment.paymentRequiredCode)
+            #expect(paymentChallenge(error)?.code == MCPPayment.paymentRequiredCode)
         }
     }
 
@@ -90,8 +93,8 @@ struct MCPPaymentServerGateTests {
             _ = try await handler(CallTool.Parameters(name: "premium", meta: meta))
             Issue.record("expected a replay rejection")
         } catch {
-            guard let (code, data) = paymentRequired(error) else {
-                Issue.record("expected .paymentRequired, got \(error)"); return
+            guard let (code, data) = paymentChallenge(error) else {
+                Issue.record("expected .serverErrorWithData, got \(error)"); return
             }
             // DIVERGING_FROM_SPEC (audit D1): -32042 for a failed credential (not the spec's
             // -32043), to match the mppx peer's client which only recognizes -32042.
@@ -109,9 +112,9 @@ struct MCPPaymentServerGateTests {
         let absent = try mcpGate(okHandler(), codeMode: .specCorrect)
         do {
             _ = try await absent(CallTool.Parameters(name: "premium"))
-            Issue.record("expected paymentRequired")
+            Issue.record("expected a payment challenge")
         } catch {
-            #expect(paymentRequired(error)?.code == MCPPayment.paymentRequiredCode)
+            #expect(paymentChallenge(error)?.code == MCPPayment.paymentRequiredCode)
         }
         let handler = try mcpGate(okHandler(), codeMode: .specCorrect)
         let meta = try await mcpCredentialMeta()
@@ -120,7 +123,7 @@ struct MCPPaymentServerGateTests {
             _ = try await handler(CallTool.Parameters(name: "premium", meta: meta))
             Issue.record("expected a replay rejection")
         } catch {
-            #expect(paymentRequired(error)?.code == MCPPayment.verificationFailedCode)
+            #expect(paymentChallenge(error)?.code == MCPPayment.verificationFailedCode)
         }
     }
 

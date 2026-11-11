@@ -147,16 +147,19 @@ jobs:
       # against OUR Swift server (MPPConformanceServer + TempoSubscriptionVerifier). Offline.
       - name: Cross-SDK subscription conformance (mppx client -> our server, offline)
         run: Scripts/conformance/run-subscription-reverse.sh
-      # MCP: the reference mppx mcp-sdk CLIENT pays OUR Swift MCP server (MPPMCPConformanceServer
-      # + MPPMCP gate) over a real stdio transport. Proves the JSON-RPC / MCP payment binding
-      # interoperates with the live peer (the -32042 frame, the credential in params._meta, the
-      # receipt in result._meta). Offline + deterministic (zero-amount proof).
+      # MCP forward: the reference mppx mcp-sdk CLIENT pays OUR Swift MCP server over stdio.
+      # mppx reads the raw -32042 frame (data.challenges), pays via params._meta, and reads the
+      # receipt. This is not MCPPaymentClient (that client cannot pay a -32042). The SDK pin
+      # must not trap StdioTransport on a Darwin socketpair (st_dev == -1, swift-sdk#327).
+      # Offline + deterministic (zero-amount proof).
       - name: Cross-SDK MCP conformance (mppx mcp-sdk client -> our Swift MCP server, stdio)
         run: Scripts/conformance/run-mcp.sh
-      # Reverse MCP: OUR Swift MCP client pays the mppx mcp-sdk SERVER over stdio (we read mppx's
-      # -32042, build the credential, read its receipt). The symmetric direction; both now live.
-      - name: Cross-SDK MCP conformance reverse (our Swift client -> mppx mcp-sdk server, stdio)
-        run: Scripts/conformance/run-mcp-reverse.sh
+      # Reverse MCP is intentionally not run. mppx emits -32042 with data.challenges, and the
+      # pinned MCP SDK (modelcontextprotocol/swift-sdk#291) decodes every -32042 as
+      # URL_ELICITATION_REQUIRED, keeping only data.elicitations. MCPPaymentClient therefore
+      # cannot pay that challenge. The MPP wire codes are unchanged. Re-enable
+      # Scripts/conformance/run-mcp-reverse.sh when the SDK preserves data.challenges on -32042.
+      # Forward (the step above) still runs: our server emits the frame, and mppx reads raw JSON.
       # CLI: drive the SHIPPED mpp binary against the reference mppx server over real HTTP,
       # proving the installed executable (not just the in-process library client) settles a
       # zero-amount proof end to end and honors the curl-like exit-code contract (no key -> 69).
