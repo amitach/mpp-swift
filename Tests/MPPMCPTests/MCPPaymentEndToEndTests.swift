@@ -4,17 +4,19 @@ import Testing
 
 @Suite("MCP payment end-to-end")
 struct MCPPaymentEndToEndTests {
-    @Test("client pays a challenge whose error.data the SDK preserved, and reads the receipt")
+    @Test("client pays a preserved challenge and the real gate verifies it")
     func paysPreservedChallenge() async throws {
-        // -32043 survives MCPError's decoder as serverErrorWithData. -32042 does not; that
-        // gap is pinned by `peerCompatibleChallengeIsNotPayable`.
+        // -32043 survives MCPError's decoder as serverErrorWithData. The paid retry goes
+        // through MCPPaymentServer, so the receipt is the one the gate mints (its reference
+        // is the verified challenge id). -32042 does not survive decode; that gap is pinned
+        // by `peerCompatibleChallengeIsNotPayable`.
         let payClient = try await makePreservedPaymentPair(clientMethods: [mcpProofMethod()])
         let paid = try await payClient.callTool(name: "premium")
 
         #expect(paid.result.isError != true)
-        #expect(paid.receipt != nil)
-        #expect(paid.receipt?.method.rawValue == "tempo")
-        #expect(paid.receipt?.reference == "ref-preserved")
+        let receipt = try #require(paid.receipt)
+        #expect(receipt.method.rawValue == "tempo")
+        #expect(receipt.extras[MCPPaymentCodec.challengeIDKey] == .string(receipt.reference))
         if case let .text(text, _, _) = paid.result.content.first {
             #expect(text.contains("premium content"))
         } else {

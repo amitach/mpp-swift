@@ -89,45 +89,34 @@ func makeMCPPair(
     return MCPPaymentClient(client: client, methods: clientMethods, authorizer: authorizer)
 }
 
-/// A connected pair whose handler throws `serverErrorWithData` with a real Tempo challenge
-/// on the first call and, once a credential is attached, returns a receipt. `code` defaults
-/// to ``MCPPayment/verificationFailedCode`` because that is the payment code the official SDK
-/// decoder preserves (`-32042` is rewritten to URL elicitation and the client cannot pay it).
+/// A connected pair whose first challenge is a payment code the official SDK decoder keeps,
+/// and whose paid retry is the real ``MCPPaymentServer`` gate (verify + receipt).
+///
+/// `code` defaults to ``MCPPayment/verificationFailedCode``. The absent-credential code the
+/// gate itself emits is `-32042`, which that decoder rewrites to URL elicitation and drops
+/// `data.challenges`, so the client never sees it. The offered challenge is minted with the
+/// gate's secret, binding, and request, and the retry calls the gate, so a credential the
+/// client builds is actually verified.
 func makePreservedPaymentPair(
     clientMethods: [any PaymentMethodClient],
     authorizer: any PaymentAuthorizer = AllowAllAuthorizer(),
     code: Int = MCPPayment.verificationFailedCode
 ) async throws -> MCPPaymentClient {
+    let gate = try mcpGate { _ in
+        CallTool.Result(content: [.text(text: "premium content", annotations: nil, _meta: nil)])
+    }
     let challenge = try ChallengeMinter(signer: ChallengeSigner(secret: mcpSecret)).mint(
         binding: RouteBinding(realm: mcpRealm, method: MethodName("tempo"), intent: .charge),
         request: mcpChargeRequest(),
         expires: Expires(date: mcpNow.addingTimeInterval(3600))
     )
     let data = try MCPPaymentCodec.errorData(challenges: [challenge], problem: nil)
-    let receipt = try Receipt(
-        method: MethodName("tempo"),
-        timestamp: RFC3339DateTime("2026-05-31T00:00:00Z"),
-        reference: "ref-preserved"
-    )
-    let receiptValue = try MCPPaymentCodec.value(for: receipt, challengeID: challenge.id)
     return try await makeMCPPair(
         clientMethods: clientMethods,
-        authorizer: authorizer,
-        handler: preservedPaymentHandler(code: code, data: data, receipt: receiptValue)
-    )
-}
-
-private func preservedPaymentHandler(
-    code: Int,
-    data: [String: Value],
-    receipt: Value
-) -> @Sendable (CallTool.Parameters) async throws -> CallTool.Result {
-    { params in
+        authorizer: authorizer
+    ) { params in
         if params._meta?[MCPPayment.credentialMetaKey] != nil {
-            return CallTool.Result(
-                content: [.text(text: "premium content", annotations: nil, _meta: nil)],
-                _meta: Metadata(additionalFields: [MCPPayment.receiptMetaKey: receipt])
-            )
+            return try await gate(params)
         }
         throw MCPError.serverErrorWithData(
             code: code,
