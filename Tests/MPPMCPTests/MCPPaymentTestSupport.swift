@@ -101,7 +101,7 @@ func makePreservedPaymentPair(
     clientMethods: [any PaymentMethodClient],
     authorizer: any PaymentAuthorizer = AllowAllAuthorizer(),
     code: Int = MCPPayment.verificationFailedCode
-) async throws -> MCPPaymentClient {
+) async throws -> (client: MCPPaymentClient, challengeID: String) {
     let gate = try mcpGate { _ in
         CallTool.Result(content: [.text(text: "premium content", annotations: nil, _meta: nil)])
     }
@@ -111,7 +111,7 @@ func makePreservedPaymentPair(
         expires: Expires(date: mcpNow.addingTimeInterval(3600))
     )
     let data = try MCPPaymentCodec.errorData(challenges: [challenge], problem: nil)
-    return try await makeMCPPair(
+    let client = try await makeMCPPair(
         clientMethods: clientMethods,
         authorizer: authorizer
     ) { params in
@@ -124,6 +124,7 @@ func makePreservedPaymentPair(
             data: .object(data)
         )
     }
+    return (client, challenge.id)
 }
 
 /// The common case: a server gating a single `premium` tool behind payment.
@@ -133,9 +134,12 @@ func makePreservedPaymentPair(
 /// ``makePreservedPaymentPair`` to exercise the client against a payment frame the SDK keeps.
 func makeMCPPaymentPair(
     clientMethods: [any PaymentMethodClient],
-    authorizer: any PaymentAuthorizer = AllowAllAuthorizer()
+    authorizer: any PaymentAuthorizer = AllowAllAuthorizer(),
+    codeMode: MCPErrorCodeMode = .peerCompatible
 ) async throws -> MCPPaymentClient {
-    let gate = try MCPPaymentServer(middleware: mcpMiddleware(), now: { mcpNow })
+    let gate = try MCPPaymentServer(
+        middleware: mcpMiddleware(), codeMode: codeMode, now: { mcpNow }
+    )
     return try await makeMCPPair(
         clientMethods: clientMethods,
         authorizer: authorizer,

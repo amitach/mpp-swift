@@ -42,10 +42,11 @@ fi
 #
 # Accepted:
 #  - github.com/EhsanAzish80/swift-sdk: temporary revision pin of
-#    modelcontextprotocol/swift-sdk#291 (structured JSON-RPC error.data:
-#    MCPError.serverErrorWithData). OSV cannot range-match a revision pin. Remove this
-#    entry and pin a tagged release of the official modelcontextprotocol/swift-sdk once
-#    #291 merges. This is not the declined #229 fork (MCPError.paymentRequired).
+#    modelcontextprotocol/swift-sdk#291 at 2f5eee98 (the feature commit, before that
+#    branch merged upstream #297). #297's StdioTransport traps on a Darwin socketpair
+#    (st_dev == -1; swift-sdk#327). OSV cannot range-match a revision pin. Remove this
+#    entry and pin a tagged official release once #291 merges and #327 is fixed. This
+#    is not the declined #229 fork (MCPError.paymentRequired).
 accepted_revision_pins=(
   "https://github.com/EhsanAzish80/swift-sdk.git"
 )

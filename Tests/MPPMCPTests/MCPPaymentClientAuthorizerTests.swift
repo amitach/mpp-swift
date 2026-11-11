@@ -25,7 +25,7 @@ struct MCPPaymentClientAuthorizerTests {
         let payClient = try await makePreservedPaymentPair(
             clientMethods: [mcpProofMethod()],
             authorizer: MCPDenyingAuthorizer()
-        )
+        ).client
         await #expect(throws: MCPAuthorizerTestError.denied) {
             _ = try await payClient.callTool(name: "premium")
         }
@@ -36,7 +36,7 @@ struct MCPPaymentClientAuthorizerTests {
         let payClient = try await makePreservedPaymentPair(
             clientMethods: [mcpProofMethod()],
             authorizer: AllowAllAuthorizer()
-        )
+        ).client
         let paid = try await payClient.callTool(name: "premium")
         #expect(paid.receipt != nil)
     }

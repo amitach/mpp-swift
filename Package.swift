@@ -94,13 +94,20 @@ let package = Package(
         // SHA3(.keccak256), wrapped behind MPPEVM's own Keccak256 type.
         .package(url: "https://github.com/krzyzanowskim/CryptoSwift.git", exact: "1.10.0"),
         // The Model Context Protocol Swift SDK (module `MCP`), used by MPPMCP to bind the 402
-        // flow to JSON-RPC / MCP. TEMPORARY pin: an IMMUTABLE commit of the still-open
+        // flow to JSON-RPC / MCP. TEMPORARY pin of the still-open
         // modelcontextprotocol/swift-sdk#291 (EhsanAzish80/swift-sdk branch
-        // feat/json-rpc-error-data, verified head 09a7df59a430009de1aa82fd454d56a7999e56f5).
-        // #291 adds `MCPError.serverErrorWithData(code:message:data:)` so a server error can
-        // carry structured JSON-RPC `error.data`. Once #291 merges, move this pin to a tagged
-        // release of the official modelcontextprotocol/swift-sdk. Package identity stays
-        // `swift-sdk` either way; the product name stays `MCP`.
+        // feat/json-rpc-error-data). This revision is the #291 feature commit (2026-10-22),
+        // not the branch tip. The tip 09a7df59 (2026-11-02) merges upstream main and therefore
+        // includes #297, whose StdioTransport.setNonBlocking does UInt64(status.st_dev). On
+        // Darwin a Node spawn pipe is a socketpair with st_dev == -1, and that conversion
+        // traps ("Negative value is not representable"; open as swift-sdk#327, no merged fix).
+        // 2f5eee98 has MCPError.serverErrorWithData and the same -32042 decoder, and its
+        // setNonBlocking only sets O_NONBLOCK, so a Node-spawned stdio server does not hit
+        // that trap. It does not include the other upstream commits that Nov 2 merge pulled
+        // in (#283, #258, #226, #227, #297). Once #291 merges, move this pin to a tagged
+        // release of official modelcontextprotocol/swift-sdk, and do not take a revision that
+        // contains #297 unless #327 is fixed. Package identity stays `swift-sdk`; the product
+        // name stays `MCP`.
         //
         // This replaces the amitach/swift-sdk fork (fe4faf15). That fork, upstreamed as
         // modelcontextprotocol/swift-sdk#229, added `MCPError.paymentRequired` and
@@ -110,13 +117,15 @@ let package = Package(
         // `data.elicitations`, so `data.challenges` is dropped on the client for the
         // peer-compatible / absent-credential path. MPPMCP still emits -32042/-32043 with
         // `data.challenges` and does not add a payment case to `MCPError`. See
-        // `MCPPaymentClient`.
+        // `MCPPaymentClient`. MCPPaymentClient cannot complete a payment against any current
+        // MPP MCP server, including this package's own gate, because that first challenge is
+        // -32042.
         // The SDK's own manifest supports Swift 6.0, but its transitive graph does not: swift-log
         // 1.13.x needs tools 6.2, swift-nio 2.100 + eventsource need 6.1. Pulling `MCP` therefore
         // raises this package's floor to Swift 6.2 (see the tools-version above).
         .package(
             url: "https://github.com/EhsanAzish80/swift-sdk.git",
-            revision: "09a7df59a430009de1aa82fd454d56a7999e56f5"
+            revision: "2f5eee9819fcbfaa693a29b271454be1cca3daf4"
         ),
         // Hummingbird 2: the live HTTP-server binding for MPPProxy. Built natively on
         // swift-http-types (so the binding is a thin adapter; chosen over Vapor for that) and

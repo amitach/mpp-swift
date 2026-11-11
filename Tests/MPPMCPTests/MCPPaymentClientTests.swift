@@ -68,4 +68,50 @@ struct MCPPaymentClientTests {
             #expect(code == -32022)
         }
     }
+
+    @Test("a -32043 frame with no challenges rethrows the original MCPError")
+    func missingChallengesRethrowsOriginalError() async throws {
+        let payClient = try await paymentErrorClient(data: .object(["httpStatus": .int(402)]))
+        try await expectOriginalPaymentError(payClient)
+    }
+
+    @Test("a -32043 frame with a malformed challenge rethrows the original MCPError")
+    func malformedChallengeRethrowsOriginalError() async throws {
+        let payClient = try await paymentErrorClient(
+            data: .object(["challenges": .array([.object(["bogus": .string("x")])])])
+        )
+        try await expectOriginalPaymentError(payClient)
+    }
+
+    @Test("a -32043 frame whose data is not an object rethrows the original MCPError")
+    func nonObjectDataRethrowsOriginalError() async throws {
+        let payClient = try await paymentErrorClient(data: .string("nope"))
+        try await expectOriginalPaymentError(payClient)
+    }
+}
+
+private func paymentErrorClient(data: Value) async throws -> MCPPaymentClient {
+    try await makeMCPPair(clientMethods: [mcpProofMethod()]) { _ in
+        throw MCPError.serverErrorWithData(
+            code: MCPPayment.verificationFailedCode,
+            message: "Payment Required",
+            data: data
+        )
+    }
+}
+
+private func expectOriginalPaymentError(_ payClient: MCPPaymentClient) async throws {
+    do {
+        _ = try await payClient.callTool(name: "premium")
+        Issue.record("expected the original payment error")
+    } catch let error as MCPError {
+        guard case let .serverErrorWithData(code, message, _) = error else {
+            Issue.record("expected .serverErrorWithData, got \(error)")
+            return
+        }
+        #expect(code == MCPPayment.verificationFailedCode)
+        #expect(message == "Payment Required")
+    } catch {
+        Issue.record("leaked a non-MCP error: \(error)")
+    }
 }
