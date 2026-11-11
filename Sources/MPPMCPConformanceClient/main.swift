@@ -13,10 +13,14 @@ import MPPTempo
 
 // A dev-only MCP client that spawns the reference mppx `mcp-sdk` server
 // (Scripts/conformance/mcp-server.mjs) over stdio and pays its payment-gated `premium` tool with a
-// zero-amount Tempo proof, via MPPMCP's MCPPaymentClient. The reverse of MPPMCPConformanceServer:
-// it proves our client interoperates with the real peer's MCP server over a real transport. Not a
-// shipped product. PASS/FAIL is reported on this process's stdout; the MCP protocol flows over the
-// pipes to the subprocess, and the server's logs go to our stderr.
+// zero-amount Tempo proof, via MPPMCP's MCPPaymentClient. The reverse of MPPMCPConformanceServer.
+// Not a shipped product. PASS/FAIL is reported on this process's stdout; the MCP protocol flows
+// over the pipes to the subprocess, and the server's logs go to our stderr.
+//
+// Known gap: mppx emits -32042 with data.challenges. The pinned MCP SDK (swift-sdk #291) decodes
+// every -32042 as MCPError.urlElicitationRequired and keeps only data.elicitations, so this
+// client cannot read the challenge. The wire codes are unchanged on purpose. Re-run once the SDK
+// preserves data.challenges on -32042. Forward conformance (mppx paying our server) is unaffected.
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))
@@ -55,7 +59,21 @@ guard let method = TempoProofMethod(signer: signer) else {
 }
 
 let payClient = MCPPaymentClient(client: client, methods: [method])
-let paid = try await payClient.callTool(name: "premium")
+let paid: MCPPaymentClient.PaidResult
+do {
+    paid = try await payClient.callTool(name: "premium")
+} catch let error as MCPError {
+    if case .urlElicitationRequired = error, error.code == MCPPayment.paymentRequiredCode {
+        server.terminate()
+        fail(
+            "FAIL: the MCP SDK decoded mppx's -32042 as urlElicitationRequired and dropped "
+                + "data.challenges (swift-sdk #291). MCPPaymentClient cannot pay until that "
+                + "data is preserved."
+        )
+    }
+    server.terminate()
+    fail("FAIL: \(error)")
+}
 
 guard let receipt = paid.receipt else {
     server.terminate()

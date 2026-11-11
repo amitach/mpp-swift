@@ -224,6 +224,49 @@ struct MCPPaymentCodecTests {
         #expect(try MCPPaymentCodec.problem(fromErrorData: data) == nil)
     }
 
+    @Test("encoding a -32042 payment error keeps data.challenges; decoding drops them")
+    func paymentRequiredEncodeKeepsChallengesDecodeDropsThem() throws {
+        // Pins swift-sdk #291: serverErrorWithData encodes the full frame, but code -32042
+        // decodes as urlElicitationRequired and retains only data.elicitations.
+        let frame = try MCPPaymentCodec.errorData(challenges: [sampleChallenge()], problem: nil)
+        let error = MCPError.serverErrorWithData(
+            code: MCPPayment.paymentRequiredCode,
+            message: "Payment Required",
+            data: .object(frame)
+        )
+        let encoded = try JSONEncoder().encode(error)
+        let wire = try JSONDecoder().decode(Value.self, from: encoded)
+        #expect(wire.objectValue?["code"] == .int(MCPPayment.paymentRequiredCode))
+        let data = try #require(wire.objectValue?["data"]?.objectValue)
+        #expect(try MCPPaymentCodec.challenges(fromErrorData: data).count == 1)
+
+        let decoded = try JSONDecoder().decode(MCPError.self, from: encoded)
+        guard case let .urlElicitationRequired(_, elicitations) = decoded else {
+            Issue.record("expected .urlElicitationRequired, got \(decoded)"); return
+        }
+        #expect(decoded.code == MCPPayment.paymentRequiredCode)
+        #expect(elicitations.isEmpty)
+    }
+
+    @Test("a -32043 payment error round-trips as serverErrorWithData with data.challenges")
+    func verificationFailedRoundTripsWithChallenges() throws {
+        let frame = try MCPPaymentCodec.errorData(challenges: [sampleChallenge()], problem: nil)
+        let error = MCPError.serverErrorWithData(
+            code: MCPPayment.verificationFailedCode,
+            message: "Payment Required",
+            data: .object(frame)
+        )
+        let encoded = try JSONEncoder().encode(error)
+        let decoded = try JSONDecoder().decode(MCPError.self, from: encoded)
+        guard case let .serverErrorWithData(code, message, data) = decoded else {
+            Issue.record("expected .serverErrorWithData, got \(decoded)"); return
+        }
+        #expect(code == MCPPayment.verificationFailedCode)
+        #expect(message == "Payment Required")
+        let object = try #require(data.objectValue)
+        #expect(try MCPPaymentCodec.challenges(fromErrorData: object).first?.id == "cid-1")
+    }
+
     @Test("errorData carries every offered challenge (multi-method)")
     func errorDataMultipleChallenges() throws {
         let tempo = try sampleChallenge()

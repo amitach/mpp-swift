@@ -15,8 +15,20 @@ case; the decoder disambiguates `-32042`/`-32043` by the presence of `data.chall
 behavior is unchanged. The identical patch is upstream as `modelcontextprotocol/swift-sdk#229`.
 - Validated on macOS (Swift 6.3, 557 tests) and Linux (Swift 6.1.3, 476 tests; Apple-only transport
   tests are skipped on Linux).
-- We pin `Package.swift` to the immutable fork commit `fe4faf15a7e51888f945ae74481453b172276164`;
-  TODO: swap to a tagged upstream release once #229 merges.
+- We pin `Package.swift` to the immutable fork commit `fe4faf15a7e51888f945ae74481453b172276164`.
+  Superseded 2026-11-11: #229 was closed unmerged. See the note below. The old TODO (swap to a
+  tagged upstream release once #229 merges) does not apply.
+
+### Superseded (2026-11-11): structured error.data, not MCPError.paymentRequired
+
+`modelcontextprotocol/swift-sdk#229` was declined. MPPMCP now throws
+`MCPError.serverErrorWithData` and reads `data.challenges` from that case. The package
+temporarily pins #291 (`EhsanAzish80/swift-sdk` `09a7df59a430009de1aa82fd454d56a7999e56f5`)
+until that PR lands on official `modelcontextprotocol/swift-sdk`. #291 still decodes every
+`-32042` as `.urlElicitationRequired` and drops `data.challenges`, so the reverse client
+and `run-mcp-reverse.sh` cannot pay a peer-compatible challenge. The wire codes are unchanged.
+Move the pin to a tagged upstream release once #291 merges; that merge does not by itself
+close the `-32042` decode gap.
 - **Swift floor: 6.0 -> 6.2 (user decision).** The SDK's own manifest supports 6.0
   (`Package@swift-6.0.swift`), but its TRANSITIVE graph does not: swift-log 1.13 needs tools 6.2,
   swift-nio 2.100 + eventsource need 6.1. The Linux G1 gate caught this (swift:6.0 resolve failed on

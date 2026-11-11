@@ -45,4 +45,27 @@ struct MCPPaymentClientTests {
             #expect(error.code == -32602)
         }
     }
+
+    @Test("a non-payment server error that carries data is rethrown, never paid")
+    func nonPaymentServerErrorWithData() async throws {
+        let payClient = try await makeMCPPair(clientMethods: [mcpProofMethod()]) { _ in
+            throw MCPError.serverErrorWithData(
+                code: -32022,
+                message: "Unsupported protocol version",
+                data: .object([
+                    "supported": .array([.string("2025-11-25")]),
+                    "requested": .string("x"),
+                ])
+            )
+        }
+        do {
+            _ = try await payClient.callTool(name: "premium")
+            Issue.record("expected the server error to propagate")
+        } catch let error as MCPError {
+            guard case let .serverErrorWithData(code, _, _) = error else {
+                Issue.record("expected .serverErrorWithData, got \(error)"); return
+            }
+            #expect(code == -32022)
+        }
+    }
 }

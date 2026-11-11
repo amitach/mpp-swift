@@ -3,8 +3,9 @@ import MCP
 import MPPCore
 
 /// Translates the MPP `Challenge` / `Credential` / `Receipt` types to and from the native-JSON
-/// shapes the MCP transport carries, and builds / parses the `-32042` error `data` frame
-/// (`{ httpStatus, challenges, problem? }`), per `draft-payment-transport-mcp-00`.
+/// shapes the MCP transport carries, and builds / parses the payment error `data` frame
+/// (`{ httpStatus, challenges, problem? }`), per `draft-payment-transport-mcp-00`. The same
+/// frame is attached to both `-32042` and `-32043` via `MCPError.serverErrorWithData`.
 ///
 /// The one shape that differs from the types' own `Codable`: over MCP a challenge's `request`
 /// (and a credential's echoed challenge) travels as a NATIVE JSON object, whereas `Challenge`
@@ -142,7 +143,7 @@ enum MCPPaymentCodec {
         }
     }
 
-    // MARK: - The -32042 error.data frame
+    // MARK: - The payment error.data frame (`-32042` and `-32043`)
 
     static func errorData(
         challenges: [Challenge],

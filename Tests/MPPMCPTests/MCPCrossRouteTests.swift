@@ -32,9 +32,13 @@ struct MCPCrossRouteTests {
         ])
     }
 
-    private func isPaymentRequired(_ error: Error) -> Bool {
-        if let mcp = error as? MCPError, case .paymentRequired = mcp { return true }
-        return false
+    private func isPaymentChallenge(_ error: Error) -> Bool {
+        guard let mcp = error as? MCPError,
+              case let .serverErrorWithData(code, _, data) = mcp,
+              code == MCPPayment.paymentRequiredCode || code == MCPPayment.verificationFailedCode,
+              data.objectValue?["challenges"] != nil
+        else { return false }
+        return true
     }
 
     @Test("a credential minted for a different realm is rejected, not honored")
@@ -47,9 +51,9 @@ struct MCPCrossRouteTests {
         let wrongMeta = try await meta(forRealm: "https://evil.example.com")
         do {
             _ = try await gate(CallTool.Parameters(name: "premium", meta: wrongMeta))
-            Issue.record("expected paymentRequired for a cross-route credential")
+            Issue.record("expected a payment challenge for a cross-route credential")
         } catch {
-            #expect(isPaymentRequired(error))
+            #expect(isPaymentChallenge(error))
         }
     }
 }

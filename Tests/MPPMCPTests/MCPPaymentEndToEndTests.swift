@@ -1,18 +1,20 @@
 import MCP
-import MPPCore
 import Testing
 @testable import MPPMCP
 
 @Suite("MCP payment end-to-end")
 struct MCPPaymentEndToEndTests {
-    @Test("client transparently pays a gated tool and reads the receipt")
-    func paysAndReadsReceipt() async throws {
-        let payClient = try await makeMCPPaymentPair(clientMethods: [mcpProofMethod()])
+    @Test("client pays a challenge whose error.data the SDK preserved, and reads the receipt")
+    func paysPreservedChallenge() async throws {
+        // -32043 survives MCPError's decoder as serverErrorWithData. -32042 does not; that
+        // gap is pinned by `peerCompatibleChallengeIsNotPayable`.
+        let payClient = try await makePreservedPaymentPair(clientMethods: [mcpProofMethod()])
         let paid = try await payClient.callTool(name: "premium")
 
         #expect(paid.result.isError != true)
         #expect(paid.receipt != nil)
         #expect(paid.receipt?.method.rawValue == "tempo")
+        #expect(paid.receipt?.reference == "ref-preserved")
         if case let .text(text, _, _) = paid.result.content.first {
             #expect(text.contains("premium content"))
         } else {
@@ -20,39 +22,38 @@ struct MCPPaymentEndToEndTests {
         }
     }
 
-    @Test("a client with no supporting method surfaces the original payment-required error")
+    @Test("a client with no supporting method surfaces the original preserved payment error")
     func noSupportingMethod() async throws {
-        let payClient = try await makeMCPPaymentPair(clientMethods: [])
-        await #expect(throws: MCPError.self) {
-            _ = try await payClient.callTool(name: "premium")
-        }
+        let payClient = try await makePreservedPaymentPair(clientMethods: [])
         do {
             _ = try await payClient.callTool(name: "premium")
-            Issue.record("expected a paymentRequired error")
+            Issue.record("expected the payment error to propagate")
         } catch let error as MCPError {
-            guard case let .paymentRequired(code, _, _) = error else {
-                Issue.record("expected .paymentRequired, got \(error)"); return
+            guard case let .serverErrorWithData(code, _, data) = error else {
+                Issue.record("expected .serverErrorWithData, got \(error)"); return
             }
-            #expect(code == MCPPayment.paymentRequiredCode)
+            #expect(code == MCPPayment.verificationFailedCode)
+            let object = try #require(data.objectValue)
+            let challenges = try MCPPaymentCodec.challenges(fromErrorData: object)
+            #expect(challenges.count == 1)
         }
     }
 
-    @Test("a replayed challenge is rejected: the second identical call fails verification")
-    func replayRejected() async throws {
+    @Test("a decoded peer-compatible -32042 is not payable: the SDK drops data.challenges")
+    func peerCompatibleChallengeIsNotPayable() async throws {
+        // The real gate emits -32042 with data.challenges. InMemoryTransport JSON-encodes that
+        // MCPError and the client decodes it. #291 maps every -32042 to urlElicitationRequired
+        // and keeps only data.elicitations, so the pay loop never starts. If a future SDK
+        // preserves the frame as serverErrorWithData, this test fails and the client will pay.
         let payClient = try await makeMCPPaymentPair(clientMethods: [mcpProofMethod()])
-        // First call consumes the (deterministic) challenge id.
-        _ = try await payClient.callTool(name: "premium")
-        // The second call mints the same id (fixed clock + fixed request), so the paid retry is
-        // a replay -> the server re-challenges. DIVERGING_FROM_SPEC (audit D1): the server emits
-        // -32042 (not the spec's -32043) for a failed credential, to match the mppx peer's client.
         do {
             _ = try await payClient.callTool(name: "premium")
-            Issue.record("expected a replay rejection")
+            Issue.record("expected the decoded -32042 to surface, not a paid result")
         } catch let error as MCPError {
-            guard case let .paymentRequired(code, _, _) = error else {
-                Issue.record("expected .paymentRequired, got \(error)"); return
+            guard case .urlElicitationRequired = error else {
+                Issue.record("expected .urlElicitationRequired, got \(error)"); return
             }
-            #expect(code == MCPPayment.paymentRequiredCode)
+            #expect(error.code == MCPPayment.paymentRequiredCode)
         }
     }
 }

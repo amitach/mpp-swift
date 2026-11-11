@@ -4,9 +4,11 @@ import MPPClient
 import Testing
 @testable import MPPMCP
 
-// The MCP client pays a -32042 challenge through the SAME buildCredential chokepoint as the
+// The MCP client pays a preserved payment challenge (here -32043, which the official SDK
+// decoder keeps as serverErrorWithData) through the SAME buildCredential chokepoint as the
 // HTTP flow, so the PaymentAuthorizer seam covers it identically: a denial short-circuits the
-// payment (no credential built, no paid retry) and propagates unwrapped.
+// payment (no credential built, no paid retry) and propagates unwrapped. A decoded -32042
+// never reaches the authorizer; see MCPPaymentEndToEndTests.peerCompatibleChallengeIsNotPayable.
 
 enum MCPAuthorizerTestError: Error, Equatable { case denied }
 
@@ -20,7 +22,7 @@ private struct MCPDenyingAuthorizer: PaymentAuthorizer {
 struct MCPPaymentClientAuthorizerTests {
     @Test("a denied payment throws unwrapped and is not retried")
     func denyShortCircuits() async throws {
-        let payClient = try await makeMCPPaymentPair(
+        let payClient = try await makePreservedPaymentPair(
             clientMethods: [mcpProofMethod()],
             authorizer: MCPDenyingAuthorizer()
         )
@@ -31,7 +33,7 @@ struct MCPPaymentClientAuthorizerTests {
 
     @Test("an allow-all authorizer pays exactly as the ungated client did")
     func allowAllPays() async throws {
-        let payClient = try await makeMCPPaymentPair(
+        let payClient = try await makePreservedPaymentPair(
             clientMethods: [mcpProofMethod()],
             authorizer: AllowAllAuthorizer()
         )

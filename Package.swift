@@ -93,21 +93,30 @@ let package = Package(
         // on our Swift 6.2 CI). Pinned EXACT; source-vetted 2026-05-29; we use only its
         // SHA3(.keccak256), wrapped behind MPPEVM's own Keccak256 type.
         .package(url: "https://github.com/krzyzanowskim/CryptoSwift.git", exact: "1.10.0"),
-        // The official Model Context Protocol Swift SDK (module `MCP`), used by MPPMCP to bind
-        // the 402 flow to JSON-RPC / MCP. Pinned to an IMMUTABLE commit on our fork
-        // (amitach/swift-sdk) because the stock SDK cannot carry the MPP payment error frame:
-        // `MCPError` has no `data` and hardwires -32042 to URL elicitation. The fork adds an
-        // additive `MCPError.paymentRequired(code:message:data:)` case (the decoder disambiguates
-        // by payload, so existing behavior is unchanged). The identical patch is upstream as
-        // modelcontextprotocol/swift-sdk#229; swap this to a tagged upstream release once it
-        // merges.
+        // The Model Context Protocol Swift SDK (module `MCP`), used by MPPMCP to bind the 402
+        // flow to JSON-RPC / MCP. TEMPORARY pin: an IMMUTABLE commit of the still-open
+        // modelcontextprotocol/swift-sdk#291 (EhsanAzish80/swift-sdk branch
+        // feat/json-rpc-error-data, verified head 09a7df59a430009de1aa82fd454d56a7999e56f5).
+        // #291 adds `MCPError.serverErrorWithData(code:message:data:)` so a server error can
+        // carry structured JSON-RPC `error.data`. Once #291 merges, move this pin to a tagged
+        // release of the official modelcontextprotocol/swift-sdk. Package identity stays
+        // `swift-sdk` either way; the product name stays `MCP`.
+        //
+        // This replaces the amitach/swift-sdk fork (fe4faf15). That fork, upstreamed as
+        // modelcontextprotocol/swift-sdk#229, added `MCPError.paymentRequired` and
+        // disambiguated -32042 by payload. #229 was closed unmerged: -32042 stays
+        // URL_ELICITATION_REQUIRED, and MPP rides generic `error.data` instead. #291's decoder
+        // still maps every -32042 to `.urlElicitationRequired` and keeps only
+        // `data.elicitations`, so `data.challenges` is dropped on the client for the
+        // peer-compatible / absent-credential path. MPPMCP still emits -32042/-32043 with
+        // `data.challenges` and does not add a payment case to `MCPError`. See
+        // `MCPPaymentClient`.
         // The SDK's own manifest supports Swift 6.0, but its transitive graph does not: swift-log
         // 1.13.x needs tools 6.2, swift-nio 2.100 + eventsource need 6.1. Pulling `MCP` therefore
-        // raises this package's floor to Swift 6.2 (see the tools-version above). Package identity
-        // is `swift-sdk` for both the fork and upstream URLs.
+        // raises this package's floor to Swift 6.2 (see the tools-version above).
         .package(
-            url: "https://github.com/amitach/swift-sdk.git",
-            revision: "fe4faf15a7e51888f945ae74481453b172276164"
+            url: "https://github.com/EhsanAzish80/swift-sdk.git",
+            revision: "09a7df59a430009de1aa82fd454d56a7999e56f5"
         ),
         // Hummingbird 2: the live HTTP-server binding for MPPProxy. Built natively on
         // swift-http-types (so the binding is a thin adapter; chosen over Vapor for that) and

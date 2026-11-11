@@ -41,12 +41,13 @@ fi
 # scanned.
 #
 # Accepted:
-#  - github.com/amitach/swift-sdk: our fork of the official MCP Swift SDK, carrying the
-#    36-line additive MCPError.paymentRequired patch (upstreamed as
-#    modelcontextprotocol/swift-sdk#229). Remove this entry and pin a tagged upstream
-#    release once #229 merges.
+#  - github.com/EhsanAzish80/swift-sdk: temporary revision pin of
+#    modelcontextprotocol/swift-sdk#291 (structured JSON-RPC error.data:
+#    MCPError.serverErrorWithData). OSV cannot range-match a revision pin. Remove this
+#    entry and pin a tagged release of the official modelcontextprotocol/swift-sdk once
+#    #291 merges. This is not the declined #229 fork (MCPError.paymentRequired).
 accepted_revision_pins=(
-  "https://github.com/amitach/swift-sdk.git"
+  "https://github.com/EhsanAzish80/swift-sdk.git"
 )
 revpins="$(jq -r '.pins[] | select(.state.version == null) | .location' "$resolved")" || {
   echo "::error::could not parse $resolved for revision pins; failing closed"

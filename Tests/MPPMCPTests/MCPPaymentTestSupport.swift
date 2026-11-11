@@ -89,7 +89,59 @@ func makeMCPPair(
     return MCPPaymentClient(client: client, methods: clientMethods, authorizer: authorizer)
 }
 
+/// A connected pair whose handler throws `serverErrorWithData` with a real Tempo challenge
+/// on the first call and, once a credential is attached, returns a receipt. `code` defaults
+/// to ``MCPPayment/verificationFailedCode`` because that is the payment code the official SDK
+/// decoder preserves (`-32042` is rewritten to URL elicitation and the client cannot pay it).
+func makePreservedPaymentPair(
+    clientMethods: [any PaymentMethodClient],
+    authorizer: any PaymentAuthorizer = AllowAllAuthorizer(),
+    code: Int = MCPPayment.verificationFailedCode
+) async throws -> MCPPaymentClient {
+    let challenge = try ChallengeMinter(signer: ChallengeSigner(secret: mcpSecret)).mint(
+        binding: RouteBinding(realm: mcpRealm, method: MethodName("tempo"), intent: .charge),
+        request: mcpChargeRequest(),
+        expires: Expires(date: mcpNow.addingTimeInterval(3600))
+    )
+    let data = try MCPPaymentCodec.errorData(challenges: [challenge], problem: nil)
+    let receipt = try Receipt(
+        method: MethodName("tempo"),
+        timestamp: RFC3339DateTime("2026-05-31T00:00:00Z"),
+        reference: "ref-preserved"
+    )
+    let receiptValue = try MCPPaymentCodec.value(for: receipt, challengeID: challenge.id)
+    return try await makeMCPPair(
+        clientMethods: clientMethods,
+        authorizer: authorizer,
+        handler: preservedPaymentHandler(code: code, data: data, receipt: receiptValue)
+    )
+}
+
+private func preservedPaymentHandler(
+    code: Int,
+    data: [String: Value],
+    receipt: Value
+) -> @Sendable (CallTool.Parameters) async throws -> CallTool.Result {
+    { params in
+        if params._meta?[MCPPayment.credentialMetaKey] != nil {
+            return CallTool.Result(
+                content: [.text(text: "premium content", annotations: nil, _meta: nil)],
+                _meta: Metadata(additionalFields: [MCPPayment.receiptMetaKey: receipt])
+            )
+        }
+        throw MCPError.serverErrorWithData(
+            code: code,
+            message: "Payment Required",
+            data: .object(data)
+        )
+    }
+}
+
 /// The common case: a server gating a single `premium` tool behind payment.
+///
+/// The gate emits `-32042` for an absent credential. After the official SDK decodes that
+/// code, `data.challenges` is gone, so ``MCPPaymentClient`` cannot complete the pay. Use
+/// ``makePreservedPaymentPair`` to exercise the client against a payment frame the SDK keeps.
 func makeMCPPaymentPair(
     clientMethods: [any PaymentMethodClient],
     authorizer: any PaymentAuthorizer = AllowAllAuthorizer()

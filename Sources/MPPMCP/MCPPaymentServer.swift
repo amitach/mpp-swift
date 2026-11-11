@@ -11,10 +11,14 @@ import MPPServer
 /// header string the middleware consumes, the body is empty (MCP carries no HTTP body, so no
 /// digest), and the middleware's `Decision` is mapped onto the JSON-RPC wire:
 ///
-/// - no / rejected credential -> `MCPError.paymentRequired`, carrying the challenge set in
-///   `error.data.challenges`; the JSON-RPC code is chosen by ``MCPErrorCodeMode`` (default
-///   ``MCPErrorCodeMode/peerCompatible``, which matches the mppx peer - see its
-///   DIVERGING_FROM_SPEC note);
+/// - no / rejected credential -> `MCPError.serverErrorWithData`, carrying the challenge set in
+///   `error.data.challenges` (the `{ httpStatus, challenges, problem? }` frame). The JSON-RPC
+///   code is chosen by ``MCPErrorCodeMode`` (default ``MCPErrorCodeMode/peerCompatible``, which
+///   matches the mppx peer; see its DIVERGING_FROM_SPEC note). There is no
+///   `MCPError.paymentRequired` case, and this gate does not remap `-32042` (that code stays
+///   the SDK's URL elicitation code). The official decoder still drops `data.challenges` when
+///   it reads `-32042`; the encoded wire object keeps them. `-32043` round-trips as
+///   `serverErrorWithData`;
 /// - verified -> the wrapped handler runs and the minted receipt is attached to `result._meta`.
 public struct MCPPaymentServer: Sendable {
     private let middleware: MPPServerMiddleware
@@ -80,10 +84,18 @@ public struct MCPPaymentServer: Sendable {
                         ? MCPPayment.paymentRequiredCode
                         : MCPPayment.verificationFailedCode
                 }
-                throw try MCPError.paymentRequired(
+                // Structured `error.data`, not an MPP-specific `MCPError` case. Encoding this
+                // value keeps `data.challenges` on the wire for both codes. Decoding `-32042`
+                // (swift-sdk #291) still yields `.urlElicitationRequired` and drops the
+                // challenges; do not paper over that by changing the code or by teaching
+                // `MCPError` to treat `-32042` as a payment.
+                let data = try MCPPaymentCodec.errorData(
+                    challenges: challenges, problem: problem
+                )
+                throw MCPError.serverErrorWithData(
                     code: code,
                     message: problem.detail ?? problem.title ?? "Payment Required",
-                    data: MCPPaymentCodec.errorData(challenges: challenges, problem: problem)
+                    data: .object(data)
                 )
             case let .problem(problem):
                 // A terminal §10.5 settlement problem (no retry challenge) only arises for a

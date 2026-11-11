@@ -7,6 +7,14 @@ public enum MCPPayment {
     /// JSON-RPC error code for "payment required" (server error range, -32000 to -32099),
     /// raised when no credential was supplied. In ``MCPErrorCodeMode/peerCompatible`` it is
     /// ALSO raised for a supplied-but-rejected credential; see that mode and ``MCPErrorCodeMode``.
+    ///
+    /// The official MCP SDK reserves this code for URL elicitation. Its decoder
+    /// (`modelcontextprotocol/swift-sdk` #291) maps every `-32042` to
+    /// `MCPError.urlElicitationRequired` and keeps only `data.elicitations`, so
+    /// `data.challenges` does not survive that decode. The binding still emits this code with
+    /// the challenge frame in `error.data`: that is the spec code and the code mppx reads from
+    /// the raw JSON-RPC object. ``MCPPaymentClient`` pays it only when the SDK surfaces the
+    /// frame as `MCPError.serverErrorWithData`.
     public static let paymentRequiredCode = -32042
 
     /// The spec's "payment verification failed" code (`draft-payment-transport-mcp-00` §10.1),
@@ -37,6 +45,9 @@ public enum MCPErrorCodeMode: Sendable, Hashable {
     case peerCompatible
     /// Emit ``MCPPayment/paymentRequiredCode`` (-32042) when no credential was supplied and
     /// ``MCPPayment/verificationFailedCode`` (-32043) when one was supplied but failed, per
-    /// `draft-payment-transport-mcp-00` §10.1.
+    /// `draft-payment-transport-mcp-00` §10.1. The absent-credential challenge is still
+    /// `-32042`, so ``MCPPaymentClient`` cannot pay that first challenge after the official
+    /// SDK decoder drops `data.challenges`. A `-32043` re-challenge round-trips as
+    /// `serverErrorWithData`.
     case specCorrect
 }

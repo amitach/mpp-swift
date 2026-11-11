@@ -41,7 +41,7 @@ Scripts/conformance/run-subscription.sh         # forward SUBSCRIPTION: our clie
 Scripts/conformance/run-subscription-reverse.sh # reverse SUBSCRIPTION: mppx client signs a key-auth vs our TempoSubscriptionVerifier (offline)
 Scripts/conformance/run-subscription-live.sh     # reverse SUBSCRIPTION, LIVE: mppx client activates vs our server, which settles period 0 on-chain (Moderato)
 Scripts/conformance/run-mcp.sh                  # forward MCP: the mppx mcp-sdk client pays our Swift MCP server (stdio)
-Scripts/conformance/run-mcp-reverse.sh          # reverse MCP: our Swift MCP client pays the mppx mcp-sdk server (stdio)
+Scripts/conformance/run-mcp-reverse.sh          # reverse MCP: blocked on the SDK's -32042 decode (see below)
 Scripts/conformance/run-cli.sh                  # CLI: the shipped `mpp` binary pays the mppx server over real HTTP
 Scripts/conformance/run-stripe-live.sh           # Stripe, LIVE: a real test-mode PaymentIntent (preview + secret gated)
 ```
@@ -130,18 +130,22 @@ it rides the on-chain channel rail, so it would re-prove a composition already p
 parity above + this live self round-trip + the on-chain channel that `run-session.sh` already proves
 cross-SDK against the same `mppx` server), with only the socket framing swapped.
 
-## JSON-RPC / MCP transport (both directions, stdio)
+## JSON-RPC / MCP transport (stdio)
 
-The `MPPMCP` payment binding is verified against the reference `mppx` `mcp-sdk` over a real stdio
-transport, both directions, offline (a zero-amount proof, no chain):
+The `MPPMCP` payment binding is checked against the reference `mppx` `mcp-sdk` over a real stdio
+transport, offline (a zero-amount proof, no chain):
 
 - **Forward** (`run-mcp.sh`): the `mppx` `mcp-sdk` **client** calls a payment-gated tool on our
   `MPPMCPConformanceServer` (`MPPMCP` gate over `MPPServerMiddleware`), reads the `-32042` frame +
-  challenge, pays via `params._meta`, and reads the receipt from `result._meta`.
-- **Reverse** (`run-mcp-reverse.sh`): our Swift `MCPPaymentClient` pays the `mppx` `mcp-sdk`
-  **server** (reads its `-32042`, builds the credential, reads its receipt).
-
-Both run in the required `Conformance (local)` CI job (offline + deterministic).
+  challenge from the raw JSON-RPC object, pays via `params._meta`, and reads the receipt from
+  `result._meta`. This runs in the required `Conformance (local)` CI job. Our server emits
+  `MCPError.serverErrorWithData` with `data.challenges`; encoding keeps that frame on the wire.
+- **Reverse** (`run-mcp-reverse.sh`): our Swift `MCPPaymentClient` would pay the `mppx` `mcp-sdk`
+  **server**. It does not, today. mppx emits `-32042` with `data.challenges`, and the MCP SDK
+  pin (`modelcontextprotocol/swift-sdk` #291) decodes every `-32042` as URL elicitation and keeps
+  only `data.elicitations`. The client does not reinterpret that code. The script is expected to
+  fail and is not in CI until the SDK preserves `data.challenges` on `-32042`. The binding codes
+  stay `-32042` (absent / peer-compatible) and `-32043` (spec-correct verification failure).
 
 ## CLI (the shipped `mpp` binary)
 
